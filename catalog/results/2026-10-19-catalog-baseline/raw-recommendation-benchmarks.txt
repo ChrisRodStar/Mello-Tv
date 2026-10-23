@@ -1,0 +1,12 @@
+goos: darwin
+goarch: arm64
+pkg: stv-catalog/internal/recommend
+cpu: Apple M4
+BenchmarkInputs_Fingerprint-10      	   22761	     50357 ns/op	   39501 B/op	    1783 allocs/op
+BenchmarkInputs_Seeds-10            	  133506	      8915 ns/op	   18960 B/op	     212 allocs/op
+BenchmarkRank_100Candidates-10      	   72840	     16417 ns/op	   53217 B/op	     385 allocs/op
+BenchmarkRank_1000Candidates-10     	    5942	    193028 ns/op	  549724 B/op	    3565 allocs/op
+BenchmarkDiversify_100Titles-10     	   24266	     49335 ns/op	   75008 B/op	     416 allocs/op
+BenchmarkRecommendations_View-10    	   31371	     38480 ns/op	   99304 B/op	     430 allocs/op
+PASS
+ok  	stv-catalog/internal/recommend	10.091s

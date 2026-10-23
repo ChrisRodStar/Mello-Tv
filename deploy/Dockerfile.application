@@ -1,0 +1,27 @@
+#
+#  Dockerfile.application
+#  Stream TV Deployment
+#
+#  Created by ChrisRodStar.
+#
+#  Summary:
+#  Production container definition packaging the Go API gateway and pre-built
+#  React/Vite web interface into a lightweight, non-privileged Debian image.
+#
+
+FROM debian:bookworm-slim
+
+# Install root TLS certificates for secure HTTPS external requests
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
+
+# Copy pre-compiled Go API binary into release location
+COPY artifacts/api /opt/releases/api/current/api
+
+# Run as non-privileged service user (UID 1000)
+USER 1000:1000
+
+# Start the API service with read-only secrets configuration
+ENTRYPOINT ["/opt/releases/api/current/api", "/run/secrets/api.json"]

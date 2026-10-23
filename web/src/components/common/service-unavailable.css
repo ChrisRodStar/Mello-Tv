@@ -1,0 +1,138 @@
+.app-shell.service-shell {
+  padding: 0;
+}
+.app-shell.service-shell main.service-view {
+  display: grid;
+  place-items: center;
+  min-height: 100svh;
+  padding: 48px 24px;
+}
+.service-unavailable {
+  width: 100%;
+}
+.service-unavailable-content {
+  width: min(100%, 760px);
+  margin-inline: auto;
+  text-align: center;
+}
+.service-unavailable h1 {
+  margin: 0;
+  font-weight: 650;
+  font-size: clamp(34px, 4.4vw, 64px);
+  line-height: 1.1;
+  letter-spacing: -0.04em;
+  text-wrap: balance;
+}
+.service-checks {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  width: min(100%, 360px);
+  margin: 36px auto 40px;
+  gap: 32px;
+}
+.service-checks > div {
+  min-width: 0;
+}
+.service-checks dt {
+  margin-bottom: 10px;
+  color: #aaa;
+  font-size: 13px;
+  line-height: 1.4;
+}
+.service-checks dd {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  gap: 8px;
+  color: #e5e5e5;
+  font-size: 14px;
+  line-height: 1.5;
+  text-wrap: balance;
+}
+.service-checks dd::before {
+  flex: 0 0 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #888;
+  content: "";
+}
+.service-checks dd[data-state="ok"]::before {
+  background: #92c99c;
+}
+.service-checks dd[data-state="down"]::before {
+  background: #e6a281;
+}
+.service-retry {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 160px;
+  min-height: 48px;
+  padding: 12px 22px;
+  gap: 10px;
+  border: 1px solid #444;
+  border-radius: 8px;
+  background: #242424;
+  color: #f5f5f5;
+  font-weight: 600;
+  font-size: 14px;
+  transition:
+    background-color 180ms ease-out,
+    border-color 180ms ease-out,
+    transform 100ms ease-out;
+}
+.service-retry svg {
+  width: 17px;
+  height: 17px;
+}
+.service-retry:hover:not(:disabled) {
+  border-color: #777;
+  background: #333;
+}
+.service-retry:active:not(:disabled) {
+  transform: scale(0.97);
+}
+.service-retry:disabled {
+  color: #aaa;
+}
+.service-retry:disabled svg {
+  animation: service-check-spin 1.4s linear infinite;
+  will-change: transform;
+}
+@keyframes service-check-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (max-width: 700px) {
+  .service-checks {
+    margin-block: 28px 32px;
+    gap: 16px;
+  }
+}
+@media (min-width: 1800px) {
+  .service-unavailable-content {
+    width: min(100%, 1000px);
+  }
+  .service-checks {
+    width: 460px;
+    margin-block: 44px 48px;
+  }
+  .service-checks dt {
+    font-size: 17px;
+  }
+  .service-checks dd {
+    font-size: 19px;
+  }
+  .service-retry {
+    min-width: 190px;
+    min-height: 58px;
+    font-size: 18px;
+  }
+  .service-retry svg {
+    width: 21px;
+    height: 21px;
+  }
+}

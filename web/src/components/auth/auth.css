@@ -1,0 +1,9 @@
+.auth-shell { min-height: 100dvh; display: grid; place-items: center; padding: 1.5rem; }
+.auth-shell .profile-editor { width: min(100%, 26rem); margin: auto; }
+.auth-shell form { display: flex; flex-direction: column; gap: .9rem; }
+.auth-shell input { width: 100%; min-height: 3rem; color: var(--text); background: var(--raised); border: 1px solid #555; border-radius: .35rem; padding: .75rem; }
+.auth-notice { position: fixed; z-index: 100; bottom: 1rem; left: 50%; transform: translateX(-50%); background: var(--raised); padding: 1rem; max-width: calc(100vw - 2rem); }
+.player-source-actions { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
+.player-source-actions button { min-height: 44px; padding: .65rem .9rem; color: var(--text); background: var(--raised); border: 1px solid #555; border-radius: .3rem; }
+.player-source-actions button:focus-visible { outline: 2px solid white; outline-offset: 3px; }
+.player-source-actions button:disabled { opacity: .5; }

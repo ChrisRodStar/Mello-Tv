@@ -1,0 +1,302 @@
+.detail-dialog {
+  position: fixed;
+  width: min(720px, 100% - 40px);
+  height: fit-content;
+  max-height: calc(100svh - 64px);
+  margin: auto;
+  inset: 0;
+  padding: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border: 0;
+  border-radius: 12px;
+  background: #181818;
+  box-shadow: 0 24px 100px #0009;
+  color: #f5f5f5;
+  scrollbar-color: #555 #181818;
+  scrollbar-width: thin;
+}
+
+.detail-dialog::backdrop {
+  -webkit-backdrop-filter: blur(5px);
+  backdrop-filter: blur(5px);
+  background: #080808c9;
+}
+
+body:has(.detail-dialog[open]) {
+  overflow: hidden;
+}
+
+.dialog-content {
+  position: relative;
+  padding: 0;
+}
+
+.close-button {
+  display: grid;
+  z-index: 2;
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border: 0;
+  border-radius: 50%;
+  background: #181818e6;
+  color: #fff;
+  transition:
+    background-color 0.16s ease-out,
+    transform 0.1s ease-out;
+}
+
+.close-button:hover {
+  background: #383838;
+}
+
+.close-button:active {
+  transform: scale(0.94);
+}
+
+.detail-artwork {
+  position: relative;
+  height: clamp(270px, 34vw, 390px);
+  overflow: hidden;
+  background: #181818;
+}
+
+.detail-artwork > img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+  transform: translateZ(0);
+}
+
+.detail-artwork::after {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    #18181805 20%,
+    #18181870 58%,
+    #181818e6 88%,
+    #181818
+  );
+  content: "";
+  pointer-events: none;
+}
+
+.detail-title-overlay {
+  z-index: 1;
+  position: absolute;
+  right: 40px;
+  bottom: 25px;
+  left: 40px;
+}
+
+.detail-title-overlay .detail-type {
+  color: #ddd;
+  font-weight: 600;
+  font-size: 12px;
+}
+
+.detail-title-overlay h2 {
+  max-width: 650px;
+  margin-top: 10px;
+  font-weight: 800;
+  font-size: clamp(28px, 3.3vw, 40px);
+  line-height: 1.08;
+  letter-spacing: -0.03em;
+  text-wrap: balance;
+}
+
+.detail-body {
+  padding: 0 40px 38px;
+  background: #181818;
+}
+
+.detail-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px;
+  color: #aaa;
+  font-size: 13px;
+}
+
+.detail-meta .rating {
+  margin-left: 0;
+}
+
+.detail-score {
+  color: #d8d8d8;
+  font-weight: 600;
+}
+
+.detail-format {
+  padding: 3px 7px;
+  border: 1px solid #666;
+  border-radius: 3px;
+  color: #ccc;
+  font-size: 11px;
+}
+
+.detail-summary > p {
+  margin: 22px 0 27px;
+  color: #e1e1e1;
+  font-size: 15px;
+  line-height: 1.7;
+}
+
+.detail-genres,
+.metadata-status {
+  margin-bottom: 24px;
+  color: #999;
+  font-size: 12px;
+}
+
+.metadata-status button {
+  padding: 7px 12px;
+  border: 0;
+  border-radius: 4px;
+  background: #333;
+  color: #fff;
+  transition: background-color 0.16s ease-out;
+}
+
+.metadata-status button:hover {
+  background: #444;
+}
+
+.netflix-detail .detail-title-overlay {
+  text-align: center;
+}
+
+.netflix-detail .detail-title-overlay h2 {
+  margin-right: auto;
+  margin-left: auto;
+}
+
+.netflix-detail .detail-summary {
+  text-align: center;
+}
+
+.netflix-detail .detail-meta {
+  justify-content: center;
+}
+
+.netflix-detail .detail-genres {
+  text-align: center;
+}
+
+.episode-section {
+  padding: 25px 0;
+  border-top: 1px solid #333;
+}
+
+.episode-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 20px;
+  gap: 15px;
+}
+
+.episode-heading h3 {
+  margin: 0;
+  font-weight: 650;
+  font-size: 21px;
+}
+
+.episode-heading select {
+  max-width: 65%;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid #555;
+  border-radius: 4px;
+  background: #252525;
+  color: #fff;
+  font-size: 13px;
+}
+
+.episode-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.episode-list img {
+  display: block;
+  aspect-ratio: 16/9;
+  width: 100%;
+  object-fit: cover;
+  border-radius: 4px;
+}
+
+@media (max-width: 700px) {
+  .detail-dialog {
+    width: calc(100% - 24px);
+    max-height: calc(100svh - 40px);
+    border-radius: 9px;
+  }
+  .detail-artwork {
+    height: 300px;
+  }
+  .detail-title-overlay {
+    right: 18px;
+    bottom: 24px;
+    left: 18px;
+  }
+  .detail-title-overlay h2 {
+    font-size: 30px;
+  }
+  .detail-body {
+    padding: 0 18px 24px;
+  }
+  .detail-summary > p {
+    font-size: 14px;
+  }
+  .episode-list img {
+    width: 72px;
+  }
+}
+.episode-thumbnail {
+  position: relative;
+}
+.episode-thumbnail .watch-indicator {
+  display: flex;
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  flex-direction: column;
+  align-items: flex-end;
+  width: 100%;
+  background: linear-gradient(transparent, rgb(0 0 0 / 75%));
+  color: #fff;
+  pointer-events: none;
+}
+.watch-indicator > span {
+  padding: 8px 6px 4px;
+  font-size: 10px;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+}
+.watch-indicator progress {
+  display: block;
+  appearance: none;
+  width: 100%;
+  height: 3px;
+  border: 0;
+  background: #555;
+}
+.watch-indicator progress::-webkit-progress-bar {
+  background: #555;
+}
+.watch-indicator progress::-webkit-progress-value {
+  background: var(--accent);
+}
+.watch-indicator progress::-moz-progress-bar {
+  background: var(--accent);
+}

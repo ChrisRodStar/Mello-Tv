@@ -1,0 +1,192 @@
+{
+  "timestamp": "2026-10-19T21:58:00-04:00",
+  "system": {
+    "os": "darwin",
+    "arch": "arm64",
+    "cpu": "Apple M4",
+    "go_version": "go1.27.0",
+    "sqlite_driver": "modernc.org/sqlite v1.60.1"
+  },
+  "benchmarks": {
+    "model": [
+      {
+        "name": "BenchmarkIdentity_Key",
+        "iterations": 64041067,
+        "ns_per_op": 18.53,
+        "bytes_per_op": 5,
+        "allocs_per_op": 1
+      },
+      {
+        "name": "BenchmarkSeasonKey",
+        "iterations": 45067177,
+        "ns_per_op": 26.56,
+        "bytes_per_op": 16,
+        "allocs_per_op": 2
+      }
+    ],
+    "storage": [
+      {
+        "name": "BenchmarkStore_Get",
+        "iterations": 160458,
+        "ns_per_op": 7152,
+        "bytes_per_op": 1584,
+        "allocs_per_op": 44
+      },
+      {
+        "name": "BenchmarkStore_TitleEnriched",
+        "iterations": 55820,
+        "ns_per_op": 21523,
+        "bytes_per_op": 4489,
+        "allocs_per_op": 105
+      },
+      {
+        "name": "BenchmarkStore_Search",
+        "iterations": 7177,
+        "ns_per_op": 162802,
+        "bytes_per_op": 15733,
+        "allocs_per_op": 219
+      },
+      {
+        "name": "BenchmarkStore_PutSingle",
+        "iterations": 16526,
+        "ns_per_op": 72253,
+        "bytes_per_op": 4584,
+        "allocs_per_op": 97
+      },
+      {
+        "name": "BenchmarkStore_PutBatch50",
+        "iterations": 1981,
+        "ns_per_op": 590176,
+        "bytes_per_op": 29023,
+        "allocs_per_op": 994
+      },
+      {
+        "name": "BenchmarkStore_ExportSnapshot",
+        "iterations": 3501,
+        "ns_per_op": 336483,
+        "bytes_per_op": 422410,
+        "allocs_per_op": 4707
+      }
+    ],
+    "upstream": [
+      {
+        "name": "BenchmarkArtworkKey",
+        "iterations": 7354834,
+        "ns_per_op": 163.1,
+        "bytes_per_op": 24,
+        "allocs_per_op": 1
+      },
+      {
+        "name": "BenchmarkUpstream_JSON",
+        "iterations": 35599,
+        "ns_per_op": 32907,
+        "bytes_per_op": 8741,
+        "allocs_per_op": 98
+      }
+    ],
+    "recommend": [
+      {
+        "name": "BenchmarkInputs_Fingerprint",
+        "iterations": 34203,
+        "ns_per_op": 34456,
+        "bytes_per_op": 19604,
+        "allocs_per_op": 619
+      },
+      {
+        "name": "BenchmarkInputs_Seeds",
+        "iterations": 208412,
+        "ns_per_op": 5636,
+        "bytes_per_op": 8832,
+        "allocs_per_op": 98
+      },
+      {
+        "name": "BenchmarkRank_100Candidates",
+        "iterations": 121366,
+        "ns_per_op": 9834,
+        "bytes_per_op": 29680,
+        "allocs_per_op": 261
+      },
+      {
+        "name": "BenchmarkRank_1000Candidates",
+        "iterations": 10000,
+        "ns_per_op": 113294,
+        "bytes_per_op": 347417,
+        "allocs_per_op": 2513
+      },
+      {
+        "name": "BenchmarkDiversify_100Titles",
+        "iterations": 24646,
+        "ns_per_op": 48524,
+        "bytes_per_op": 36176,
+        "allocs_per_op": 404
+      },
+      {
+        "name": "BenchmarkRecommendations_View",
+        "iterations": 31426,
+        "ns_per_op": 38186,
+        "bytes_per_op": 89912,
+        "allocs_per_op": 422
+      },
+      {
+        "name": "BenchmarkSerendipityMix",
+        "iterations": 147890,
+        "ns_per_op": 8066,
+        "bytes_per_op": 14840,
+        "allocs_per_op": 169
+      }
+    ],
+    "service": [
+      {
+        "name": "BenchmarkJob_Key",
+        "iterations": 30868497,
+        "ns_per_op": 32.70,
+        "bytes_per_op": 19,
+        "allocs_per_op": 2
+      },
+      {
+        "name": "BenchmarkJob_Validate",
+        "iterations": 532472502,
+        "ns_per_op": 2.25,
+        "bytes_per_op": 0,
+        "allocs_per_op": 0
+      },
+      {
+        "name": "BenchmarkService_RequestDeduplicated",
+        "iterations": 123844,
+        "ns_per_op": 9569,
+        "bytes_per_op": 936,
+        "allocs_per_op": 27
+      }
+    ],
+    "api": [
+      {
+        "name": "BenchmarkHandler_HealthLive",
+        "iterations": 1000000,
+        "ns_per_op": 1003,
+        "bytes_per_op": 1161,
+        "allocs_per_op": 20
+      },
+      {
+        "name": "BenchmarkHandler_HealthLive_WithAuth",
+        "iterations": 1000000,
+        "ns_per_op": 1021,
+        "bytes_per_op": 1209,
+        "allocs_per_op": 21
+      },
+      {
+        "name": "BenchmarkHandler_GetTitle",
+        "iterations": 50464,
+        "ns_per_op": 23813,
+        "bytes_per_op": 10647,
+        "allocs_per_op": 132
+      },
+      {
+        "name": "BenchmarkHandler_ParallelGetTitle",
+        "iterations": 47107,
+        "ns_per_op": 24631,
+        "bytes_per_op": 10807,
+        "allocs_per_op": 136
+      }
+    ]
+  }
+}

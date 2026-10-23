@@ -1,0 +1,12 @@
+{
+  "contract_version": "relay.v1",
+  "session_id": "AAAAAAAAAAAAAAAAAAAAAA",
+  "entry_path": "/stream/AAAAAAAAAAAAAAAAAAAAAA/entry",
+  "format": "hls",
+  "expires_at": "2030-01-01T06:00:00Z",
+  "revision": 1,
+  "source_generation": 1,
+  "state": "active",
+  "resume_required": false,
+  "auth_revision": 1
+}

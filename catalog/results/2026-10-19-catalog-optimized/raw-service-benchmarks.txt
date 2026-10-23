@@ -1,0 +1,9 @@
+goos: darwin
+goarch: arm64
+pkg: stv-catalog/internal/service
+cpu: Apple M4
+BenchmarkJob_Key-10                        	30868497	        32.70 ns/op	      19 B/op	       2 allocs/op
+BenchmarkJob_Validate-10                   	532472502	         2.249 ns/op	       0 B/op	       0 allocs/op
+BenchmarkService_RequestDeduplicated-10    	  123844	      9569 ns/op	     936 B/op	      27 allocs/op
+PASS
+ok  	stv-catalog/internal/service	3.561s

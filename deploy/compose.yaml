@@ -1,0 +1,117 @@
+#
+#  compose.yaml
+#  Stream TV Deployment
+#
+#  Created by ChrisRodStar.
+#
+#  Summary:
+#  Master multi-container Docker Compose specification orchestrating the three
+#  production containers: Application (8090), Catalog, and Streaming (8095).
+#
+
+name: stream-tv
+
+services:
+  # ---------------------------------------------------------------------------
+  # Application Container: Go API backend and built static Web UI
+  # Listens privately on 172.30.84.10:8090 (published to 127.0.0.1:8090 on host)
+  # ---------------------------------------------------------------------------
+  application:
+    image: stream-tv/application:${RELEASE}
+    build:
+      context: .
+      dockerfile: Dockerfile.application
+    restart: unless-stopped
+    stop_grace_period: 60s
+    ports:
+      - "127.0.0.1:8090:8090"
+    volumes:
+      - ${PRIVATE_ROOT}/application:/run/secrets:ro
+      - ${STATE_ROOT}/application:/state
+      - ./artifacts/web:/opt/web:ro
+      - ./components/api:/opt/releases/api:ro
+    networks:
+      private:
+        ipv4_address: 172.30.84.10
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - "/tmp:mode=1777"
+
+  # ---------------------------------------------------------------------------
+  # Catalog Container: Go Catalog backend with persistent SQLite database
+  # Listens on private bridge network at 172.30.84.20:8092
+  # ---------------------------------------------------------------------------
+  catalog:
+    image: stream-tv/catalog:${RELEASE}
+    build:
+      context: .
+      dockerfile: Dockerfile.catalog
+    restart: unless-stopped
+    stop_grace_period: 60s
+    volumes:
+      - ${PRIVATE_ROOT}/catalog:/run/secrets:ro
+      - ${STATE_ROOT}/catalog:/state
+      - ./components/catalog:/opt/releases/catalog:ro
+    networks:
+      private:
+        ipv4_address: 172.30.84.20
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - "/tmp:mode=1777"
+
+  # ---------------------------------------------------------------------------
+  # Streaming Container: Go Providers and Rust Relay with WireGuard VPN tunnel
+  # Listens privately on 172.30.84.30:8093 (Providers) and 8094/8095 (Relay)
+  # Public media relay endpoint published to 127.0.0.1:8095 on host
+  # ---------------------------------------------------------------------------
+  streaming:
+    image: stream-tv/streaming:${RELEASE}
+    build:
+      context: .
+      dockerfile: Dockerfile.streaming
+    restart: unless-stopped
+    stop_grace_period: 150s
+    ports:
+      - "127.0.0.1:8095:8095"
+    volumes:
+      - ${PRIVATE_ROOT}/streaming:/run/secrets:ro
+      - ${STATE_ROOT}/streaming:/state
+      - ./components/providers:/opt/releases/providers:ro
+      - ./components/relay:/opt/releases/relay:ro
+    networks:
+      private:
+        ipv4_address: 172.30.84.30
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+      - SETUID
+      - SETGID
+      - SETPCAP
+      - CHOWN
+      - DAC_OVERRIDE
+      - KILL
+    read_only: true
+    tmpfs:
+      - "/run:mode=755"
+      - "/tmp:mode=1777"
+      - "/var/log:mode=755"
+
+# -----------------------------------------------------------------------------
+# Isolated Private Bridge Network (172.30.84.0/24)
+# -----------------------------------------------------------------------------
+networks:
+  private:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.84.0/24

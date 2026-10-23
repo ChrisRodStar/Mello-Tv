@@ -1,0 +1,509 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://family-stream.invalid/contracts/providers.schema.json",
+  "title": "Current Go providers.v1 wire snapshot",
+  "description": "Compatibility snapshot from providers commit d44ae22; not its unimplemented HTTP API. Runtime import applies stricter relay validation and byte bounds. Unknown diagnostic/metadata fields are preserved privately.",
+  "$ref": "#/$defs/Selection",
+  "$defs": {
+    "Title": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "enum": [
+            "movie",
+            "tv"
+          ]
+        },
+        "tmdb_id": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "imdb_id": {
+          "type": "string"
+        },
+        "my_anime_list_id": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "season": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "episode": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "required": [
+        "type",
+        "tmdb_id"
+      ],
+      "additionalProperties": true,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "tv"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "season",
+              "episode"
+            ]
+          },
+          "else": {
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "season"
+                  ]
+                },
+                {
+                  "required": [
+                    "episode"
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "FetchScope": {
+      "type": "object",
+      "properties": {
+        "origin": {
+          "type": "string",
+          "format": "uri"
+        },
+        "path_prefix": {
+          "type": "string"
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "cookies": {
+          "type": "string"
+        },
+        "cookie_path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "origin"
+      ],
+      "additionalProperties": true
+    },
+    "PublicResources": {
+      "type": "object",
+      "properties": {
+        "origin": {
+          "type": "string",
+          "format": "uri"
+        },
+        "referer": {
+          "type": "string",
+          "format": "uri"
+        }
+      },
+      "required": [],
+      "additionalProperties": true
+    },
+    "FetchContext": {
+      "type": "object",
+      "properties": {
+        "scopes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/FetchScope"
+          }
+        },
+        "public_resources": {
+          "$ref": "#/$defs/PublicResources"
+        }
+      },
+      "required": [],
+      "additionalProperties": true
+    },
+    "Track": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "language": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "group": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string",
+          "format": "uri"
+        },
+        "default": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "kind",
+        "default"
+      ],
+      "additionalProperties": true
+    },
+    "Variant": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string",
+          "format": "uri"
+        },
+        "width": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "bitrate": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "codecs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "audio_group": {
+          "type": "string"
+        },
+        "subtitle_group": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "url"
+      ],
+      "additionalProperties": true
+    },
+    "Metadata": {
+      "type": "object",
+      "properties": {
+        "provider_data": {
+          "type": "object"
+        },
+        "tracks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Track"
+          }
+        },
+        "tracks_known": {
+          "type": "boolean"
+        },
+        "variants": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Variant"
+          }
+        }
+      },
+      "required": [
+        "tracks_known"
+      ],
+      "additionalProperties": true
+    },
+    "Source": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "provider": {
+          "type": "string",
+          "enum": [
+            "vidcore",
+            "vidlink",
+            "vidsrc",
+            "vidfast"
+          ]
+        },
+        "server": {
+          "type": "string"
+        },
+        "title": {
+          "$ref": "#/$defs/Title"
+        },
+        "content_verified": {
+          "type": "boolean"
+        },
+        "selected_variant_url": {
+          "type": "string",
+          "format": "uri"
+        },
+        "url": {
+          "type": "string",
+          "format": "uri"
+        },
+        "format": {
+          "type": "string",
+          "enum": [
+            "unknown",
+            "hls",
+            "dash",
+            "mp4"
+          ]
+        },
+        "fetch_context": {
+          "$ref": "#/$defs/FetchContext"
+        },
+        "expires_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "resolver_metadata": {
+          "$ref": "#/$defs/Metadata"
+        }
+      },
+      "required": [
+        "id",
+        "provider",
+        "title",
+        "content_verified",
+        "url",
+        "format",
+        "fetch_context",
+        "resolver_metadata"
+      ],
+      "additionalProperties": true
+    },
+    "Observation": {
+      "type": "object",
+      "properties": {
+        "at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "accessible": {
+          "type": "boolean"
+        },
+        "format": {
+          "type": "string",
+          "enum": [
+            "unknown",
+            "hls",
+            "dash",
+            "mp4"
+          ]
+        },
+        "playlist_metadata": {
+          "$ref": "#/$defs/Metadata"
+        },
+        "variant": {
+          "$ref": "#/$defs/Variant"
+        },
+        "first_byte": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Go time.Duration, integer nanoseconds"
+        },
+        "delivery_bps": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Measured bits per second"
+        },
+        "samples_completed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sample_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "encrypted": {
+          "type": "boolean"
+        },
+        "protection_known": {
+          "type": "boolean"
+        },
+        "reliability": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "failure": {
+          "type": "string",
+          "enum": [
+            "unavailable",
+            "unsupported",
+            "timeout",
+            "cancellation",
+            "upstream_failure",
+            "protocol_change"
+          ]
+        }
+      },
+      "required": [
+        "at",
+        "accessible",
+        "format",
+        "playlist_metadata",
+        "samples_completed",
+        "sample_bytes",
+        "encrypted",
+        "protection_known"
+      ],
+      "additionalProperties": true
+    },
+    "Probed": {
+      "type": "object",
+      "properties": {
+        "source": {
+          "$ref": "#/$defs/Source"
+        },
+        "observation": {
+          "$ref": "#/$defs/Observation"
+        }
+      },
+      "required": [
+        "source",
+        "observation"
+      ],
+      "additionalProperties": true
+    },
+    "Ranked": {
+      "type": "object",
+      "properties": {
+        "candidate": {
+          "$ref": "#/$defs/Probed"
+        },
+        "score": {
+          "type": "number"
+        },
+        "reasons": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "candidate",
+        "score",
+        "reasons"
+      ],
+      "additionalProperties": true
+    },
+    "ProviderStatus": {
+      "type": "object",
+      "properties": {
+        "provider": {
+          "type": "string",
+          "enum": [
+            "vidcore",
+            "vidlink",
+            "vidsrc",
+            "vidfast"
+          ]
+        },
+        "duration": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Integer nanoseconds"
+        },
+        "candidate_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "failure": {
+          "type": "string",
+          "enum": [
+            "unavailable",
+            "unsupported",
+            "timeout",
+            "cancellation",
+            "upstream_failure",
+            "protocol_change"
+          ]
+        }
+      },
+      "required": [
+        "provider",
+        "duration",
+        "candidate_count"
+      ],
+      "additionalProperties": true
+    },
+    "Selection": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "const": "providers.v1"
+        },
+        "selected": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Ranked"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "backups": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/$defs/Ranked"
+          }
+        },
+        "rejected": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "providers": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/$defs/ProviderStatus"
+          }
+        },
+        "pending": {
+          "type": "boolean",
+          "description": "Verified startup selection; an owned lookup is still completing its backup set."
+        }
+      },
+      "required": [
+        "version",
+        "backups",
+        "rejected",
+        "providers"
+      ],
+      "additionalProperties": true
+    }
+  }
+}

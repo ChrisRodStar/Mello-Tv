@@ -1,0 +1,5 @@
+{
+  "listen": "127.0.0.1:8090",
+  "bearer_file": "/PRIVATE/RUN/providers-bearer",
+  "dns_address": "1.1.1.1:53"
+}

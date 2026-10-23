@@ -1,0 +1,29 @@
+#
+#  Dockerfile.catalog
+#  Stream TV Deployment
+#
+#  Created by ChrisRodStar.
+#
+#  Summary:
+#  Production container definition packaging the Go catalog service and SQLite
+#  database manager with persistent volume support for title metadata.
+#
+
+FROM debian:bookworm-slim
+
+# Install system dependencies: TLS certificates and Python 3 for entrypoint configuration
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        ca-certificates \
+        python3 && \
+    rm -rf /var/lib/apt/lists/*
+
+# Copy pre-compiled Go Catalog binary and Python startup entrypoint
+COPY artifacts/catalog /opt/releases/catalog/current/catalog
+COPY runtime/catalog-entry.py /opt/runtime/catalog-entry.py
+
+# Run as non-privileged service user (UID 1000)
+USER 1000:1000
+
+# Launch catalog service via entrypoint script
+ENTRYPOINT ["python3", "/opt/runtime/catalog-entry.py"]

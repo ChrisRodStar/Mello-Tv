@@ -1,0 +1,67 @@
+# Typed configuration; stages 1–6 transport, auth, store and delivery are active.
+# Runtime readiness is component health; overall production acceptance is false.
+# Provision real secrets separately; never replace these paths with inline keys.
+[http]
+control_listen = "127.0.0.1:8091"
+stream_listen = "127.0.0.1:8092"
+public_prefix = "/stream"
+
+[auth]
+control_bearer_file = "/run/secrets/relay-control-bearer"
+api_verification_keys_file = "/run/secrets/api-playback-public-keys.json"
+issuer = "family-stream-api"
+audience = "family-stream-relay"
+algorithm = "EdDSA"
+clock_skew_s = 30
+max_grant_bytes = 4096
+max_grant_lifetime_s = 21600
+
+[state]
+max_database_bytes = 1073741824
+min_free_space_bytes = 67108864
+max_idempotency_count = 256
+database_path = "state/relay.sqlite"
+encryption_key_file = "/run/secrets/relay-session-encryption-key"
+max_sessions_count = 128
+max_sources_per_session_count = 128
+max_resources_per_session_count = 20000
+max_resources_total_count = 100000
+hot_index_bytes = 16777216
+max_snapshot_bytes = 2097152
+max_session_lifetime_s = 21600
+old_generation_grace_s = 120
+cleanup_batch_count = 128
+cleanup_period_s = 30
+
+[network]
+guard_mode = "local-mullvad"
+dns_endpoint = "https://cloudflare-dns.com/dns-query"
+dns_endpoint_ip = "1.1.1.1"
+dns_timeout_s = 3
+connect_timeout_s = 3
+tls_timeout_s = 3
+response_header_timeout_s = 8
+read_idle_timeout_s = 20
+write_idle_timeout_s = 30
+playlist_timeout_s = 20
+segment_timeout_s = 120
+mp4_max_transfer_s = 21600
+max_redirects_count = 3
+max_streams_count = 32
+max_streams_per_session_count = 8
+max_streams_per_authority_count = 8
+admission_wait_s = 2
+body_chunk_bytes = 65536
+
+[limits]
+max_manifest_registrations_count = 4096
+max_control_body_bytes = 4194304
+max_control_concurrency_count = 4
+max_store_queue_count = 32
+max_playlist_bytes = 1048576
+max_playlist_depth_count = 6
+max_key_bytes = 4096
+max_sniff_bytes = 4096
+
+[lifecycle]
+drain_timeout_s = 30

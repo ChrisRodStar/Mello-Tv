@@ -1,0 +1,32 @@
+[
+  {
+    "name": "movie-input-only",
+    "lookup": {
+      "title": {"type": "movie", "tmdb_id": 27205},
+      "device": {"formats": ["hls"]}
+    }
+  },
+  {
+    "name": "rick-and-morty-s1e1-input-only",
+    "lookup": {
+      "title": {"type": "tv", "tmdb_id": 60625, "imdb_id": "tt2861424", "season": 1, "episode": 1},
+      "device": {"formats": ["hls"]}
+    }
+  },
+  {
+    "name": "attack-on-titan-required-english-audio-input-only",
+    "lookup": {
+      "title": {"type": "tv", "tmdb_id": 1429, "season": 1, "episode": 1},
+      "preferences": {"audio_languages": ["en"], "require_audio": true},
+      "device": {"formats": ["hls"]}
+    }
+  },
+  {
+    "name": "attack-on-titan-required-english-subtitles-input-only",
+    "lookup": {
+      "title": {"type": "tv", "tmdb_id": 1429, "season": 1, "episode": 1},
+      "preferences": {"audio_languages": ["ja"], "subtitle_languages": ["en"], "require_audio": true, "require_subtitles": true},
+      "device": {"formats": ["hls"]}
+    }
+  }
+]

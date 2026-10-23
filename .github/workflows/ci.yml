@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  go-services:
+    name: Go Services (API, Catalog, Providers)
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [api, catalog, providers]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          check-latest: true
+          cache-dependency-path: ${{ matrix.service }}/go.sum
+
+      - name: Build and test ${{ matrix.service }}
+        working-directory: ./${{ matrix.service }}
+        run: |
+          go vet ./...
+          go test ./...
+
+  relay-service:
+    name: Rust Media Relay
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: relay
+
+      - name: Check and test relay
+        working-directory: ./relay
+        run: |
+          cargo check --verbose
+          cargo test --verbose
+
+  web-frontend:
+    name: Web Frontend
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: latest
+
+      - name: Install dependencies and build
+        working-directory: ./web
+        run: |
+          bun install --frozen-lockfile
+          bun run build

@@ -1,0 +1,48 @@
+[package]
+name = "family-stream-relay"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99"
+default-run = "family-stream-relay"
+publish = false
+
+[dependencies]
+axum = { version = "0.8.9", default-features = false, features = ["http1", "json", "tokio"] }
+chrono = { version = "0.4.45", default-features = false, features = ["clock", "serde", "std"] }
+httpdate = "1.0.3"
+http-body-util = "0.1.5"
+libc = "0.2.190"
+hyper = { version = "1.12.0", features = ["client", "server", "http1"] }
+hyper-util = { version = "0.1.21", features = ["tokio", "service"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = { version = "1.0.154", features = ["arbitrary_precision"] }
+sha2 = "0.11.1"
+subtle = "2.6.1"
+tokio = { version = "1.53.3", features = ["macros", "rt-multi-thread", "net", "signal", "sync", "time", "io-util", "process"] }
+tokio-util = { version = "0.7.20", features = ["rt"] }
+toml = "1.1.8"
+tower = { version = "0.5.3", features = ["util"] }
+url = "2.5.8"
+zeroize = "1.9.1"
+socket2 = { version = "0.6.5", features = ["all"] }
+tokio-rustls = { version = "0.26.6", default-features = false, features = ["ring", "tls12"] }
+webpki-roots = "1.0.9"
+ed25519-dalek = "3.0.0"
+base64 = "0.23.1"
+
+aes-gcm = { version = "0.11.1", features = ["zeroize"] }
+rusqlite = { version = "0.40.2", features = ["bundled", "limits"] }
+getrandom = "0.4.3"
+hmac = "0.13.0"
+fs2 = "0.4.3"
+
+[dev-dependencies]
+tempfile = "3.27.0"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"

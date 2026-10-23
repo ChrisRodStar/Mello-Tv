@@ -1,0 +1,9 @@
+{
+  "type": "about:blank",
+  "title": "Media source unavailable",
+  "status": 502,
+  "code": "upstream_rejected",
+  "detail": "Registered source request was rejected.",
+  "request_id": "synthetic-request-id",
+  "retryable": false
+}

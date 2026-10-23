@@ -1,0 +1,15 @@
+{
+  "sourceId": "fixture-vault",
+  "stream": {
+    "id": "primary",
+    "type": "file",
+    "deliveryType": "file",
+    "TTL": 3600,
+    "qualities": {
+      "720": {"type": "mp4", "url": "https://media.example.com/720.mp4", "codecName": "hevc", "size": "100000000", "requiresProxy": true, "se": 1, "ep": 1},
+      "1080": {"type": "mp4", "url": "https://media.example.com/1080.mp4", "codecName": "h264", "size": "200000000", "requiresProxy": true, "se": 1, "ep": 1}
+    },
+    "captions": [{"id": "fixture-caption", "url": "https://captions.example.com/english.srt", "language": "English", "type": "srt", "hasCorsRestrictions": false}],
+    "flags": ["cors-allowed"]
+  }
+}

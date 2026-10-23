@@ -1,0 +1,175 @@
+{
+  "fill-specializations" : [
+    {
+      "value" : {
+        "linear-gradient" : [
+          "srgb:0.96863,0.96078,0.94118,1.00000",
+          "display-p3:0.90588,0.89412,0.86275,1.00000"
+        ]
+      }
+    },
+    {
+      "appearance" : "dark",
+      "value" : {
+        "linear-gradient" : [
+          "display-p3:0.12941,0.13725,0.15686,1.00000",
+          "srgb:0.07059,0.07451,0.08627,1.00000"
+        ],
+        "orientation" : {
+          "start" : {
+            "x" : 0.5,
+            "y" : 1
+          },
+          "stop" : {
+            "x" : 0.5,
+            "y" : 0
+          }
+        }
+      }
+    }
+  ],
+  "groups" : [
+    {
+      "layers" : [
+        {
+          "fill-specializations" : [
+            {
+              "value" : {
+                "solid" : "srgb:0.00000,0.40000,0.80000,1.00000"
+              }
+            },
+            {
+              "appearance" : "dark",
+              "value" : {
+                "solid" : "srgb:0.16078,0.59216,1.00000,1.00000"
+              }
+            },
+            {
+              "appearance" : "tinted",
+              "value" : {
+                "solid" : "gray:0.44478,1.00000"
+              }
+            }
+          ],
+          "image-name" : "04-status.svg",
+          "name" : "04-status"
+        },
+        {
+          "fill-specializations" : [
+            {
+              "value" : {
+                "solid" : "srgb:0.94902,0.94118,0.91765,1.00000"
+              }
+            },
+            {
+              "appearance" : "dark",
+              "value" : {
+                "solid" : "srgb:0.08627,0.09020,0.10196,1.00000"
+              }
+            },
+            {
+              "appearance" : "tinted",
+              "value" : {
+                "solid" : "gray:0.13164,1.00000"
+              }
+            }
+          ],
+          "image-name" : "03-play.svg",
+          "name" : "03-play"
+        }
+      ],
+      "name" : "Playback marks",
+      "shadow-specializations" : [
+        {
+          "appearance" : "tinted",
+          "value" : {
+            "kind" : "neutral",
+            "opacity" : 0.1
+          }
+        }
+      ],
+      "translucency" : {
+        "enabled" : false,
+        "value" : 0.3
+      }
+    },
+    {
+      "layers" : [
+        {
+          "fill-specializations" : [
+            {
+              "value" : {
+                "solid" : "srgb:0.10980,0.11373,0.13333,1.00000"
+              }
+            },
+            {
+              "appearance" : "dark",
+              "value" : {
+                "solid" : "srgb:0.94902,0.94118,0.91765,1.00000"
+              }
+            },
+            {
+              "appearance" : "tinted",
+              "value" : {
+                "solid" : "gray:0.85032,1.00000"
+              }
+            }
+          ],
+          "image-name" : "02-screen.svg",
+          "name" : "02-screen"
+        },
+        {
+          "fill-specializations" : [
+            {
+              "value" : {
+                "solid" : "srgb:0.10980,0.11373,0.13333,1.00000"
+              }
+            },
+            {
+              "appearance" : "dark",
+              "value" : {
+                "solid" : "srgb:0.94902,0.94118,0.91765,1.00000"
+              }
+            },
+            {
+              "appearance" : "tinted",
+              "value" : {
+                "solid" : "gray:0.84731,1.00000"
+              }
+            }
+          ],
+          "image-name" : "01-foot.svg",
+          "name" : "01-foot",
+          "position" : {
+            "scale" : 1,
+            "translation-in-points" : [
+              -0.8094622066548709,
+              8
+            ]
+          }
+        }
+      ],
+      "lighting" : "combined",
+      "name" : "TV",
+      "shadow-specializations" : [
+        {
+          "appearance" : "tinted",
+          "value" : {
+            "kind" : "neutral",
+            "opacity" : 0.2
+          }
+        }
+      ],
+      "translucency" : {
+        "enabled" : false,
+        "value" : 0.3
+      }
+    }
+  ],
+  "supported-platforms" : {
+    "circles" : [
+      "watchOS"
+    ],
+    "squares" : "shared"
+  }
+}

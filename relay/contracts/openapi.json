@@ -1,0 +1,1125 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Family Stream Relay",
+    "version": "relay.v1",
+    "description": "Implemented relay.v1 private control/health and independently authorized stream listeners. Runtime readiness is distinct from live/player/deployment acceptance."
+  },
+  "x-design-status": "implemented-offline-verified-live-acceptance-pending",
+  "tags": [
+    {
+      "name": "control"
+    },
+    {
+      "name": "stream"
+    }
+  ],
+  "paths": {
+    "/internal/v1/sessions": {
+      "post": {
+        "operationId": "createSession",
+        "summary": "Durably import a provider selection",
+        "security": [
+          {
+            "ControlBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "./relay.schema.json#/$defs/CreateSession"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Session persisted; entry_path has no grant or upstream URL",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./relay.schema.json#/$defs/SessionReady"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Idempotent replay of the same request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./relay.schema.json#/$defs/SessionReady"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Safe pre-body error, never raw upstream context",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./relay.schema.json#/$defs/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/sessions/{session_id}": {
+      "parameters": [
+        {
+          "name": "session_id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "minLength": 22,
+            "maxLength": 64,
+            "pattern": "^[A-Za-z0-9_-]+$"
+          }
+        }
+      ],
+      "get": {
+        "operationId": "getSession",
+        "security": [
+          {
+            "ControlBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Redacted session state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./relay.schema.json#/$defs/SessionReady"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Safe pre-body error, never raw upstream context",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./relay.schema.json#/$defs/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "revokeSession",
+        "description": "Authenticated control caller revokes by opaque SID; persist tombstone and cancel active requests. Repeated deletion is safe.",
+        "security": [
+          {
+            "ControlBearer": []
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Revoked or already absent"
+          },
+          "default": {
+            "description": "Safe pre-body error, never raw upstream context",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./relay.schema.json#/$defs/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/sessions/{session_id}/renew": {
+      "parameters": [
+        {
+          "name": "session_id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "minLength": 22,
+            "maxLength": 64,
+            "pattern": "^[A-Za-z0-9_-]+$"
+          }
+        }
+      ],
+      "post": {
+        "operationId": "renewSession",
+        "security": [
+          {
+            "ControlBearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "./relay.schema.json#/$defs/RenewSession"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "CAS state transition; source change requires caller reload/resume",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./relay.schema.json#/$defs/SessionReady"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Safe pre-body error, never raw upstream context",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./relay.schema.json#/$defs/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/sessions/{session_id}/source": {
+      "parameters": [
+        {
+          "name": "session_id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "minLength": 22,
+            "maxLength": 64,
+            "pattern": "^[A-Za-z0-9_-]+$"
+          }
+        }
+      ],
+      "post": {
+        "operationId": "sourceSession",
+        "security": [
+          {
+            "ControlBearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "./relay.schema.json#/$defs/UpdateSource"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "CAS state transition; source change requires caller reload/resume",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./relay.schema.json#/$defs/SessionReady"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Safe pre-body error, never raw upstream context",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./relay.schema.json#/$defs/Problem"
+                }
+              }
+            }
+          }
+        },
+        "description": "Prepare a fresh matching selection via guarded HLS graph or MP4 prefix validation; atomically publish generation/resources under expected revision. The API obtains selections from providers; relay makes no provider call."
+      }
+    },
+    "/internal/v1/sessions/{session_id}/failover": {
+      "parameters": [
+        {
+          "name": "session_id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "minLength": 22,
+            "maxLength": 64,
+            "pattern": "^[A-Za-z0-9_-]+$"
+          }
+        }
+      ],
+      "post": {
+        "operationId": "failoverSession",
+        "security": [
+          {
+            "ControlBearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "./relay.schema.json#/$defs/MutationBase"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "CAS state transition; source change requires caller reload/resume",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./relay.schema.json#/$defs/SessionReady"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Safe pre-body error, never raw upstream context",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./relay.schema.json#/$defs/Problem"
+                }
+              }
+            }
+          }
+        },
+        "description": "Prepare stored backups in original order within finite time/byte/state limits; atomically activate the first successful candidate. No automatic entry/segment switching. A stale revision returns 409; read current state before an intentional next mutation."
+      }
+    },
+    "/stream/{session_id}/entry": {
+      "parameters": [
+        {
+          "name": "session_id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "minLength": 22,
+            "maxLength": 64,
+            "pattern": "^[A-Za-z0-9_-]+$"
+          }
+        },
+        {
+          "name": "Range",
+          "in": "header",
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "If-Range",
+          "in": "header",
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "get": {
+        "operationId": "getEntry",
+        "description": "Validate session grant and resource ownership before upstream work. No upstream redirects or URLs reach the client.",
+        "security": [
+          {
+            "StreamGrant": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authorized representation; HEAD sends no body",
+            "headers": {
+              "Content-Range": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Length": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Accept-Ranges": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/vnd.apple.mpegurl": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "video/mp4": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "audio/mp4": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "video/mp2t": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "text/vtt": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "206": {
+            "description": "Authorized representation; HEAD sends no body",
+            "headers": {
+              "Content-Range": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Length": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Accept-Ranges": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/vnd.apple.mpegurl": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "video/mp4": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "audio/mp4": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "video/mp2t": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "text/vtt": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Safe pre-body error, never raw upstream context",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./relay.schema.json#/$defs/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "head": {
+        "operationId": "headEntry",
+        "description": "Validate session grant and resource ownership before upstream work. No upstream redirects or URLs reach the client.",
+        "security": [
+          {
+            "StreamGrant": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authorized representation; HEAD sends no body",
+            "headers": {
+              "Content-Range": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Length": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Accept-Ranges": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/vnd.apple.mpegurl": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "video/mp4": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "audio/mp4": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "video/mp2t": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "text/vtt": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "206": {
+            "description": "Authorized representation; HEAD sends no body",
+            "headers": {
+              "Content-Range": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Length": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Accept-Ranges": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/vnd.apple.mpegurl": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "video/mp4": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "audio/mp4": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "video/mp2t": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "text/vtt": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Safe pre-body error, never raw upstream context",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./relay.schema.json#/$defs/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/stream/{session_id}/r/{resource_id}": {
+      "parameters": [
+        {
+          "name": "session_id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "minLength": 22,
+            "maxLength": 64,
+            "pattern": "^[A-Za-z0-9_-]+$"
+          }
+        },
+        {
+          "name": "resource_id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "minLength": 22,
+            "maxLength": 64,
+            "pattern": "^[A-Za-z0-9_-]+$"
+          }
+        },
+        {
+          "name": "Range",
+          "in": "header",
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "If-Range",
+          "in": "header",
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "get": {
+        "operationId": "getResource",
+        "description": "Validate session grant and resource ownership before upstream work. No upstream redirects or URLs reach the client.",
+        "security": [
+          {
+            "StreamGrant": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authorized representation; HEAD sends no body",
+            "headers": {
+              "Content-Range": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Length": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Accept-Ranges": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/vnd.apple.mpegurl": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "video/mp4": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "audio/mp4": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "video/mp2t": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "text/vtt": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "206": {
+            "description": "Authorized representation; HEAD sends no body",
+            "headers": {
+              "Content-Range": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Length": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Accept-Ranges": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/vnd.apple.mpegurl": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "video/mp4": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "audio/mp4": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "video/mp2t": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "text/vtt": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Safe pre-body error, never raw upstream context",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./relay.schema.json#/$defs/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "head": {
+        "operationId": "headResource",
+        "description": "Validate session grant and resource ownership before upstream work. No upstream redirects or URLs reach the client.",
+        "security": [
+          {
+            "StreamGrant": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authorized representation; HEAD sends no body",
+            "headers": {
+              "Content-Range": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Length": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Accept-Ranges": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/vnd.apple.mpegurl": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "video/mp4": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "audio/mp4": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "video/mp2t": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "text/vtt": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "206": {
+            "description": "Authorized representation; HEAD sends no body",
+            "headers": {
+              "Content-Range": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Length": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Accept-Ranges": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/vnd.apple.mpegurl": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "video/mp4": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "audio/mp4": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "video/mp2t": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "text/vtt": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Safe pre-body error, never raw upstream context",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./relay.schema.json#/$defs/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health/livez": {
+      "get": {
+        "operationId": "livez",
+        "description": "Private control-listener health only; never exposed through Serve.",
+        "security": [
+          {
+            "ControlBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Healthy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./relay.schema.json#/$defs/Health"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Not ready/draining",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./relay.schema.json#/$defs/Health"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health/readyz": {
+      "get": {
+        "operationId": "readyz",
+        "description": "Private authenticated runtime readiness: store/key owner, current VPN epoch, task owner, admission and drain state. No upstream-media health request. Provider readiness is external; overall acceptance remains false.",
+        "security": [
+          {
+            "ControlBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Healthy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./relay.schema.json#/$defs/Health"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Not ready/draining",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./relay.schema.json#/$defs/Health"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/metrics": {
+      "get": {
+        "operationId": "metrics",
+        "description": "Private fixed-vocabulary process counters and timing sums. No user/source/session labels; fewer than 64 series and 8192 output bytes.",
+        "security": [
+          {
+            "ControlBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Prometheus text exposition",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string",
+                  "maxLength": 8192
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/sessions/{session_id}/backups": {
+      "parameters": [
+        {
+          "name": "session_id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "minLength": 22,
+            "maxLength": 64,
+            "pattern": "^[A-Za-z0-9_-]+$"
+          }
+        }
+      ],
+      "post": {
+        "operationId": "enrichBackups",
+        "security": [
+          {
+            "ControlBearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "relay.schema.json#/$defs/UpdateBackups"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Backups stored; revision, grant and generation unchanged"
+          },
+          "409": {
+            "description": "Generation changed; enrichment rejected"
+          }
+        },
+        "description": "Prepare a fresh matching selection via guarded HLS graph or MP4 prefix validation; atomically publish generation/resources under expected revision. The API obtains selections from providers; relay makes no provider call.",
+        "summary": "Enrich verified backups without changing the playing source"
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "ControlBearer": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Dedicated private service secret loaded from file; never a playback JWT"
+      },
+      "StreamGrant": {
+        "type": "apiKey",
+        "in": "query",
+        "name": "st",
+        "description": "Ed25519 JWT; pin algorithm/issuer/audience and require owner, sid, auth revision and time claims"
+      }
+    }
+  }
+}

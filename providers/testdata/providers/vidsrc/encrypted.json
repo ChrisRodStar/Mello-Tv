@@ -1,0 +1,12 @@
+{
+  "status_code": "200",
+  "data": {
+    "imdb_id": "tt1375666",
+    "stream_urls": "AAAAAAAAAAAAAAAAHsyU3dPLEr8jOQTLNv7cRc2+fJfBo4Ap3Q7lpP8DfbTgbnYfNTlm6A9FjU/UvWVVRC6LgS0="
+  },
+  "default_subs": [],
+  "vs": {
+    "w": 42,
+    "wasm_url": "https://data.vidsrc.sh/wasm.php?w=42&_=12600"
+  }
+}

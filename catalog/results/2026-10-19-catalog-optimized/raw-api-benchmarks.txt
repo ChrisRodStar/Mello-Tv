@@ -1,0 +1,10 @@
+goos: darwin
+goarch: arm64
+pkg: stv-catalog/internal/api
+cpu: Apple M4
+BenchmarkHandler_HealthLive-10             	 1000000	      1003 ns/op	    1161 B/op	      20 allocs/op
+BenchmarkHandler_HealthLive_WithAuth-10    	 1000000	      1021 ns/op	    1209 B/op	      21 allocs/op
+BenchmarkHandler_GetTitle-10               	   50464	     23813 ns/op	   10647 B/op	     132 allocs/op
+BenchmarkHandler_ParallelGetTitle-10       	   47107	     24631 ns/op	   10807 B/op	     136 allocs/op
+PASS
+ok  	stv-catalog/internal/api	4.852s

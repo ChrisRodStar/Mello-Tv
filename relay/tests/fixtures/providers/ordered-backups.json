@@ -1,0 +1,183 @@
+{
+  "version": "providers.v1",
+  "selected": {
+    "candidate": {
+      "source": {
+        "id": "synthetic-source-1",
+        "provider": "vidcore",
+        "title": {
+          "type": "movie",
+          "tmdb_id": 27205,
+          "imdb_id": "tt1375666"
+        },
+        "content_verified": false,
+        "selected_variant_url": "https://media.example.com/video/1080.m3u8",
+        "url": "https://media.example.com/master.m3u8",
+        "format": "hls",
+        "fetch_context": {},
+        "resolver_metadata": {
+          "provider_data": {
+            "unknown": {
+              "preserve": true,
+              "big": 18446744073709551617,
+              "decimal": 0.12345678901234567890123456789
+            }
+          },
+          "tracks_known": false
+        }
+      },
+      "observation": {
+        "at": "2030-01-01T00:00:00Z",
+        "accessible": true,
+        "format": "hls",
+        "playlist_metadata": {
+          "tracks": [
+            {
+              "kind": "audio",
+              "language": "en",
+              "group": "audio-en",
+              "url": "https://media.example.com/audio/en.m3u8",
+              "default": true
+            },
+            {
+              "kind": "subtitles",
+              "language": "en",
+              "group": "subs-en",
+              "url": "https://media.example.com/subs/en.m3u8",
+              "default": false
+            }
+          ],
+          "tracks_known": true,
+          "variants": [
+            {
+              "url": "https://media.example.com/video/1080.m3u8",
+              "width": 1920,
+              "height": 1080,
+              "bitrate": 6000000,
+              "codecs": [
+                "avc1.640028",
+                "mp4a.40.2"
+              ],
+              "audio_group": "audio-en",
+              "subtitle_group": "subs-en"
+            }
+          ]
+        },
+        "variant": {
+          "url": "https://media.example.com/video/1080.m3u8",
+          "width": 1920,
+          "height": 1080,
+          "bitrate": 6000000,
+          "codecs": [
+            "avc1.640028",
+            "mp4a.40.2"
+          ],
+          "audio_group": "audio-en",
+          "subtitle_group": "subs-en"
+        },
+        "first_byte": 100000000,
+        "delivery_bps": 24000000,
+        "samples_completed": 3,
+        "sample_bytes": 393216,
+        "encrypted": false,
+        "protection_known": true
+      }
+    },
+    "score": 40,
+    "reasons": null
+  },
+  "backups": [
+    {
+      "candidate": {
+        "source": {
+          "id": "synthetic-backup-1",
+          "provider": "vidlink",
+          "title": {
+            "type": "movie",
+            "tmdb_id": 27205,
+            "imdb_id": "tt1375666"
+          },
+          "content_verified": false,
+          "url": "https://media.example.com/movie.mp4",
+          "format": "mp4",
+          "fetch_context": {},
+          "resolver_metadata": {
+            "provider_data": {
+              "unknown": {
+                "preserve": true,
+                "big": 18446744073709551617,
+                "decimal": 0.12345678901234567890123456789
+              }
+            },
+            "tracks_known": false
+          }
+        },
+        "observation": {
+          "at": "2030-01-01T00:00:00Z",
+          "accessible": true,
+          "format": "mp4",
+          "playlist_metadata": {
+            "tracks_known": false
+          },
+          "samples_completed": 3,
+          "sample_bytes": 393216,
+          "encrypted": false,
+          "protection_known": true
+        }
+      },
+      "score": 40,
+      "reasons": null
+    },
+    {
+      "candidate": {
+        "source": {
+          "id": "synthetic-backup-2",
+          "provider": "vidsrc",
+          "title": {
+            "type": "movie",
+            "tmdb_id": 27205,
+            "imdb_id": "tt1375666"
+          },
+          "content_verified": false,
+          "url": "https://media.example.com/master.m3u8",
+          "format": "hls",
+          "fetch_context": {},
+          "resolver_metadata": {
+            "provider_data": {
+              "unknown": {
+                "preserve": true,
+                "big": 18446744073709551617,
+                "decimal": 0.12345678901234567890123456789
+              }
+            },
+            "tracks_known": false
+          }
+        },
+        "observation": {
+          "at": "2030-01-01T00:00:00Z",
+          "accessible": true,
+          "format": "hls",
+          "playlist_metadata": {
+            "tracks_known": false
+          },
+          "first_byte": 100000000,
+          "delivery_bps": 24000000,
+          "samples_completed": 3,
+          "sample_bytes": 393216,
+          "encrypted": false,
+          "protection_known": true
+        }
+      },
+      "score": 40,
+      "reasons": null
+    }
+  ],
+  "rejected": {},
+  "providers": [
+    {
+      "provider": "vidcore",
+      "duration": 1000000000,
+      "candidate_count": 1
+    }
+  ]
+}

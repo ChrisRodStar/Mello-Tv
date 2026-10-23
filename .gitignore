@@ -1,0 +1,43 @@
+# Operating System Files
+.DS_Store
+Thumbs.db
+
+# Environment and Secrets
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+secrets/
+*.secret
+
+# SQLite Databases & Local State
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.db
+.local/
+
+# Web & Node / Bun
+**/node_modules/
+dist/
+build/
+.output/
+
+# Rust
+**/target/
+
+# Go
+*.exe
+*.test
+bin/
+
+# iOS / Xcode
+**/xcuserdata/
+**/DerivedData/
+**/build/
+*.xcuserstate
+
+# Logs & Temp
+*.log
+tmp/

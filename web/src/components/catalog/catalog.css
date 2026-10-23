@@ -1,0 +1,227 @@
+.shelf {
+  margin-bottom: 34px;
+}
+
+.shelf:not(:first-of-type) {
+  contain-intrinsic-size: auto 340px;
+  content-visibility: auto;
+}
+
+.shelf-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+  gap: 20px;
+}
+
+.shelf-controls {
+  display: flex;
+  gap: 7px;
+}
+
+.shelf-controls button {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border: 1px solid #3a3a3a;
+  border-radius: 50%;
+  background: #252525;
+  color: #fff;
+  transition:
+    background-color 0.16s ease-out,
+    transform 0.1s ease-out;
+}
+
+.shelf-controls button:hover:not(:disabled) {
+  background: #454545;
+}
+
+.shelf-controls button:active:not(:disabled) {
+  transform: scale(0.96);
+}
+
+.shelf-controls button:disabled {
+  opacity: 0.25;
+}
+
+.shelf-controls svg {
+  width: 15px;
+  height: 15px;
+}
+
+.shelf-track {
+  contain: layout paint;
+  display: grid;
+  grid-auto-columns: calc(15.873% - 12.6984px);
+  grid-auto-flow: column;
+  margin-right: -4.95%;
+  margin-left: -4.95%;
+  padding: 6px 0 10px;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  gap: 16px;
+  scroll-snap-type: none;
+  scrollbar-width: none;
+}
+
+.shelf-track::-webkit-scrollbar {
+  display: none;
+}
+
+.title-card {
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+
+.poster-wrap {
+  position: relative;
+  aspect-ratio: 2/3;
+  width: 100%;
+  overflow: hidden;
+  border-radius: 4px;
+  background: #262626;
+}
+
+.poster-wrap img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transform: translateZ(0);
+  backface-visibility: hidden;
+  transition:
+    transform 0.35s cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 0.35s ease-out;
+}
+
+.title-card:hover img,
+.title-card:focus-visible img {
+  transform: scale(1.045) translateZ(0);
+  opacity: 0.88;
+}
+
+.poster-placeholder {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  padding: 20px;
+  color: #aaa;
+  font-size: 18px;
+  text-align: center;
+}
+
+.card-overlay {
+  position: absolute;
+  inset: auto 0 0;
+  padding: 48px 14px 16px;
+  transform: translateY(6px);
+  background: linear-gradient(#0000, #000e 55%, #000);
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity 0.2s ease-out,
+    transform 0.2s ease-out;
+  will-change: opacity, transform;
+}
+
+.card-overlay h3 {
+  margin: 0 0 8px;
+  color: #fff;
+  font-size: 14px;
+  line-height: 1.35;
+  white-space: normal;
+}
+
+.card-overlay .card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+  color: #ccc;
+  font-size: 11px;
+}
+
+.card-overlay .rating {
+  margin-left: auto;
+  color: #fff;
+  white-space: nowrap;
+}
+
+.card-overlay .rating-max {
+  color: #bbb;
+}
+
+.title-card:hover .card-overlay,
+.title-card:focus-visible .card-overlay {
+  transform: translateY(0);
+  opacity: 1;
+}
+
+.results-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 28px 18px;
+}
+
+@media (min-width: 1700px) {
+  .shelf-track {
+    grid-auto-columns: calc(12.0482% - 13.494px);
+  }
+  .results-grid {
+    grid-template-columns: repeat(8, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 1100px) {
+  .shelf-track {
+    grid-auto-columns: calc(23.2558% - 11.1628px);
+  }
+  .results-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 700px) {
+  .shelf {
+    margin-bottom: 27px;
+  }
+  .shelf-track {
+    grid-auto-columns: calc(37.7358% - 9.0566px);
+    margin-right: -5.55%;
+    margin-left: -5.55%;
+    gap: 12px;
+  }
+  .card-overlay {
+    padding: 40px 10px 12px;
+  }
+  .card-overlay h3 {
+    font-size: 12px;
+  }
+  .card-overlay .card-meta {
+    font-size: 10px;
+  }
+  .results-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 24px 14px;
+  }
+  .results-grid .card-meta {
+    flex-wrap: wrap;
+  }
+}
+
+@media (hover: none) {
+  .title-card:hover:not(:focus-visible) .card-overlay {
+    opacity: 0;
+  }
+  .title-card:hover:not(:focus-visible) img {
+    transform: none;
+    opacity: 1;
+  }
+}

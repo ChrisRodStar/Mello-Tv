@@ -1,0 +1,7 @@
+.local/
+data/
+*.sqlite*
+*.key
+*.pem
+.DS_Store
+__pycache__/

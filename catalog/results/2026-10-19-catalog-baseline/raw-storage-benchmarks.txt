@@ -1,0 +1,12 @@
+goos: darwin
+goarch: arm64
+pkg: stv-catalog/internal/db
+cpu: Apple M4
+BenchmarkStore_Get-10               	  169382	      6919 ns/op	    1584 B/op	      44 allocs/op
+BenchmarkStore_TitleEnriched-10     	   58904	     20546 ns/op	    4488 B/op	     105 allocs/op
+BenchmarkStore_Search-10            	    1623	    722167 ns/op	   15888 B/op	     221 allocs/op
+BenchmarkStore_PutSingle-10         	   18985	     62567 ns/op	    4617 B/op	      98 allocs/op
+BenchmarkStore_PutBatch50-10        	    2683	    413174 ns/op	   29037 B/op	     995 allocs/op
+BenchmarkStore_ExportSnapshot-10    	    3576	    332674 ns/op	  422550 B/op	    4709 allocs/op
+PASS
+ok  	stv-catalog/internal/db	8.486s
