@@ -4,12 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"family-stream-providers/internal/cache"
-	"family-stream-providers/internal/model"
-	"family-stream-providers/internal/network"
-	"family-stream-providers/internal/probe"
-	"family-stream-providers/internal/provider"
-	"family-stream-providers/internal/selection"
+	"stv-providers/internal/cache"
+	"stv-providers/internal/model"
+	"stv-providers/internal/network"
+	"stv-providers/internal/probe"
+	"stv-providers/internal/provider"
+	"stv-providers/internal/selection"
 	"net/url"
 	"strconv"
 	"sync"
@@ -78,6 +78,12 @@ func New(registry *provider.Registry, prober Prober, limits Limits, diagnostic f
 
 // Resolve executes a coordinated lookup across providers with in-flight request coalescing.
 func (c *Coordinator) Resolve(ctx context.Context, lookup model.Lookup) (model.Selection, error) {
+	if c == nil {
+		return model.Selection{}, model.Fail(model.Unavailable, "coordinator", "nil coordinator")
+	}
+	if ctx == nil {
+		return model.Selection{}, model.Fail(model.Unsupported, "context", "nil context provided")
+	}
 	if err := ctx.Err(); err != nil {
 		return model.Selection{}, err
 	}
@@ -461,6 +467,9 @@ func (c *Coordinator) emit(status model.ProviderStatus) {
 
 // Close gracefully cancels outstanding background lookup tasks and releases coordinator resources.
 func (c *Coordinator) Close() {
+	if c == nil {
+		return
+	}
 	c.closeOnce.Do(func() {
 		c.mu.Lock()
 		close(c.closed)

@@ -3,6 +3,11 @@ import SwiftUI
 struct CatalogView: View {
     @State private var store: CatalogStore
     @State private var selectedTitle: MediaTitle?
+    @State private var heroScrollOffset: CGFloat = 0
+    @State private var foregroundRefreshGeneration = 0
+    @State private var completedForegroundRefreshGeneration = 0
+    @State private var hasEnteredBackground = false
+    @Environment(\.scenePhase) private var scenePhase
     @State private var playbackRequest: PlaybackRequest?
     @State private var resolvingTitleID: String?
     @State private var resumeTask: Task<Void, Never>?
@@ -19,54 +24,85 @@ struct CatalogView: View {
     }
 
     var body: some View {
-        ScrollView {
-            Group {
-                if store.isLoading && !store.hasLoaded {
-                    CatalogLoadingView()
-                } else if let errorMessage = store.errorMessage {
-                    CatalogFailureView(message: errorMessage) {
-                        Task { await store.load(force: true) }
-                    }
-                } else if store.sections.isEmpty && store.featuredTitles.isEmpty {
-                    ContentUnavailableView {
-                        Label {
-                            Text("No titles available")
-                        } icon: {
-                            PhosphorIcon("film-slate", size: 48)
+        GeometryReader { viewport in
+            ScrollView {
+                Group {
+                    if !store.hasLoaded && store.errorMessage == nil {
+                        FeaturedCarouselSkeleton(viewportSize: viewport.size)
+                            .padding(.vertical, 12)
+                    } else if let errorMessage = store.errorMessage {
+                        CatalogFailureView(message: errorMessage) {
+                            Task { await store.load(force: true) }
                         }
-                    } description: {
-                        Text("There are no titles to show right now.")
-                    }
-                    .padding(.top, 88)
-                } else {
-                    LazyVStack(alignment: .leading, spacing: 28) {
-                        // Featured Carousel (Showroom Hero Stage)
-                        if !store.featuredTitles.isEmpty {
-                            FeaturedCarouselView(
-                                titles: store.featuredTitles,
-                                onSelect: { title in
-                                    selectedTitle = title
-                                },
-                                onPlay: { title in
-                                    playFeatured(title)
-                                }
-                            )
+                    } else if store.sections.isEmpty && store.featuredTitles.isEmpty {
+                        ContentUnavailableView {
+                            Label {
+                                Text("No titles available")
+                            } icon: {
+                                PhosphorIcon("film-slate", size: 48)
+                            }
+                        } description: {
+                            Text("There are no titles to show right now.")
                         }
+                        .padding(.top, 88)
+                    } else {
+                        LazyVStack(alignment: .leading, spacing: 28) {
+                            // Featured Carousel (Showroom Hero Stage)
+                            if !store.featuredTitles.isEmpty {
+                                FeaturedCarouselView(
+                                    titles: store.featuredTitles,
+                                    viewportSize: viewport.size,
+                                    onSelect: { title in
+                                        selectedTitle = title
+                                    },
+                                    onPlay: { title in
+                                        playFeatured(title)
+                                    }
+                                )
+                            }
 
-                        curatedHomeSections
+                            curatedHomeSections
+                        }
+                        .padding(.vertical, 12)
                     }
-                    .padding(.vertical, 12)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background {
+                    GeometryReader { content in
+                        Color.clear.preference(
+                            key: CatalogScrollOffsetKey.self,
+                            value: content.frame(in: .named("catalogScroll")).minY
+                        )
+                    }
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .coordinateSpace(name: "catalogScroll")
+            .scrollIndicators(.hidden)
+            .onPreferenceChange(CatalogScrollOffsetKey.self) { heroScrollOffset = $0 }
         }
-        .background(FamilyStreamTheme.background.ignoresSafeArea())
-        .scrollIndicators(.hidden)
+        .background { CatalogPageSurface(heroOffset: heroScrollOffset).ignoresSafeArea() }
         .toolbar(.hidden, for: .navigationBar)
-        .task {
-            await store.load()
+        .task(id: foregroundRefreshGeneration) {
+            let generation = foregroundRefreshGeneration
+            let refreshing = generation > completedForegroundRefreshGeneration
+            await store.load(force: refreshing)
+            guard !Task.isCancelled else { return }
             if let profileID {
-                await libraryStore.loadLibrary(for: profileID)
+                if refreshing {
+                    await libraryStore.refresh(for: profileID)
+                } else {
+                    await libraryStore.loadLibrary(for: profileID)
+                }
+            }
+            if !Task.isCancelled { completedForegroundRefreshGeneration = generation }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .background {
+                hasEnteredBackground = true
+            } else if phase == .active && hasEnteredBackground {
+                // Temporary interruptions such as Control Center don't refresh feeds.
+                hasEnteredBackground = false
+                foregroundRefreshGeneration += 1
             }
         }
         .onChange(of: profileID) { _, newID in
@@ -77,12 +113,6 @@ struct CatalogView: View {
                 Task {
                     await libraryStore.loadLibrary(for: newID, forceReload: true)
                 }
-            }
-        }
-        .refreshable {
-            await store.load(force: true)
-            if let profileID {
-                await libraryStore.refresh(for: profileID)
             }
         }
         .sheet(item: $selectedTitle) { title in
@@ -127,11 +157,19 @@ struct CatalogView: View {
                 catalogTitle: title
             ).traced(.play)
         } else {
-            // For TV, if progress exists, resume it; otherwise open details to select episode
+            // Resume an existing series, or start its first episode directly.
             if let saved = libraryStore.savedProgress(for: title) {
                 resumeItem(saved)
             } else {
-                selectedTitle = title
+                playbackRequest = PlaybackRequest(
+                    titleID: title.tmdbID,
+                    type: .tv,
+                    title: title.title,
+                    profileID: profileID,
+                    season: 1,
+                    episode: 1,
+                    catalogTitle: title
+                ).traced(.play)
             }
         }
     }
@@ -218,8 +256,9 @@ struct CatalogView: View {
         }
 
         // Dynamic Curated Shelves
-        ForEach(store.sections.indices, id: \.self) { index in
-            let section = store.sections[index]
+        // SwiftUI may finish updating outgoing rows after a profile change
+        // clears the store. Capture each section instead of retaining its index.
+        ForEach(Array(store.sections.enumerated()), id: \.element.id) { index, section in
             if index == 0 && section.titles.count >= 4 {
                 // Section 0: Numbered Top 10 Charts
                 NumberedShelf(
@@ -236,8 +275,7 @@ struct CatalogView: View {
                 )
 
                 // Editorial Spotlight Card Break
-                if store.featuredTitles.count > 1 {
-                    let spotlightPick = store.featuredTitles[1]
+                if let spotlightPick = store.featuredTitles.dropFirst().first {
                     EditorialSpotlightCard(
                         title: spotlightPick,
                         onSelect: { selectedTitle = spotlightPick },
@@ -271,19 +309,10 @@ private struct NumberedShelf: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            VStack(alignment: .leading, spacing: 3) {
-                if let eyebrow {
-                    Text(eyebrow.uppercased())
-                        .font(.caption2.weight(.bold))
-                        .tracking(0.6)
-                        .foregroundStyle(FamilyStreamTheme.muted)
-                }
-
-                Text(section.heading)
-                    .font(.title3.weight(.bold))
-                    .foregroundStyle(FamilyStreamTheme.text)
-            }
-            .padding(.horizontal, 16)
+            Text(eyebrow ?? section.heading)
+                .font(.title3.weight(.bold))
+                .foregroundStyle(FamilyStreamTheme.text)
+                .padding(.horizontal, 16)
 
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(alignment: .top, spacing: 16) {
@@ -306,8 +335,9 @@ private struct NumberedPosterTile: View {
     let title: MediaTitle
     var action: (() -> Void)? = nil
 
-    private let posterWidth: CGFloat = 126
-    private let posterHeight: CGFloat = 189
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    private var posterWidth: CGFloat { dynamicTypeSize.isAccessibilitySize ? 176 : 136 }
+    private var posterHeight: CGFloat { posterWidth * 1.5 }
 
     var body: some View {
         if let action {
@@ -327,25 +357,16 @@ private struct NumberedPosterTile: View {
     private var content: some View {
         HStack(alignment: .bottom, spacing: -18) {
             Text("\(rank)")
-                .font(.system(size: 88, weight: .black, design: .rounded))
-                .foregroundStyle(
-                    LinearGradient(
-                        colors: [
-                            FamilyStreamTheme.text.opacity(0.35),
-                            FamilyStreamTheme.text.opacity(0.12)
-                        ],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                )
-                .offset(x: rank >= 10 ? -10 : 0, y: 12)
+                .font(.system(size: dynamicTypeSize.isAccessibilitySize ? 96 : 80, weight: .black, design: .rounded))
+                .monospacedDigit()
+                .foregroundStyle(FamilyStreamTheme.textSecondary.opacity(0.55))
+                .offset(y: 8)
                 .zIndex(0)
                 .allowsHitTesting(false)
 
             posterArtwork
                 .frame(width: posterWidth, height: posterHeight)
-                .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
-                .appleNeumorphic(cornerRadius: 11, elevation: .medium)
+                .artworkCardSurface()
                 .zIndex(1)
         }
         .frame(height: posterHeight)
@@ -364,12 +385,7 @@ private struct NumberedPosterTile: View {
                 case .failure:
                     placeholder
                 case .empty:
-                    ZStack {
-                        FamilyStreamTheme.cardBackground
-                        ProgressView()
-                            .tint(FamilyStreamTheme.accent)
-                            .scaleEffect(0.8)
-                    }
+                    FamilyStreamTheme.cardBackground
                 @unknown default:
                     placeholder
                 }
@@ -404,19 +420,10 @@ private struct PanoramicShelf: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            VStack(alignment: .leading, spacing: 3) {
-                if let eyebrow {
-                    Text(eyebrow.uppercased())
-                        .font(.caption2.weight(.bold))
-                        .tracking(0.6)
-                        .foregroundStyle(FamilyStreamTheme.muted)
-                }
-
-                Text(section.heading)
-                    .font(.title3.weight(.bold))
-                    .foregroundStyle(FamilyStreamTheme.text)
-            }
-            .padding(.horizontal, 16)
+            Text(eyebrow ?? section.heading)
+                .font(.title3.weight(.bold))
+                .foregroundStyle(FamilyStreamTheme.text)
+                .padding(.horizontal, 16)
 
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(alignment: .top, spacing: 14) {
@@ -438,8 +445,10 @@ private struct PanoramicCard: View {
     let title: MediaTitle
     var action: (() -> Void)? = nil
 
-    private let cardWidth: CGFloat = 260
-    private let cardHeight: CGFloat = 146
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    private var cardWidth: CGFloat { verticalSizeClass == .compact ? 320 : 288 }
+    private var cardHeight: CGFloat { cardWidth * (dynamicTypeSize.isAccessibilitySize ? 0.80 : 9.0 / 16) }
 
     var body: some View {
         if let action {
@@ -474,16 +483,15 @@ private struct PanoramicCard: View {
             .allowsHitTesting(false)
 
             Text(title.title)
-                .font(.subheadline.weight(.bold))
+                .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.white)
-                .lineLimit(1)
-                .shadow(color: Color.black.opacity(0.8), radius: 3, x: 0, y: 1)
-                .padding(.horizontal, 12)
-                .padding(.bottom, 10)
+                .multilineTextAlignment(.leading)
+                .lineLimit(2)
+                .shadow(color: Color.black.opacity(0.35), radius: 3, y: 1)
+                .padding(16)
         }
         .frame(width: cardWidth, height: cardHeight)
-        .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
-        .appleNeumorphic(cornerRadius: 13, elevation: .medium)
+        .artworkCardSurface(cornerRadius: 20)
     }
 
     @ViewBuilder
@@ -499,12 +507,7 @@ private struct PanoramicCard: View {
                 case .failure:
                     placeholder
                 case .empty:
-                    ZStack {
-                        FamilyStreamTheme.cardBackground
-                        ProgressView()
-                            .tint(FamilyStreamTheme.accent)
-                            .scaleEffect(0.8)
-                    }
+                    FamilyStreamTheme.cardBackground
                 @unknown default:
                     placeholder
                 }
@@ -546,94 +549,67 @@ private struct EditorialSpotlightCard: View {
     let onSelect: () -> Void
     let onPlay: () -> Void
 
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
     var body: some View {
-        Button(action: onSelect) {
-            ZStack(alignment: .topLeading) {
-                artwork
-                    .frame(height: 220)
-                    .frame(maxWidth: .infinity)
-                    .clipped()
-
-                LinearGradient(
-                    colors: [
-                        Color.clear,
-                        Color.black.opacity(0.45),
-                        Color.black.opacity(0.88)
-                    ],
-                    startPoint: .center,
-                    endPoint: .bottom
-                )
-                .allowsHitTesting(false)
-
-                // Subtle top left-hand corner tag (no icon, just "Feature Spotlight")
-                Text("Feature Spotlight")
-                    .font(.caption2.weight(.medium))
-                    .foregroundStyle(Color.white.opacity(0.85))
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .background(Color.black.opacity(0.45), in: Capsule())
-                    .overlay(
-                        Capsule()
-                            .stroke(Color.white.opacity(0.18), lineWidth: 0.5)
-                    )
-                    .padding(14)
-
-                VStack(alignment: .leading, spacing: 8) {
-                    Spacer()
-
+        Button(action: onPlay) {
+            VStack(alignment: .leading, spacing: 0) {
+                Spacer(minLength: verticalSizeClass == .compact ? 100 : 130)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("SPOTLIGHT")
+                        .font(.caption2.weight(.semibold))
+                        .tracking(1.6)
+                        .foregroundStyle(.white.opacity(0.75))
                     Text(title.title)
-                        .font(.title3.weight(.bold))
+                        .font(.title2.weight(.semibold))
+                        .tracking(-0.4)
                         .foregroundStyle(.white)
-                        .lineLimit(1)
-                        .shadow(color: Color.black.opacity(0.8), radius: 4, x: 0, y: 2)
-
-                    if !title.overview.isEmpty {
-                        Text(title.overview)
-                            .font(.caption)
-                            .foregroundStyle(Color.white.opacity(0.82))
-                            .lineLimit(2)
-                            .lineSpacing(2)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-
-                    HStack(spacing: 12) {
-                        Button(action: onPlay) {
-                            HStack(spacing: 6) {
-                                PhosphorIcon("play", size: 12, weight: .fill)
-                                Text("Play")
-                                    .font(.subheadline.weight(.semibold))
-                            }
-                            .foregroundStyle(Color.black)
-                            .padding(.horizontal, 18)
-                            .padding(.vertical, 9)
-                            .background(Color.white, in: Capsule())
-                            .shadow(color: Color.black.opacity(0.2), radius: 4, x: 0, y: 2)
-                        }
-                        .buttonStyle(CardScaleButtonStyle(scale: 0.95))
-
-                        Button(action: onSelect) {
-                            Text("Details")
-                                .font(.subheadline.weight(.medium))
-                                .foregroundStyle(.white)
-                                .padding(.horizontal, 16)
-                                .padding(.vertical, 9)
-                                .background(Color.white.opacity(0.18), in: Capsule())
-                                .overlay(
-                                    Capsule()
-                                        .stroke(Color.white.opacity(0.22), lineWidth: 0.8)
-                                )
-                        }
-                        .buttonStyle(CardScaleButtonStyle(scale: 0.95))
-                    }
-                    .padding(.top, 2)
+                        .multilineTextAlignment(.leading)
+                        .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                .padding(16)
+                .padding(.leading, 20)
+                .padding(.trailing, 68)
+                .padding(.top, 32)
+                .padding(.bottom, 20)
             }
-            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .appleNeumorphic(cornerRadius: 18, elevation: .prominent)
-            .padding(.horizontal, 16)
+            .frame(maxWidth: .infinity, minHeight: verticalSizeClass == .compact ? 200 : 240, alignment: .bottomLeading)
+            .background {
+                GeometryReader { geometry in
+                    artwork
+                        .frame(width: geometry.size.width, height: geometry.size.height)
+                        .clipped()
+                        .overlay {
+                            LinearGradient(stops: [
+                                .init(color: .clear, location: 0.25),
+                                .init(color: .black.opacity(0.25), location: 0.50),
+                                .init(color: .black.opacity(0.88), location: 1)
+                            ], startPoint: .top, endPoint: .bottom)
+                        }
+                }
+            }
+            .contentShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
         }
         .buttonStyle(.plain)
+        .accessibilityLabel("Play \(title.title)")
+        .overlay(alignment: .topTrailing) {
+            BrandTVMark().padding(.trailing, 16).padding(.top, 16)
+        }
+        .overlay(alignment: .bottomTrailing) {
+            Button(action: onSelect) { CardDetailsGlyph() }
+                .buttonStyle(CardScaleButtonStyle(scale: 0.94))
+                .accessibilityLabel("Details for \(title.title)")
+                .padding(.trailing, 16)
+                .padding(.bottom, 12)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .strokeBorder(FamilyStreamTheme.subtleBorder, lineWidth: 0.5)
+                .allowsHitTesting(false)
+        }
+        .padding(.horizontal, 16)
     }
 
     @ViewBuilder
@@ -666,7 +642,7 @@ private struct EditorialSpotlightCard: View {
     private var placeholder: some View {
         ZStack {
             FamilyStreamTheme.secondaryBackground
-            PhosphorIcon("film-slate", size: 36)
+            PhosphorIcon(title.type == .tv ? "television-simple" : "film-slate", size: 36)
                 .foregroundStyle(FamilyStreamTheme.muted)
         }
     }
@@ -697,31 +673,6 @@ private struct CatalogShelf: View {
     }
 }
 
-private struct CatalogLoadingView: View {
-    var body: some View {
-        VStack(alignment: .leading, spacing: 28) {
-            ForEach(0..<3, id: \.self) { _ in
-                VStack(alignment: .leading, spacing: 12) {
-                    RoundedRectangle(cornerRadius: 4)
-                        .fill(FamilyStreamTheme.secondaryBackground)
-                        .frame(width: 150, height: 22)
-                    HStack(spacing: 14) {
-                        ForEach(0..<4, id: \.self) { _ in
-                            RoundedRectangle(cornerRadius: 8)
-                                .fill(FamilyStreamTheme.secondaryBackground)
-                                .frame(width: 126, height: 189)
-                        }
-                    }
-                }
-            }
-        }
-        .redacted(reason: .placeholder)
-        .padding(.horizontal, 20)
-        .padding(.top, 18)
-        .accessibilityLabel("Loading catalog")
-    }
-}
-
 private struct CatalogFailureView: View {
     let message: String
     let retry: () -> Void
@@ -742,4 +693,9 @@ private struct CatalogFailureView: View {
         }
         .padding(.top, 68)
     }
+}
+
+private struct CatalogScrollOffsetKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
 }

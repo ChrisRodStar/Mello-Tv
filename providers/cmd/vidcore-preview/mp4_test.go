@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"testing"
 
-	"family-stream-providers/internal/network"
+	"stv-providers/internal/network"
 )
 
 type mp4PreviewFixture struct {
@@ -122,3 +122,24 @@ func TestPreviewRangeRejectsMalformedOverflowAndMultipleRanges(t *testing.T) {
 		t.Fatal("suffix range changed")
 	}
 }
+
+func BenchmarkParseContentRange(b *testing.B) {
+	header := "bytes 0-1000/50000"
+	b.ReportAllocs()
+	for b.Loop() {
+		if _, _, _, err := parseContentRange(header); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkPreviewRange(b *testing.B) {
+	header := "bytes=0-1000"
+	b.ReportAllocs()
+	for b.Loop() {
+		if _, _, err := previewRange(header, 50000); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+

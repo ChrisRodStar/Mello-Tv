@@ -12,8 +12,8 @@ import (
 	"strconv"
 	"strings"
 
-	"family-stream-providers/internal/model"
-	"family-stream-providers/internal/network"
+	"stv-providers/internal/model"
+	"stv-providers/internal/network"
 )
 
 type source struct {

@@ -5,7 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"family-stream-providers/internal/model"
+	"stv-providers/internal/model"
 )
 
 // flight manages in-flight deduplication (singleflight) for concurrent duplicate requests.
@@ -40,21 +40,16 @@ func requestKey(lookup model.Lookup) (string, error) {
 	return hex.EncodeToString(hash[:]), nil
 }
 
-// cloneSelection creates an isolated deep copy of a Selection result via JSON serialization.
+// cloneSelection creates an isolated deep copy of a Selection result.
+// Uses native deep cloning instead of JSON marshal/unmarshal for maximum performance.
 func cloneSelection(sel model.Selection) model.Selection {
-	data, _ := json.Marshal(sel)
-	var cloned model.Selection
-	_ = json.Unmarshal(data, &cloned)
-	return cloned
+	return sel.Clone()
 }
 
-// cloneLookup creates an isolated deep copy of a Lookup struct via JSON serialization.
+// cloneLookup creates an isolated deep copy of a Lookup struct.
+// Uses native deep cloning instead of JSON marshal/unmarshal for maximum performance.
 func cloneLookup(lookup model.Lookup) model.Lookup {
-	data, _ := json.Marshal(lookup)
-	var cloned model.Lookup
-	_ = json.Unmarshal(data, &cloned)
-	cloned.ContextKey = lookup.ContextKey
-	return cloned
+	return lookup.Clone()
 }
 
 func sourceKey(lookup model.Lookup) (string, error) {

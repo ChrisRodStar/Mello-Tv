@@ -5,33 +5,41 @@ import (
 	"errors"
 	"sync"
 
-	"family-stream-providers/internal/model"
-	"family-stream-providers/internal/network"
-	"family-stream-providers/internal/search"
+	"stv-providers/internal/model"
+	"stv-providers/internal/network"
+	"stv-providers/internal/search"
 )
 
 // Service lazily establishes the local guarded engine, keeping liveness usable
 // while Mullvad is unavailable. A changed tunnel requires a process restart.
 type Service struct {
-	mu           sync.Mutex
-	initializing chan struct{}
-	dnsAddress   string
-	budget       *network.AcceptanceBudget
-	engine       *search.Coordinator
-	guard        network.Guard
-	cleanup      func()
-	closed       bool
+	mu            sync.Mutex
+	initializing  chan struct{}
+	dnsAddress    string
+	budget        *network.AcceptanceBudget
+	engine        *search.Coordinator
+	guard         network.Guard
+	cleanup       func()
+	closed        bool
+	optionsOpener func(ctx context.Context, dnsAddress string, budget *network.AcceptanceBudget) (network.Options, error)
 }
 
 func NewService(dnsAddress string, budget *network.AcceptanceBudget) *Service {
 	return &Service{
-		dnsAddress:   dnsAddress,
-		budget:       budget,
-		initializing: make(chan struct{}, 1),
+		dnsAddress:    dnsAddress,
+		budget:        budget,
+		initializing:  make(chan struct{}, 1),
+		optionsOpener: network.LocalMullvadOptionsWithBudget,
 	}
 }
 
 func (s *Service) Check(ctx context.Context) error {
+	if s == nil {
+		return errors.New("service is nil")
+	}
+	if ctx == nil {
+		return errors.New("context cannot be nil")
+	}
 	s.mu.Lock()
 	engine, guard, closed := s.engine, s.guard, s.closed
 	s.mu.Unlock()
@@ -39,7 +47,10 @@ func (s *Service) Check(ctx context.Context) error {
 		return errors.New("service closed")
 	}
 	if engine != nil {
-		return guard.Check(ctx)
+		if guard != nil {
+			return guard.Check(ctx)
+		}
+		return nil
 	}
 	select {
 	case s.initializing <- struct{}{}:
@@ -57,9 +68,16 @@ func (s *Service) Check(ctx context.Context) error {
 		return errors.New("service closed")
 	}
 	if engine != nil {
-		return guard.Check(ctx)
+		if guard != nil {
+			return guard.Check(ctx)
+		}
+		return nil
 	}
-	options, err := network.LocalMullvadOptionsWithBudget(ctx, s.dnsAddress, s.budget)
+	opener := s.optionsOpener
+	if opener == nil {
+		opener = network.LocalMullvadOptionsWithBudget
+	}
+	options, err := opener(ctx, s.dnsAddress, s.budget)
 	if err != nil {
 		return errors.New("VPN unavailable")
 	}
@@ -78,20 +96,40 @@ func (s *Service) Check(ctx context.Context) error {
 	}
 	s.engine, s.cleanup, s.guard = engine, cleanup, options.Guard
 	s.mu.Unlock()
-	return options.Guard.Check(ctx)
+	if options.Guard != nil {
+		return options.Guard.Check(ctx)
+	}
+	return nil
 }
 
 // Ready additionally checks admission; prepaid work uses Check instead.
 func (s *Service) Ready(ctx context.Context) error {
+	if s == nil {
+		return errors.New("service is nil")
+	}
+	if ctx == nil {
+		return errors.New("context cannot be nil")
+	}
 	if err := s.Check(ctx); err != nil {
 		return err
 	}
-	return s.budget.Check()
+	if s.budget != nil {
+		return s.budget.Check()
+	}
+	return nil
 }
 
 func (s *Service) Resolve(ctx context.Context, lookup model.Lookup) (model.Selection, error) {
-	if err := s.budget.Check(); err != nil {
-		return model.Selection{}, err
+	if s == nil {
+		return model.Selection{}, errors.New("service is nil")
+	}
+	if ctx == nil {
+		return model.Selection{}, errors.New("context cannot be nil")
+	}
+	if s.budget != nil {
+		if err := s.budget.Check(); err != nil {
+			return model.Selection{}, err
+		}
 	}
 	if err := s.Check(ctx); err != nil {
 		return model.Selection{}, err
@@ -102,10 +140,16 @@ func (s *Service) Resolve(ctx context.Context, lookup model.Lookup) (model.Selec
 	if closed {
 		return model.Selection{}, errors.New("service closed")
 	}
+	if engine == nil {
+		return model.Selection{}, errors.New("engine unavailable")
+	}
 	return engine.Resolve(ctx, lookup)
 }
 
 func (s *Service) Close() {
+	if s == nil {
+		return
+	}
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()

@@ -13,8 +13,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"family-stream-providers/internal/model"
-	"family-stream-providers/internal/network"
+	"stv-providers/internal/model"
+	"stv-providers/internal/network"
 )
 
 func (a *Adapter) sources(ctx context.Context, body []byte, title model.Title) (model.AdapterResult, error) {

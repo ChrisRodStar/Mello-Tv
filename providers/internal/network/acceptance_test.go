@@ -30,6 +30,7 @@ func newAllowance(t *testing.T, bytes int64, requests int) string {
 	}
 	return path
 }
+
 func TestAcceptanceAllowancePersistsAcrossExclusiveOwners(t *testing.T) {
 	path := newAllowance(t, 10000, 20)
 	budget, err := OpenAcceptanceBudget(path)
@@ -65,12 +66,11 @@ func TestAcceptanceAllowancePersistsAcrossExclusiveOwners(t *testing.T) {
 		t.Fatal("stopped run continued")
 	}
 }
+
 func TestAcceptanceAllowanceRejectsIncompleteAndExpiredState(t *testing.T) {
 	for _, data := range []string{
 		`{"remaining_bytes":1,"remaining_requests":1,"deadline_ms":1}` + "\n",
-
 		`{"remaining_bytes":1,"remaining_requests":1,"deadline_ms":99999999999999}`,
-
 		"not json\n",
 	} {
 		path := filepath.Join(t.TempDir(), "allowance")
@@ -125,3 +125,44 @@ func TestFinalPrepaidRequestSurvivesCreditExhaustion(t *testing.T) {
 		t.Fatal("credit stop invalidated prepaid work")
 	}
 }
+
+func TestAcceptanceBudgetNilAndEdgeCases(t *testing.T) {
+	var nilBudget *AcceptanceBudget
+	if nilBudget.Check() != nil {
+		t.Fatal("nil budget Check should be nil")
+	}
+	if nilBudget.Take(100) != nil {
+		t.Fatal("nil budget Take should be nil")
+	}
+	if nilBudget.WorkCheck() != nil {
+		t.Fatal("nil budget WorkCheck should be nil")
+	}
+	ctx, cancel := nilBudget.Context(context.Background())
+	if ctx == nil || cancel == nil {
+		t.Fatal("nil budget Context should return valid context")
+	}
+	cancel()
+	if nilBudget.Close() != nil {
+		t.Fatal("nil budget Close should be nil")
+	}
+
+	path := newAllowance(t, 5000, 5)
+	budget, err := OpenAcceptanceBudget(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if budget.Take(0) == nil {
+		t.Fatal("zero byte debit must fail and stop budget")
+	}
+	if budget.Take(-50) == nil {
+		t.Fatal("negative byte debit must fail")
+	}
+
+	for range 3 {
+		if err := budget.Close(); err != nil {
+			t.Fatalf("idempotent Close failed: %v", err)
+		}
+	}
+}
+

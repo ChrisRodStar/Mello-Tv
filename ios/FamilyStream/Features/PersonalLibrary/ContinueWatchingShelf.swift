@@ -22,18 +22,23 @@ struct ContinueWatchingShelf: View {
                 ScrollView(.horizontal, showsIndicators: false) {
                     LazyHStack(alignment: .top, spacing: 14) {
                         ForEach(items, id: \.title.id) { item in
-                            LandscapeCard(
+                            ContinueWatchingCard(
                                 item: item,
                                 isPreparingPlayback: resolvingTitleID == item.title.id,
                                 isPlaybackDisabled: resolvingTitleID != nil,
                                 onPlay: { onPlay(item) },
                                 onInfo: { onInfo(item.title) }
                             )
+                            .containerRelativeFrame(.horizontal) { width, _ in
+                                min(360, max(220, width * 0.72))
+                            }
                         }
                     }
+                    .scrollTargetLayout()
                     .padding(.horizontal, 16)
                     .padding(.vertical, 4)
                 }
+                .scrollTargetBehavior(.viewAligned)
                 .scrollClipDisabled()
             }
         }

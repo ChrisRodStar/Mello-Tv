@@ -1,11 +1,12 @@
 package network
 
 import (
-	"family-stream-providers/internal/model"
 	"net/http"
 	"net/netip"
 	"net/url"
 	"testing"
+
+	"stv-providers/internal/model"
 )
 
 func BenchmarkPublicIP(b *testing.B) {
@@ -19,9 +20,8 @@ func BenchmarkPublicIP(b *testing.B) {
 		netip.MustParseAddr("2001:db8::1"),
 		netip.MustParseAddr("172.16.0.1"),
 	}
-	b.ResetTimer()
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		for _, ip := range ips {
 			_ = PublicIP(ip)
 		}
@@ -40,9 +40,8 @@ func BenchmarkValidateURL(b *testing.B) {
 	for i, raw := range rawURLs {
 		parsed[i], _ = url.Parse(raw)
 	}
-	b.ResetTimer()
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		for _, u := range parsed {
 			_ = ValidateURL(u)
 		}
@@ -69,9 +68,8 @@ func BenchmarkApplyContext(b *testing.B) {
 			},
 		},
 	}
-	b.ResetTimer()
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		header := make(http.Header)
 		_ = applyContext(header, targetURL, fetchContext)
 	}

@@ -1,8 +1,9 @@
 package cache
 
 import (
-	"family-stream-providers/internal/model"
 	"testing"
+
+	"stv-providers/internal/model"
 )
 
 func observationCandidate(identifier string, hostname string, accessible bool) model.Probed {
@@ -85,5 +86,16 @@ func TestMasterHandoffKeepsRenditionEndpointHistorySeparate(t *testing.T) {
 	}
 	if candidates[0].Observation.Reliability == nil || *candidates[0].Observation.Reliability != 1 || candidates[1].Observation.Reliability == nil || *candidates[1].Observation.Reliability != 0 {
 		t.Fatal("playable master URL merged distinct rendition endpoint histories")
+	}
+
+	if history.Len() != 2 {
+		t.Fatalf("expected 2 distinct endpoint histories, got %d", history.Len())
+	}
+
+	// Nil Observations safety
+	var nilObs *Observations
+	nilObs.RecordRound(candidates)
+	if nilObs.Len() != 0 {
+		t.Fatalf("expected 0 from nil Observations.Len(), got %d", nilObs.Len())
 	}
 }

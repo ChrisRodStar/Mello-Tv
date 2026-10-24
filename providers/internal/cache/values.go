@@ -18,9 +18,16 @@ type valueEntry[Value any] struct {
 	expires time.Time
 }
 
+// Get retrieves an unexpired cached value, or returns false if absent or expired.
 func (values *Values[Value]) Get(key string) (Value, bool) {
+	if values == nil {
+		var empty Value
+		return empty, false
+	}
+
 	values.mutex.Lock()
 	defer values.mutex.Unlock()
+
 	entry, found := values.entries[key]
 	if !found || !time.Now().Before(entry.expires) {
 		delete(values.entries, key)
@@ -30,33 +37,56 @@ func (values *Values[Value]) Get(key string) (Value, bool) {
 	return entry.value, true
 }
 
+// Put inserts a value with a maximum lifetime and enforces the given capacity limit.
 func (values *Values[Value]) Put(key string, value Value, lifetime time.Duration, capacity int) {
-	if capacity <= 0 || lifetime <= 0 {
+	if values == nil || capacity <= 0 || lifetime <= 0 {
 		return
 	}
+
 	values.mutex.Lock()
 	defer values.mutex.Unlock()
+
 	if values.entries == nil {
 		values.entries = make(map[string]valueEntry[Value])
 	}
+
 	now := time.Now()
 	for entryKey, entry := range values.entries {
 		if !now.Before(entry.expires) {
 			delete(values.entries, entryKey)
 		}
 	}
+
 	if _, replacing := values.entries[key]; !replacing && len(values.entries) >= capacity {
 		for entryKey := range values.entries {
 			delete(values.entries, entryKey)
 			break
 		}
 	}
-	values.entries[key] = valueEntry[Value]{value: value, expires: now.Add(lifetime)}
+
+	values.entries[key] = valueEntry[Value]{
+		value:   value,
+		expires: now.Add(lifetime),
+	}
 }
 
 // Delete invalidates a value after an access failure or explicit refresh.
 func (values *Values[Value]) Delete(key string) {
+	if values == nil {
+		return
+	}
 	values.mutex.Lock()
 	delete(values.entries, key)
 	values.mutex.Unlock()
 }
+
+// Len returns the current number of cached entries.
+func (values *Values[Value]) Len() int {
+	if values == nil {
+		return 0
+	}
+	values.mutex.Lock()
+	defer values.mutex.Unlock()
+	return len(values.entries)
+}
+

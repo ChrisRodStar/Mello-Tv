@@ -2,10 +2,10 @@ package vidcore
 
 import (
 	"context"
-	"family-stream-providers/internal/cache"
-	"family-stream-providers/internal/model"
-	"family-stream-providers/internal/network"
-	"family-stream-providers/internal/provider"
+	"stv-providers/internal/cache"
+	"stv-providers/internal/model"
+	"stv-providers/internal/network"
+	"stv-providers/internal/provider"
 	"strconv"
 	"time"
 )
@@ -63,6 +63,13 @@ func (a *Adapter) Resolve(ctx context.Context, lookup model.Lookup) (result mode
 	defer func() {
 		result.Duration = time.Since(startTime)
 	}()
+
+	if ctx == nil {
+		return result, model.Fail(model.Unsupported, "context", "nil context provided")
+	}
+	if err := ctx.Err(); err != nil {
+		return result, err
+	}
 
 	path, err := embedPath(lookup.Title)
 	if err != nil {

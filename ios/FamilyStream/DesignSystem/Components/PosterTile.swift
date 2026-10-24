@@ -3,6 +3,9 @@ import SwiftUI
 struct PosterTile: View {
     let title: MediaTitle
     var action: (() -> Void)? = nil
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    private var width: CGFloat { dynamicTypeSize.isAccessibilitySize ? 176 : 136 }
 
     var body: some View {
         if let action {
@@ -20,9 +23,8 @@ struct PosterTile: View {
 
     private var content: some View {
         poster
-            .frame(width: 126, height: 189)
-            .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
-            .appleNeumorphic(cornerRadius: 11, elevation: .medium)
+            .frame(width: width, height: width * 1.5)
+            .artworkCardSurface()
     }
 
     @ViewBuilder
@@ -37,12 +39,7 @@ struct PosterTile: View {
                 case .failure:
                     posterPlaceholder
                 case .empty:
-                    ZStack {
-                        FamilyStreamTheme.cardBackground
-                        ProgressView()
-                            .tint(.white.opacity(0.6))
-                            .scaleEffect(0.8)
-                    }
+                    FamilyStreamTheme.cardBackground
                 @unknown default:
                     posterPlaceholder
                 }
@@ -62,7 +59,7 @@ struct PosterTile: View {
 
                 Text(title.title)
                     .font(.caption2.weight(.medium))
-                    .foregroundStyle(.white.opacity(0.8))
+                    .foregroundStyle(FamilyStreamTheme.textSecondary)
                     .multilineTextAlignment(.center)
                     .lineLimit(3)
                     .padding(.horizontal, 8)
@@ -78,5 +75,22 @@ struct PosterTile: View {
             parts.append("Rated \(rating)")
         }
         return parts.joined(separator: ", ")
+    }
+}
+
+/// A restrained edge shared by artwork cards across browsing, search, and details.
+extension View {
+    func artworkCardSurface(cornerRadius: CGFloat = 16) -> some View {
+        overlay(alignment: .topTrailing) {
+            BrandTVMark()
+                .padding(10)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .strokeBorder(FamilyStreamTheme.subtleBorder, lineWidth: 0.5)
+                    .allowsHitTesting(false)
+            }
+            .shadow(color: .black.opacity(0.10), radius: 6, y: 3)
     }
 }

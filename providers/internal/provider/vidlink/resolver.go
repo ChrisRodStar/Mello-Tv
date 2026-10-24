@@ -10,9 +10,9 @@ import (
 	"strconv"
 	"time"
 
-	"family-stream-providers/internal/cache"
-	"family-stream-providers/internal/model"
-	"family-stream-providers/internal/network"
+	"stv-providers/internal/cache"
+	"stv-providers/internal/model"
+	"stv-providers/internal/network"
 )
 
 const (

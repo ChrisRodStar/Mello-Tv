@@ -2,12 +2,13 @@ package main
 
 import (
 	"context"
-	"family-stream-providers/internal/model"
-	"family-stream-providers/internal/network"
-	"family-stream-providers/internal/probe"
 	"fmt"
 	"net/url"
 	"time"
+
+	"stv-providers/internal/model"
+	"stv-providers/internal/network"
+	"stv-providers/internal/probe"
 )
 
 // diagnoseContinuity validates consecutive media segments at startup to verify stream continuity.

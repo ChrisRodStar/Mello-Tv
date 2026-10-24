@@ -6,6 +6,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net"
+	"os"
 	"os/exec"
 	"strings"
 	"syscall"
@@ -27,7 +29,14 @@ func mullvadTunnel(ctx context.Context) (string, error) {
 	checkCtx, cancel := context.WithTimeout(ctx, time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(checkCtx, "/usr/local/bin/mullvad", "status", "--json")
+	binPath := "/usr/local/bin/mullvad"
+	if _, err := os.Stat(binPath); err != nil {
+		if p, err := exec.LookPath("mullvad"); err == nil {
+			binPath = p
+		}
+	}
+
+	cmd := exec.CommandContext(checkCtx, binPath, "status", "--json")
 	output, err := cmd.Output()
 	if err != nil {
 		return "", errors.New("local Mullvad tunnel unavailable")
@@ -54,7 +63,11 @@ func boundControl(interfaceIndex int) func(string, string, syscall.RawConn) erro
 			level := syscall.IPPROTO_IP
 			option := 25
 
-			if strings.HasSuffix(networkProto, "6") {
+			host, _, err := net.SplitHostPort(address)
+			if err != nil {
+				host = address
+			}
+			if strings.HasSuffix(networkProto, "6") || strings.Contains(host, ":") {
 				level = syscall.IPPROTO_IPV6
 				option = 125
 			}

@@ -14,14 +14,14 @@ import (
 	"strings"
 	"time"
 
-	"family-stream-providers/internal/model"
-	"family-stream-providers/internal/network"
-	"family-stream-providers/internal/probe"
-	"family-stream-providers/internal/provider"
-	"family-stream-providers/internal/provider/vidcore"
-	"family-stream-providers/internal/provider/vidlink"
-	"family-stream-providers/internal/provider/vidsrc"
-	"family-stream-providers/internal/search"
+	"stv-providers/internal/model"
+	"stv-providers/internal/network"
+	"stv-providers/internal/probe"
+	"stv-providers/internal/provider"
+	"stv-providers/internal/provider/vidcore"
+	"stv-providers/internal/provider/vidlink"
+	"stv-providers/internal/provider/vidsrc"
+	"stv-providers/internal/search"
 )
 
 func main() {

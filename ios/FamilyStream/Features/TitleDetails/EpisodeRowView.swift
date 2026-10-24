@@ -4,12 +4,14 @@ struct EpisodeRowView: View {
     let episode: Episode
     let progress: WatchProgress?
     let isWatched: Bool
+    var isNextUp = false
     let hasManualWatchedMark: Bool
     var onPlay: () -> Void
     var onRewatch: () -> Void
     var onSetWatched: (Bool) -> Void
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isExpanded = false
 
     private var progressFraction: Double? {
@@ -21,10 +23,13 @@ struct EpisodeRowView: View {
 
     private var episodeMetadata: String {
         var values: [String] = []
-        if let runtime = episode.runtime, runtime > 0 { values.append("\(runtime) min") }
-        if isWatched { values.append("Watched") }
-        else if let fraction = progressFraction, fraction >= 0.05 {
-            values.append("Watching · \(Int((fraction * 100).rounded()))%")
+        if isWatched {
+            values.append("Watched")
+        } else if let progress, progressFraction != nil {
+            let minutes = max(1, ceil((progress.duration - progress.position) / 60))
+            values.append("\(minutes.formatted(.number.precision(.fractionLength(0)))) min remaining")
+        } else if let runtime = episode.runtime, runtime > 0 {
+            values.append("\(runtime) min")
         }
         return values.joined(separator: "  ·  ")
     }
@@ -39,7 +44,7 @@ struct EpisodeRowView: View {
             } else {
                 ViewThatFits(in: .horizontal) {
                     HStack(alignment: .top, spacing: 12) {
-                        preview.frame(width: 128)
+                        preview.frame(width: 144)
                         episodeCopy.frame(minWidth: 140, maxWidth: .infinity, alignment: .leading)
                     }
                     VStack(alignment: .leading, spacing: 12) {
@@ -57,7 +62,14 @@ struct EpisodeRowView: View {
                     .transition(.opacity)
             }
         }
+        .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .background(isNextUp ? FamilyStreamTheme.accent.opacity(0.08) : FamilyStreamTheme.cardBackground.opacity(0.45),
+                    in: RoundedRectangle(cornerRadius: 20))
+        .overlay {
+            RoundedRectangle(cornerRadius: 20)
+                .strokeBorder(isNextUp ? FamilyStreamTheme.accent.opacity(0.22) : FamilyStreamTheme.border.opacity(0.35), lineWidth: 0.5)
+        }
         .contextMenu { episodeActions }
     }
 
@@ -82,8 +94,8 @@ struct EpisodeRowView: View {
                 .aspectRatio(16.0 / 9, contentMode: .fit)
                 .overlay {
                     thumbnail
-                        .saturation(isWatched ? 0.25 : 1)
-                        .overlay(.black.opacity(isWatched ? 0.3 : 0.12))
+                        .saturation(isWatched ? 0.65 : 1)
+                        .overlay(.black.opacity(0.12))
                 }
                 .overlay {
                     PhosphorIcon("play", size: 20, weight: .fill)
@@ -105,7 +117,7 @@ struct EpisodeRowView: View {
                         .allowsHitTesting(false)
                     }
                 }
-                .clipShape(.rect(cornerRadius: 8))
+                .clipShape(.rect(cornerRadius: 12))
                 .contentShape(Rectangle())
         }
         .buttonStyle(CardScaleButtonStyle(scale: 0.98))
@@ -118,7 +130,17 @@ struct EpisodeRowView: View {
         VStack(alignment: .leading, spacing: 0) {
             Button(action: onPlay) {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("\(episode.number). \(episode.name)")
+                    HStack(spacing: 6) {
+                        Text("EPISODE \(episode.number)")
+                        if isNextUp {
+                            Circle().fill(FamilyStreamTheme.accent).frame(width: 4, height: 4)
+                            Text("UP NEXT")
+                        }
+                    }
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(isNextUp ? FamilyStreamTheme.accent : FamilyStreamTheme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                    Text(episode.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Episode \(episode.number)" : episode.name)
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(FamilyStreamTheme.text)
                         .fixedSize(horizontal: false, vertical: true)
@@ -138,21 +160,33 @@ struct EpisodeRowView: View {
             .accessibilityValue(episodeMetadata)
             .accessibilityActions { episodeActions }
 
-            if !episode.overview.isEmpty {
-                Button {
-                    withAnimation(.easeInOut(duration: 0.2)) { isExpanded.toggle() }
-                } label: {
-                    HStack(spacing: 8) {
-                        Text("Synopsis")
-                        PhosphorIcon(isExpanded ? "caret-up" : "caret-down", size: 12, weight: .bold)
+            HStack(spacing: 8) {
+                if !episode.overview.isEmpty {
+                    Button {
+                        withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) { isExpanded.toggle() }
+                    } label: {
+                        HStack(spacing: 5) {
+                            Text(isExpanded ? "Less" : "Synopsis")
+                            Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                                .font(.system(size: 9, weight: .semibold))
+                        }
+                        .font(.caption)
+                        .foregroundStyle(FamilyStreamTheme.textSecondary)
+                        .frame(minHeight: 44)
                     }
-                    .font(.caption)
-                    .foregroundStyle(FamilyStreamTheme.muted)
-                    .touchTarget()
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("\(isExpanded ? "Collapse" : "Expand") synopsis for episode \(episode.number)")
+                    .accessibilityValue(isExpanded ? "Expanded" : "Collapsed")
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel("\(isExpanded ? "Collapse" : "Expand") synopsis for episode \(episode.number)")
-                .accessibilityValue(isExpanded ? "Expanded" : "Collapsed")
+                Spacer(minLength: 0)
+                Menu { episodeActions } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(FamilyStreamTheme.textSecondary)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Circle())
+                }
+                .accessibilityLabel("Options for episode \(episode.number)")
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)

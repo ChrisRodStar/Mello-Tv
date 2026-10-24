@@ -13,7 +13,7 @@ import (
 )
 
 // The privileged container VPN owner publishes this short-lived, root-owned
-// attestation only while firewall, interface, route and WireGuard handshake agree.
+// attestation only while firewall, interface, route, and WireGuard handshake agree.
 // Source processes cannot write the directory or modify the network namespace.
 func mullvadTunnel(ctx context.Context) (string, error) {
 	if err := ctx.Err(); err != nil {
@@ -47,6 +47,9 @@ func mullvadTunnel(ctx context.Context) (string, error) {
 
 func boundControl(interfaceIndex int) func(string, string, syscall.RawConn) error {
 	return func(networkProto, address string, raw syscall.RawConn) error {
+		if interfaceIndex <= 0 {
+			return errors.New("invalid tunnel interface")
+		}
 		actual, err := net.InterfaceByIndex(interfaceIndex)
 		if err != nil || actual.Name != "wg0" || actual.Flags&net.FlagUp == 0 {
 			return errors.New("VPN interface unavailable")

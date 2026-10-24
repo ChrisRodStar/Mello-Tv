@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"testing"
 
-	"family-stream-providers/internal/network"
+	"stv-providers/internal/network"
 )
 
 func TestAttestationUsesExplicitFamilyEndpoints(t *testing.T) {

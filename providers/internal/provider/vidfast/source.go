@@ -14,9 +14,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"family-stream-providers/internal/cache"
-	"family-stream-providers/internal/model"
-	"family-stream-providers/internal/network"
+	"stv-providers/internal/cache"
+	"stv-providers/internal/model"
+	"stv-providers/internal/network"
 )
 
 func normalize(body []byte, title model.Title, serverName string) (model.Candidate, error) {

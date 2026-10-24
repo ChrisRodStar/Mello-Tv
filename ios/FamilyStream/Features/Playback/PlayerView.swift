@@ -37,6 +37,7 @@ struct PlayerView: View {
                 .id(activeRequest.id)
         }
         .background { PlaybackLandscapeLock().allowsHitTesting(false) }
+        .preferredColorScheme(.dark)
         .onDisappear { nextPreparation.cancel() }
     }
 }
@@ -111,7 +112,7 @@ private struct PlaybackSessionView: View {
     @State private var loadingTracks = false
 
     private let preparedPlayback = PreparedPlaybackService.shared
-    private var isPreparing: Bool { errorMessage == nil && !recordedFirstFrame && (isLoading || intendsToPlay) }
+    private var isPreparing: Bool { errorMessage == nil && !hasStartedPlayback && (isLoading || intendsToPlay) }
     private var controlsVisible: Bool { isPreparing || errorMessage != nil || (!isLocked && showControls) }
     private var canSeek: Bool { duration.isFinite && duration > 0 && hasStartedPlayback && !isLocked }
 
@@ -152,12 +153,13 @@ private struct PlaybackSessionView: View {
                         .accessibilityAction(named: "Forward 10 seconds") { seek(by: 10) }
                 }
 
-                preparationArtwork
-                    .opacity(isPreparing ? 1 : 0)
-                    .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: isPreparing)
-
                 if controlsVisible {
-                    Color.black.opacity(0.28)
+                    LinearGradient(stops: [
+                        .init(color: .black.opacity(0.46), location: 0),
+                        .init(color: .black.opacity(0.08), location: 0.34),
+                        .init(color: .black.opacity(0.08), location: 0.58),
+                        .init(color: .black.opacity(0.62), location: 1)
+                    ], startPoint: .top, endPoint: .bottom)
                         .ignoresSafeArea()
                         .allowsHitTesting(false)
                 }
@@ -201,7 +203,7 @@ private struct PlaybackSessionView: View {
                             .font(.subheadline.weight(.semibold))
                             .padding(.horizontal, 20)
                             .frame(minHeight: 48)
-                            .background(.black.opacity(0.65), in: Capsule())
+                            .playerGlass(in: Capsule())
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
@@ -224,7 +226,7 @@ private struct PlaybackSessionView: View {
                         }
                         .font(.subheadline.weight(.semibold))
                         .padding(16)
-                        .background(.black.opacity(0.65), in: Capsule())
+                        .playerGlass(in: Capsule())
                         if feedback.direction < 0 { Spacer() }
                     }
                     .padding(.horizontal, 24)
@@ -300,9 +302,10 @@ private struct PlaybackSessionView: View {
     private var header: some View {
         HStack(spacing: 12) {
             Button(action: dismiss) {
-                PhosphorIcon("x", size: 20, weight: .bold)
+                PhosphorIcon("x", size: 17, weight: .bold)
                     .frame(width: 48, height: 48)
-                    .contentShape(Rectangle())
+                    .playerGlass(in: Circle())
+                    .contentShape(Circle())
             }
             .accessibilityLabel("Close player")
 
@@ -313,7 +316,7 @@ private struct PlaybackSessionView: View {
                 if request.type == .tv, let season = request.season, let episode = request.episode {
                     Text("S\(season) · E\(episode)\(request.episodeTitle.map { " · \($0)" } ?? "")")
                         .font(.caption)
-                        .foregroundStyle(FamilyStreamTheme.textSecondary)
+                        .foregroundStyle(.white.opacity(0.70))
                         .lineLimit(1)
                 }
             }
@@ -329,9 +332,10 @@ private struct PlaybackSessionView: View {
                     hideControlsTask?.cancel()
                     revealUnlockControl()
                 } label: {
-                    PhosphorIcon("lock-open", size: 22)
+                    PhosphorIcon("lock-open", size: 20)
                         .frame(width: 48, height: 48)
-                        .contentShape(Rectangle())
+                        .playerGlass(in: Circle())
+                        .contentShape(Circle())
                 }
                 .accessibilityLabel("Lock playback controls")
             }
@@ -339,37 +343,19 @@ private struct PlaybackSessionView: View {
         .buttonStyle(.plain)
     }
 
-    private var preparationArtwork: some View {
-        // Read the full-screen bounds here, after extending through the safe areas.
-        // The player is landscape-only; never substitute portrait poster artwork.
-        GeometryReader { artworkGeometry in
-            AsyncImage(
-                url: request.catalogTitle.backdropURL,
-                transaction: Transaction(animation: reduceMotion ? nil : .easeOut(duration: 0.18))
-            ) { phase in
-                ZStack {
-                    Color.black
-                    if let image = phase.image {
-                        image.resizable().scaledToFill()
-                    }
-                }
-                .frame(width: artworkGeometry.size.width, height: artworkGeometry.size.height)
-                .clipped()
-                .transition(.opacity)
-            }
-            .saturation(0.15)
-            .overlay(Color.black.opacity(0.2))
-        }
-        .ignoresSafeArea()
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
-    }
-
     private var preparationOverlay: some View {
-        ProgressView()
-            .tint(.white)
-            .controlSize(.large)
-            .accessibilityLabel("Loading video")
+        VStack(spacing: 14) {
+            ProgressView().tint(.white)
+            Text(isLoading ? "Finding a playable source" : "Preparing video")
+                .font(.subheadline.weight(.medium))
+            Text("\(request.title)")
+                .font(.caption)
+                .foregroundStyle(FamilyStreamTheme.muted)
+                .lineLimit(2)
+        }
+        .multilineTextAlignment(.center)
+        .padding(.horizontal, 32)
+        .accessibilityElement(children: .combine)
     }
 
     private func errorOverlay(_ message: String) -> some View {
@@ -395,7 +381,7 @@ private struct PlaybackSessionView: View {
                 .foregroundStyle(.black)
                 .padding(.horizontal, 24)
                 .frame(minHeight: 44)
-                .background(.white, in: RoundedRectangle(cornerRadius: 10))
+                .background(.white, in: Capsule())
         }
         .frame(maxWidth: 360)
         .padding(24)
@@ -407,11 +393,12 @@ private struct PlaybackSessionView: View {
                 if isBuffering && intendsToPlay {
                     ProgressView().tint(.white)
                 } else {
-                    PhosphorIcon(intendsToPlay ? "pause" : "play", size: 48, weight: .fill)
+                    PhosphorIcon(intendsToPlay ? "pause" : "play", size: 34, weight: .fill)
                 }
             }
-            .frame(width: 68, height: 68)
-            .contentShape(Rectangle())
+            .frame(width: 76, height: 76)
+            .playerGlass(in: Circle())
+            .contentShape(Circle())
         }
         .buttonStyle(.plain)
         .accessibilityLabel(intendsToPlay ? "Pause" : "Play")
@@ -503,7 +490,7 @@ private struct PlaybackSessionView: View {
                 }
 
                 let position = isSeeking ? sliderValue : currentTime
-                Text(formatSeconds(max(0, duration - position)))
+                Text("−" + formatSeconds(max(0, duration - position)))
                     .font(.caption.monospacedDigit())
                     .frame(minWidth: 44, alignment: .trailing)
                     .accessibilityLabel("\(formatSeconds(max(0, duration - position))) remaining")
@@ -524,11 +511,11 @@ private struct PlaybackSessionView: View {
 
     private func playbackActions(compact: Bool) -> some View {
         HStack(spacing: compact ? 8 : 16) {
-            actionButton(compact ? "\(speedLabel)×" : "Speed (\(speedLabel)×)",
-                         icon: "speedometer", compact: compact) { openPanel(.speed) }
+            actionButton("\(speedLabel)×", icon: "speedometer", compact: compact) { openPanel(.speed) }
+                .accessibilityLabel("Playback speed, \(speedLabel) times")
             if authorizedSource?.format == "hls", (authorizedSource?.availableHeights.count ?? 0) > 1 {
-                actionButton(compact ? playbackQuality.label : "Quality (\(playbackQuality.label))",
-                             icon: "stack", compact: compact) { openPanel(.quality) }
+                actionButton(playbackQuality.label, icon: "stack", compact: compact) { openPanel(.quality) }
+                    .accessibilityLabel("Maximum quality, \(playbackQuality.label)")
             }
             if request.type == .tv {
                 actionButton("Episodes", icon: "stack", compact: compact) { openPanel(.episodes) }
@@ -550,7 +537,10 @@ private struct PlaybackSessionView: View {
             }
         }
         .buttonStyle(.plain)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 2)
         .frame(maxWidth: .infinity)
+        .playerGlass(in: Capsule())
     }
 
     private func actionButton(_ title: String, icon: String, compact: Bool,
@@ -598,13 +588,9 @@ private struct PlaybackSessionView: View {
             }
             .padding(.horizontal, 18)
             .padding(.bottom, 18)
-            .padding(.top, 6)
+            .padding(.top, 16)
             .frame(width: min(panel == .speed ? 420 : 520, max(0, size.width - 32)))
-            .background(FamilyStreamTheme.cardBackground, in: RoundedRectangle(cornerRadius: 18))
-            .overlay {
-                RoundedRectangle(cornerRadius: 18).strokeBorder(FamilyStreamTheme.border, lineWidth: 0.5)
-                    .allowsHitTesting(false)
-            }
+            .playerGlass(in: RoundedRectangle(cornerRadius: 24, style: .continuous))
             .shadow(color: .black.opacity(0.3), radius: 16, y: 8)
             .padding(.bottom, 12)
             .accessibilityElement(children: .contain)
@@ -1396,7 +1382,7 @@ private struct PlayerSeekSlider: UIViewRepresentable {
 private final class SlimSeekSlider: UISlider {
     override func trackRect(forBounds bounds: CGRect) -> CGRect {
         let track = super.trackRect(forBounds: bounds)
-        return CGRect(x: track.minX, y: bounds.midY - 1.5, width: track.width, height: 3)
+        return CGRect(x: track.minX, y: bounds.midY - 2, width: track.width, height: 4)
     }
 }
 
@@ -1504,7 +1490,7 @@ private struct PlaybackEpisodesSheet: View {
                         selectedSeason = season.number
                     } label: {
                         if season.number == selectedSeason {
-                            Label(seasonTitle(season), image: "check-bold")
+                            Label(seasonTitle(season), systemImage: "checkmark")
                         } else {
                             Text(seasonTitle(season))
                         }
@@ -1520,7 +1506,7 @@ private struct PlaybackEpisodesSheet: View {
                 }
                 .padding(.horizontal, 18)
                 .frame(minHeight: 48)
-                .background(.white.opacity(0.1), in: Capsule())
+                .playerGlass(in: Capsule())
                 .contentShape(Rectangle())
             }
             .disabled(seasons.isEmpty)
@@ -1531,8 +1517,9 @@ private struct PlaybackEpisodesSheet: View {
                 .foregroundStyle(FamilyStreamTheme.muted)
                 .lineLimit(1)
             Button { dismiss() } label: {
-                PhosphorIcon("x", size: 18, weight: .bold)
-                    .touchTarget(minWidth: 48, minHeight: 48)
+                PhosphorIcon("x", size: 16, weight: .bold)
+                    .frame(width: 48, height: 48)
+                    .playerGlass(in: Circle())
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Close episodes")
@@ -1616,10 +1603,10 @@ private struct PlaybackEpisodesSheet: View {
                     }
                     .allowsHitTesting(false)
                 }
-                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .artworkCardSurface()
                 .overlay {
                     if isCurrent {
-                        RoundedRectangle(cornerRadius: 8)
+                        RoundedRectangle(cornerRadius: 16)
                             .strokeBorder(FamilyStreamTheme.accent, lineWidth: 1.5)
                     }
                 }
@@ -2036,4 +2023,15 @@ private enum PlaybackQuality: Int, CaseIterable, Identifiable {
     var id: Int { rawValue }
     var height: Int { rawValue }
     var label: String { self == .automatic ? "Auto" : "\(rawValue)p" }
+}
+
+private extension View {
+    @ViewBuilder
+    func playerGlass<S: Shape>(in shape: S) -> some View {
+        if #available(iOS 26.0, *) {
+            self.glassEffect(.regular, in: shape)
+        } else {
+            self.background(.ultraThinMaterial, in: shape)
+        }
+    }
 }

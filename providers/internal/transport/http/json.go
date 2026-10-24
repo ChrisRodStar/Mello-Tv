@@ -27,14 +27,17 @@ func uniqueJSON(data []byte) bool {
 		}
 		switch delimiter {
 		case '{':
-			keys := make(map[string]bool)
+			keys := make(map[string]struct{}, 8)
 			for decoder.More() {
 				key, err := decoder.Token()
 				name, ok := key.(string)
-				if err != nil || !ok || name != strings.ToLower(name) || keys[name] {
+				if err != nil || !ok || hasUppercase(name) || name != strings.ToLower(name) {
 					return false
 				}
-				keys[name] = true
+				if _, exists := keys[name]; exists {
+					return false
+				}
+				keys[name] = struct{}{}
 				if !value(depth + 1) {
 					return false
 				}
@@ -56,6 +59,15 @@ func uniqueJSON(data []byte) bool {
 	}
 	_, err := decoder.Token()
 	return err == io.EOF
+}
+
+func hasUppercase(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] >= 'A' && s[i] <= 'Z' {
+			return true
+		}
+	}
+	return false
 }
 
 // responseFits bounds encoder working memory before encoding. It conservatively
@@ -117,7 +129,11 @@ func responseFits(value any) bool {
 				if name == "-" || !field.IsExported() {
 					continue
 				}
-				if !charge(6*int64(len(field.Name))+4) || !visit(current.Field(index)) {
+				keyLen := len(field.Name)
+				if name != "" {
+					keyLen = len(name)
+				}
+				if !charge(6*int64(keyLen)+4) || !visit(current.Field(index)) {
 					return false
 				}
 			}

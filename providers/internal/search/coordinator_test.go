@@ -3,8 +3,8 @@ package search
 import (
 	"context"
 	"errors"
-	"family-stream-providers/internal/model"
-	"family-stream-providers/internal/provider"
+	"stv-providers/internal/model"
+	"stv-providers/internal/provider"
 	"runtime"
 	"sync/atomic"
 	"testing"
@@ -253,5 +253,119 @@ func TestCancelledFlightRetainsAdmissionUntilAdapterJoins(t *testing.T) {
 	}})
 	if model.Category(err) != model.Unavailable || adapter.calls.Load() != 1 {
 		t.Fatal("cancelled but unjoined work escaped flight admission")
+	}
+}
+
+func TestCoordinatorNilGuards(t *testing.T) {
+	var nilCoord *Coordinator
+	if _, err := nilCoord.Resolve(context.Background(), model.Lookup{}); err == nil {
+		t.Fatal("expected error calling Resolve on nil coordinator")
+	}
+	nilCoord.Close() // Should not panic
+
+	reg, err := provider.NewRegistry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	coord, err := New(reg, syntheticProber{}, DefaultLimits(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer coord.Close()
+
+	var nilCtx context.Context
+	if _, err := coord.Resolve(nilCtx, model.Lookup{Title: model.Title{Type: model.Movie, TMDBID: 1}}); err == nil {
+		t.Fatal("expected error calling Resolve with nil context")
+	}
+}
+
+func BenchmarkRequestKey(b *testing.B) {
+	lookup := model.Lookup{
+		Title: model.Title{
+			Type:   model.Movie,
+			TMDBID: 27205,
+		},
+		ContextKey: "user-session-12345",
+	}
+
+	b.ReportAllocs()
+	for b.Loop() {
+		_, err := requestKey(lookup)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkCloneLookup(b *testing.B) {
+	season, episode := 1, 1
+	malID := int64(21)
+	lookup := model.Lookup{
+		Title: model.Title{
+			Type:          model.TV,
+			TMDBID:        60625,
+			IMDbID:        "tt2861424",
+			MyAnimeListID: &malID,
+			Season:        &season,
+			Episode:       &episode,
+		},
+		Preferences: model.Preferences{
+			AudioLanguages:    []string{"en", "ja"},
+			SubtitleLanguages: []string{"en"},
+			RequireAudio:      true,
+		},
+		Device: model.Device{
+			Formats:              []model.Format{model.HLS, model.MP4},
+			Codecs:               []string{"avc1", "hvc1"},
+			MaxHeight:            1080,
+			SupportsEncryptedHLS: true,
+		},
+		ContextKey: "benchmark-key",
+	}
+
+	b.ReportAllocs()
+	for b.Loop() {
+		cloned := cloneLookup(lookup)
+		if cloned.Title.TMDBID != 60625 {
+			b.Fatal("clone mismatch")
+		}
+	}
+}
+
+func BenchmarkCloneSelection(b *testing.B) {
+	rate := 6_000_000.0
+	sel := model.Selection{
+		Version: model.ContractVersion,
+		Selected: &model.Ranked{
+			Candidate: model.Probed{
+				Source: model.Candidate{
+					ID:       "vidlink:test",
+					Provider: model.VidLink,
+					URL:      "https://media.example.com/master.m3u8",
+					Format:   model.HLS,
+				},
+				Observation: model.Observation{
+					Accessible:  true,
+					Format:      model.HLS,
+					DeliveryBPS: &rate,
+				},
+			},
+			Reasons: []string{"top tier"},
+			Score:   95.5,
+		},
+		Rejected: map[string]string{
+			"vidsrc:test": "unsupported codec",
+		},
+		Providers: []model.ProviderStatus{
+			{Provider: model.VidLink, CandidateCount: 1, Duration: 50 * time.Millisecond},
+		},
+	}
+
+	b.ReportAllocs()
+	for b.Loop() {
+		cloned := cloneSelection(sel)
+		if cloned.Selected == nil {
+			b.Fatal("clone mismatch")
+		}
 	}
 }

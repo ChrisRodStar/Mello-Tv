@@ -1,11 +1,13 @@
 package selection
 
 import (
-	"family-stream-providers/internal/model"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"time"
+
+	"stv-providers/internal/model"
 )
 
 // StartupReady never promotes labels or unknown delivery into startup evidence.
@@ -88,7 +90,7 @@ func compatibleStartupCodecs(first, second []string) bool {
 		sort.Strings(result)
 		return result
 	}
-	return reflect.DeepEqual(families(first), families(second))
+	return slices.Equal(families(first), families(second))
 }
 
 const adaptiveReason = "verified same-source adaptive rendition available"

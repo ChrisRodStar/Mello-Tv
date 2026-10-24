@@ -1,11 +1,12 @@
 package selection
 
 import (
-	"family-stream-providers/internal/model"
 	"math"
 	"slices"
 	"strings"
 	"time"
+
+	"stv-providers/internal/model"
 )
 
 // containsFormat checks if the format slice contains the specified format.
@@ -26,21 +27,35 @@ func languageRank(preferredLanguages []string, availableTracks []model.Track, ki
 }
 
 // collectTracks aggregates tracks from both the provider metadata and HLS manifest, filtering by variant group.
+// Pre-allocates slice capacity to avoid intermediate allocations and reduce garbage collector pressure.
 func collectTracks(probed model.Probed) []model.Track {
-	var combined []model.Track
-	allTracks := append(append([]model.Track(nil), probed.Source.Metadata.Tracks...), probed.Observation.Metadata.Tracks...)
+	srcTracks := probed.Source.Metadata.Tracks
+	obsTracks := probed.Observation.Metadata.Tracks
+	total := len(srcTracks) + len(obsTracks)
+	if total == 0 {
+		return nil
+	}
 
+	combined := make([]model.Track, 0, total)
 	variant := probed.Observation.Variant
-	for _, track := range allTracks {
+
+	filterTrack := func(track model.Track) {
 		if variant != nil && track.Group != "" {
 			if track.Kind == "audio" && track.Group != variant.AudioGroup {
-				continue
+				return
 			}
 			if track.Kind == "subtitles" && track.Group != variant.SubtitleGroup {
-				continue
+				return
 			}
 		}
 		combined = append(combined, track)
+	}
+
+	for _, track := range srcTracks {
+		filterTrack(track)
+	}
+	for _, track := range obsTracks {
+		filterTrack(track)
 	}
 
 	return combined
@@ -90,6 +105,9 @@ func Eligible(lookup model.Lookup, probed model.Probed) (bool, string) {
 			return false, "resolution unknown"
 		}
 	} else {
+		if *variant.Height <= 0 {
+			return false, "invalid resolution height"
+		}
 		if lookup.Device.MaxHeight > 0 && *variant.Height > lookup.Device.MaxHeight {
 			return false, "device resolution limit"
 		}
@@ -106,8 +124,10 @@ func Eligible(lookup model.Lookup, probed model.Probed) (bool, string) {
 	} else {
 		for _, codec := range variant.Codecs {
 			isSupported := false
+			codecLower := strings.ToLower(codec)
 			for _, allowedCodec := range lookup.Device.Codecs {
-				if codec == allowedCodec || strings.HasPrefix(codec, allowedCodec+".") {
+				allowedLower := strings.ToLower(allowedCodec)
+				if codecLower == allowedLower || strings.HasPrefix(codecLower, allowedLower+".") {
 					isSupported = true
 					break
 				}

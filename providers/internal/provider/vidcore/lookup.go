@@ -4,8 +4,8 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
-	"family-stream-providers/internal/model"
-	"family-stream-providers/internal/network"
+	"stv-providers/internal/model"
+	"stv-providers/internal/network"
 	"fmt"
 	"net/http"
 	"net/http/cookiejar"
@@ -64,13 +64,13 @@ func (a *Adapter) resolveNative(
 		},
 	}
 
-	postProtocolAction := func(action, data string) (network.Response, error) {
+	postProtocolAction := func(reqCtx context.Context, action, data string) (network.Response, error) {
 		if len(data) == 0 || len(data) > 128*1024 || !actionNamePattern.MatchString(action) || !actionDataPattern.MatchString(data) {
 			return network.Response{}, protocolError("invalid encoded protocol path")
 		}
 
 		targetURL := origin + proto.Base + "/" + action + "/" + data
-		resp, err := a.client.Fetch(ctx, network.Request{
+		resp, err := a.client.Fetch(reqCtx, network.Request{
 			URL:     targetURL,
 			Method:  "POST",
 			Context: fetchContext,
@@ -78,7 +78,7 @@ func (a *Adapter) resolveNative(
 			Limit:   2_500_000,
 		})
 		if err != nil {
-			return resp, upstreamError(ctx, action, err)
+			return resp, upstreamError(reqCtx, action, err)
 		}
 
 		if resp.Status != http.StatusOK {
@@ -99,7 +99,7 @@ func (a *Adapter) resolveNative(
 		return result, err
 	}
 
-	challengeResp, err := postProtocolAction(proto.ChallengeAction, challengeStr)
+	challengeResp, err := postProtocolAction(ctx, proto.ChallengeAction, challengeStr)
 	if err != nil {
 		return result, err
 	}
@@ -111,7 +111,7 @@ func (a *Adapter) resolveNative(
 	}
 
 	// Step 3: Fetch and decrypt server list.
-	listResp, err := postProtocolAction(proto.ListAction, ticketStr)
+	listResp, err := postProtocolAction(ctx, proto.ListAction, ticketStr)
 	if err != nil {
 		return result, err
 	}
@@ -147,7 +147,8 @@ func (a *Adapter) resolveNative(
 	outcomes := make([]unlockOutcome, len(servers))
 	var cursor atomic.Int32
 	var workers sync.WaitGroup
-	for workerIndex := 0; workerIndex < min(3, len(servers)); workerIndex++ {
+	workerCount := min(8, len(servers))
+	for workerIndex := 0; workerIndex < workerCount; workerIndex++ {
 		workers.Add(1)
 		go func() {
 			defer workers.Done()
@@ -160,7 +161,9 @@ func (a *Adapter) resolveNative(
 				if server.Data == "" {
 					continue
 				}
-				unlockResp, unlockErr := postProtocolAction(proto.UnlockAction, server.Data)
+				unlockCtx, cancelUnlock := context.WithTimeout(ctx, 1500*time.Millisecond)
+				unlockResp, unlockErr := postProtocolAction(unlockCtx, proto.UnlockAction, server.Data)
+				cancelUnlock()
 				if unlockErr != nil {
 					outcomes[index].err = unlockErr
 					continue
@@ -369,7 +372,7 @@ func normalizeSource(plaintext []byte, title model.Title, serverName string) (mo
 			File  string `json:"file"`
 			Label string `json:"label"`
 		}
-		if err := json.Unmarshal(rawTracks, &tracks); err != nil || len(tracks) > 64 {
+		if err := json.Unmarshal(rawTracks, &tracks); err != nil || len(tracks) > 256 {
 			return model.Candidate{}, protocolError("invalid source tracks")
 		}
 		for _, track := range tracks {
@@ -417,7 +420,10 @@ func (a *Adapter) promoteMaster(ctx context.Context, candidate model.Candidate) 
 	streamURL.Path = streamURL.Path[:sdIndex] + "/master.m3u8"
 	streamURL.RawPath = ""
 
-	resp, err := a.client.Fetch(ctx, network.Request{
+	promoteCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+
+	resp, err := a.client.Fetch(promoteCtx, network.Request{
 		URL:     streamURL.String(),
 		Context: candidate.Context,
 		Limit:   256 * 1024,

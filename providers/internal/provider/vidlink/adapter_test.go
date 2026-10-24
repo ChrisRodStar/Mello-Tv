@@ -15,9 +15,9 @@ import (
 	"testing"
 	"time"
 
-	"family-stream-providers/internal/model"
-	"family-stream-providers/internal/network"
-	"family-stream-providers/internal/provider"
+	"stv-providers/internal/model"
+	"stv-providers/internal/network"
+	"stv-providers/internal/provider"
 	"golang.org/x/crypto/nacl/secretbox"
 )
 
@@ -54,6 +54,11 @@ func TestTokenMessageAndPublicAlgorithm(t *testing.T) {
 }
 
 func TestContextAndInputFailures(t *testing.T) {
+	var nilCtx context.Context
+	if _, err := New(nil).Resolve(nilCtx, model.Lookup{}); err == nil {
+		t.Fatal("nil context accepted")
+	}
+
 	cancelledContext, cancel := context.WithCancel(context.Background())
 	cancel()
 	_, err := New(nil).Resolve(cancelledContext, model.Lookup{})

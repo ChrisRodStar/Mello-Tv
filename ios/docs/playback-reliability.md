@@ -64,7 +64,7 @@ and a second title; neither represents actual provider video. Its API data and
 progress are local synthetic state, reset on process relaunch.
 
 A passing synthetic player flow confirms client control/lifecycle behavior. It
-does not prove production deployment, VPN behavior, provider availability, device
+does not prove Server deployment, VPN behavior, provider availability, device
 buffering, audio/subtitles or an instant start for arbitrary cold titles.
 
 ## Verification recorded in this change

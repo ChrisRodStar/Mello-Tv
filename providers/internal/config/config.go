@@ -2,15 +2,17 @@
 package config
 
 import (
-	"family-stream-providers/internal/model"
-	"family-stream-providers/internal/network"
-	"family-stream-providers/internal/probe"
-	"family-stream-providers/internal/provider"
-	"family-stream-providers/internal/provider/vidcore"
-	"family-stream-providers/internal/provider/vidfast"
-	"family-stream-providers/internal/provider/vidlink"
-	"family-stream-providers/internal/provider/vidsrc"
-	"family-stream-providers/internal/search"
+	"sync"
+
+	"stv-providers/internal/model"
+	"stv-providers/internal/network"
+	"stv-providers/internal/probe"
+	"stv-providers/internal/provider"
+	"stv-providers/internal/provider/vidcore"
+	"stv-providers/internal/provider/vidfast"
+	"stv-providers/internal/provider/vidlink"
+	"stv-providers/internal/provider/vidsrc"
+	"stv-providers/internal/search"
 )
 
 // NewEngine wires all four native providers into the registry
@@ -46,9 +48,12 @@ func NewEngine(options network.Options, diagnostic func(model.ProviderStatus)) (
 		return nil, nil, err
 	}
 
+	var once sync.Once
 	cleanup := func() {
-		coordinator.Close()
-		client.Close()
+		once.Do(func() {
+			coordinator.Close()
+			client.Close()
+		})
 	}
 
 	return coordinator, cleanup, nil

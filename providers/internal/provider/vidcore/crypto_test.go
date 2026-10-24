@@ -6,7 +6,7 @@ import (
 	"crypto/cipher"
 	"encoding/base64"
 	"encoding/binary"
-	"family-stream-providers/internal/model"
+	"stv-providers/internal/model"
 	"testing"
 )
 

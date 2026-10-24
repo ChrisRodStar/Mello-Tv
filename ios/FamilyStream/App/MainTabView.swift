@@ -2,6 +2,8 @@ import SwiftUI
 
 struct MainTabView: View {
     @State private var selection: AppTab = .home
+    @State private var presentedDestination: TopDestination?
+    @State private var switchProfileAfterDismissal = false
     @State private var libraryStore: LibraryStore
 
     let api: FamilyStreamAPI
@@ -64,19 +66,6 @@ struct MainTabView: View {
             NavigationStack {
                 CatalogView(
                     api: api,
-                    category: .home,
-                    profileID: activeProfileID,
-                    libraryStore: libraryStore
-                )
-            }
-            .tabItem {
-                Label("Home", image: selection == .home ? "house-fill" : "house")
-            }
-            .tag(AppTab.home)
-
-            NavigationStack {
-                CatalogView(
-                    api: api,
                     category: .movies,
                     profileID: activeProfileID,
                     libraryStore: libraryStore
@@ -86,6 +75,19 @@ struct MainTabView: View {
                 Label("Movies", image: selection == .movies ? "film-slate-fill" : "film-slate")
             }
             .tag(AppTab.movies)
+
+            NavigationStack {
+                CatalogView(
+                    api: api,
+                    category: .home,
+                    profileID: activeProfileID,
+                    libraryStore: libraryStore
+                )
+            }
+            .tabItem {
+                Label("Home", image: selection == .home ? "house-fill" : "house")
+            }
+            .tag(AppTab.home)
 
             NavigationStack {
                 CatalogView(
@@ -100,29 +102,96 @@ struct MainTabView: View {
             }
             .tag(AppTab.tv)
 
-            SearchView(
-                api: api,
-                profileID: activeProfileID,
-                libraryStore: libraryStore
-            )
-            .tabItem {
-                Label("Search", image: selection == .search ? "magnifying-glass-bold" : "magnifying-glass")
-            }
-            .tag(AppTab.search)
-
-            ProfilePageView(
-                profileStore: profileStore,
-                libraryStore: libraryStore,
-                onBrowseTitles: {
-                    selection = .home
+        }
+        .overlay(alignment: .top) {
+            HStack {
+                Button {
+                    presentedDestination = .profile
+                } label: {
+                    if #available(iOS 26.0, *) {
+                        profileIcon
+                            .glassEffect(.regular.interactive(), in: Circle())
+                    } else {
+                        profileIcon
+                            .background(.regularMaterial, in: Circle())
+                            .overlay {
+                                Circle().strokeBorder(FamilyStreamTheme.subtleBorder, lineWidth: 0.5)
+                            }
+                    }
                 }
-            )
-            .tabItem {
-                Label("Profile", image: selection == .profile ? "user-circle-fill" : "user-circle")
+                .accessibilityLabel("Profile")
+                .accessibilityValue(profileStore.activeProfile?.name ?? "No profile selected")
+
+                Spacer()
+
+                Button {
+                    presentedDestination = .search
+                } label: {
+                    if #available(iOS 26.0, *) {
+                        searchIcon
+                            .glassEffect(.regular.interactive(), in: Circle())
+                    } else {
+                        searchIcon
+                            .background(.regularMaterial, in: Circle())
+                            .overlay {
+                                Circle().strokeBorder(FamilyStreamTheme.subtleBorder, lineWidth: 0.5)
+                            }
+                    }
+                }
+                .accessibilityLabel("Search")
             }
-            .tag(AppTab.profile)
+            .foregroundStyle(FamilyStreamTheme.text)
+            .buttonStyle(CardScaleButtonStyle(scale: 0.94))
+            .padding(.horizontal, 16)
+            .padding(.top, 2)
+        }
+        .sheet(item: $presentedDestination, onDismiss: {
+            // The active profile owns this entire screen. Clear it only once
+            // SwiftUI has finished dismissing the sheet presented by this screen.
+            guard switchProfileAfterDismissal else { return }
+            switchProfileAfterDismissal = false
+            profileStore.switchProfile()
+        }) { destination in
+            Group {
+                switch destination {
+                case .search:
+                    SearchView(api: api, profileID: activeProfileID, libraryStore: libraryStore)
+                case .profile:
+                    ProfilePageView(
+                        profileStore: profileStore,
+                        libraryStore: libraryStore,
+                        onBrowseTitles: {
+                            presentedDestination = nil
+                            selection = .home
+                        },
+                        onSwitchProfile: {
+                            switchProfileAfterDismissal = true
+                            presentedDestination = nil
+                        }
+                    )
+                }
+            }
+            .presentationDragIndicator(.visible)
         }
         .tint(FamilyStreamTheme.accent)
+    }
+    private var profileIcon: some View {
+        Group {
+            if let profile = profileStore.activeProfile {
+                ProfileAvatarView(name: profile.name, colorHex: profile.color, size: 46)
+                    .clipShape(Circle())
+            } else {
+                PhosphorIcon("user-circle", size: 30)
+            }
+        }
+        .frame(width: 52, height: 52)
+        .contentShape(Circle())
+    }
+
+    private var searchIcon: some View {
+        PhosphorIcon("magnifying-glass", size: 25, weight: .bold)
+            .frame(width: 52, height: 52)
+            .contentShape(Circle())
     }
 }
 
@@ -130,6 +199,10 @@ private enum AppTab: Hashable {
     case home
     case movies
     case tv
+}
+
+private enum TopDestination: String, Identifiable {
     case search
     case profile
+    var id: String { rawValue }
 }

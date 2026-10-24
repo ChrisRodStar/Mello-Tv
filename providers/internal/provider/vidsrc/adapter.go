@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"time"
 
-	"family-stream-providers/internal/cache"
-	"family-stream-providers/internal/model"
-	"family-stream-providers/internal/network"
-	"family-stream-providers/internal/provider"
+	"stv-providers/internal/cache"
+	"stv-providers/internal/model"
+	"stv-providers/internal/network"
+	"stv-providers/internal/provider"
 )
 
 type fetcher interface {
@@ -51,6 +51,9 @@ func (a *Adapter) Resolve(ctx context.Context, lookup model.Lookup) (result mode
 		result.Duration = time.Since(startedAt)
 	}()
 
+	if ctx == nil {
+		return result, model.Fail(model.Unsupported, "context", "nil context provided")
+	}
 	if err := ctx.Err(); err != nil {
 		return result, fmt.Errorf("resolve VidSrc: %w", err)
 	}

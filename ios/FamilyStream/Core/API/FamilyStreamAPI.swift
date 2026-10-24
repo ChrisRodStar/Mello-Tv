@@ -455,6 +455,7 @@ struct FamilyStreamAPI: Sendable {
         case "no_source": "No playable source is available for this title."
         case "vpn_unavailable": "Playback is temporarily unavailable. Try again shortly."
         case "playback_busy", "overloaded": "The server is busy. Try again shortly."
+        case "state_limit": "The streaming server has reached its playback limit. Try again shortly."
         case "session_expired", "revoked": "This playback session has ended. Start playback again."
         case "source_refresh_required": "The playback source has expired. Start playback again."
         default: "Couldn’t complete that request. Try again."
@@ -463,7 +464,18 @@ struct FamilyStreamAPI: Sendable {
 }
 
 private struct EmptyReply: Decodable {}
-private struct FailureReply: Decodable { let error: String }
+private struct FailureReply: Decodable {
+    let error: String
+
+    private enum CodingKeys: String, CodingKey { case code, error }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        error = try values.decodeIfPresent(String.self, forKey: .code)
+            ?? values.decodeIfPresent(String.self, forKey: .error)
+            ?? "unavailable"
+    }
+}
 private struct SavedRecord<Value: Decodable>: Decodable { let data: Value }
 private struct HomePageReply: Decodable { let sections: [WireShelf]; let featured: [WireTitle] }
 private struct FeedbackReply: Decodable { let hidden: [WireTitle]; let watched: [WireTitle]; let ignored: [WireTitle]; let favorites: [WireTitle]; let topics: [String] }

@@ -5,7 +5,6 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
-	"family-stream-providers/internal/model"
 	"fmt"
 	"io"
 	"net"
@@ -14,6 +13,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"stv-providers/internal/model"
 )
 
 // Guard enforces that the network environment is healthy and attested before traffic egresses.
@@ -31,7 +32,7 @@ func (fn GuardFunc) Check(ctx context.Context) error {
 
 // Options configures a secure, fail-closed HTTP network client.
 type Options struct {
-	AddressFamily  string // Empty/ip, ip4 or ip6; only diagnostics restrict the family.
+	AddressFamily  string // Empty or ip, ip4 or ip6; only diagnostics restrict the family.
 	Budget         *AcceptanceBudget
 	Guard          Guard
 	Cleanup        func()
@@ -139,7 +140,7 @@ func New(opts Options) (*Client, error) {
 	client.http = &http.Client{
 		Transport: transport,
 		CheckRedirect: func(*http.Request, []*http.Request) error {
-			// Manual redirect handling in Fetch() prevents automatic credential leaking.
+			// Manual redirect handling in fetch() prevents automatic credential leaking.
 			return http.ErrUseLastResponse
 		},
 	}
@@ -149,7 +150,12 @@ func New(opts Options) (*Client, error) {
 
 // Close closes idle transport connections and invokes any cleanup routines.
 func (c *Client) Close() {
-	c.http.CloseIdleConnections()
+	if c == nil {
+		return
+	}
+	if c.http != nil {
+		c.http.CloseIdleConnections()
+	}
 	if c.cleanup != nil {
 		c.cleanup()
 	}
@@ -172,18 +178,28 @@ func pathMatches(path, prefix string) bool {
 
 // applyContext attaches scoped headers and cookies to an outbound request if the origin and path match.
 func applyContext(header http.Header, targetURL *url.URL, fetchContext model.FetchContext) error {
+	if header == nil || targetURL == nil {
+		return errors.New("invalid request header or target URL")
+	}
+
 	if publicRes := fetchContext.PublicResources; publicRes != nil {
-		for name, value := range map[string]string{"Origin": publicRes.Origin, "Referer": publicRes.Referer} {
-			if value == "" {
-				continue
-			}
-			identityURL, err := url.Parse(value)
+		if publicRes.Origin != "" {
+			identityURL, err := url.Parse(publicRes.Origin)
 			if err != nil || ValidateURL(identityURL) != nil || identityURL.RawQuery != "" || identityURL.ForceQuery || identityURL.Fragment != "" || (identityURL.Path != "" && identityURL.Path != "/") {
 				return errors.New("public resource identity must be a validated root origin")
 			}
-			header.Set(name, value)
+			header.Set("Origin", publicRes.Origin)
+		}
+		if publicRes.Referer != "" {
+			identityURL, err := url.Parse(publicRes.Referer)
+			if err != nil || ValidateURL(identityURL) != nil || identityURL.RawQuery != "" || identityURL.ForceQuery || identityURL.Fragment != "" || (identityURL.Path != "" && identityURL.Path != "/") {
+				return errors.New("public resource identity must be a validated root origin")
+			}
+			header.Set("Referer", publicRes.Referer)
 		}
 	}
+
+	targetOrigin := Origin(targetURL)
 
 	for _, scope := range fetchContext.Scopes {
 		origin := scopeOrigin(scope.Origin)
@@ -191,7 +207,7 @@ func applyContext(header http.Header, targetURL *url.URL, fetchContext model.Fet
 			return errors.New("invalid context scope")
 		}
 
-		if origin != Origin(targetURL) || !pathMatches(targetURL.Path, scope.PathPrefix) {
+		if origin != targetOrigin || !pathMatches(targetURL.Path, scope.PathPrefix) {
 			continue
 		}
 
@@ -218,8 +234,12 @@ func applyContext(header http.Header, targetURL *url.URL, fetchContext model.Fet
 	return nil
 }
 
-// Fetch executes a bounded HTTP request with SSRF validation, origin scoping, and redirect containment.
+// fetch executes a bounded HTTP request with SSRF validation, origin scoping, and redirect containment.
 func (c *Client) fetch(ctx context.Context, req Request) (Response, error) {
+	if c == nil {
+		return Response{}, errors.New("nil network client")
+	}
+
 	budgetCtx, stopBudget := c.budget.Context(ctx)
 	defer stopBudget()
 	reqCtx, cancel := context.WithTimeout(budgetCtx, c.timeout)
@@ -251,6 +271,9 @@ func (c *Client) fetch(ctx context.Context, req Request) (Response, error) {
 	startTime := time.Now()
 
 	for redirects := 0; ; redirects++ {
+		if c.guard == nil {
+			return Response{}, errors.New("VPN route unavailable")
+		}
 		if err := c.guard.Check(reqCtx); err != nil {
 			return Response{}, errors.New("VPN route unavailable")
 		}
@@ -352,6 +375,10 @@ func (c *Client) fetch(ctx context.Context, req Request) (Response, error) {
 				return Response{}, reqCtx.Err()
 			}
 			return Response{}, errors.New("upstream body failed")
+		}
+
+		if reqCtx.Err() != nil {
+			return Response{}, reqCtx.Err()
 		}
 
 		body := append(firstByte[:bytesRead:bytesRead], remainingBytes...)

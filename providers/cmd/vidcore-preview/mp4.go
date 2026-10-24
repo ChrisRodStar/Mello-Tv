@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"family-stream-providers/internal/network"
+	"stv-providers/internal/network"
 )
 
 const mp4PreviewRangeLimit = int64(8 * 1024 * 1024)

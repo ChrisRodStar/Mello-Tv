@@ -5,16 +5,17 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"family-stream-providers/internal/model"
-	"family-stream-providers/internal/network"
-	"family-stream-providers/internal/probe"
-	"family-stream-providers/internal/provider/vidcore"
-	"family-stream-providers/internal/selection"
 	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
 	"time"
+
+	"stv-providers/internal/model"
+	"stv-providers/internal/network"
+	"stv-providers/internal/probe"
+	"stv-providers/internal/provider/vidcore"
+	"stv-providers/internal/selection"
 )
 
 func main() {
@@ -34,6 +35,7 @@ func run() error {
 	imdbID := flag.String("imdb", "", "optional IMDb cross-ID")
 	season := flag.Int("season", 1, "TV season number")
 	episode := flag.Int("episode", 1, "TV episode number")
+	warm := flag.Bool("warm", true, "run an immediate warm lookup to measure steady-state resolution")
 	flag.Parse()
 
 	if *continuity < 0 || *continuity > 24 {
@@ -99,7 +101,17 @@ func run() error {
 	}
 
 	duration := time.Since(startTime).Round(time.Millisecond)
-	fmt.Printf("Native lookup: %d candidates in %s; %d server issues\n", len(resolved.Candidates), duration, len(resolved.Issues))
+	fmt.Printf("Native lookup (cold): %d candidates in %s; %d server issues\n", len(resolved.Candidates), duration, len(resolved.Issues))
+
+	if *warm {
+		warmStart := time.Now()
+		warmResolved, err := adapter.Resolve(ctx, lookup)
+		if err != nil {
+			return fmt.Errorf("warm vidcore resolution failed: %w", err)
+		}
+		warmDuration := time.Since(warmStart).Round(time.Millisecond)
+		fmt.Printf("Native lookup (warm): %d candidates in %s; %d server issues\n", len(warmResolved.Candidates), warmDuration, len(warmResolved.Issues))
+	}
 
 	tmpDir, err := os.MkdirTemp("", "family-stream-vidcore-check-")
 	if err != nil {

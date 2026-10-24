@@ -1,12 +1,11 @@
 package cache
 
 import (
-	"bytes"
-	"family-stream-providers/internal/model"
-	"maps"
 	"slices"
 	"sync"
 	"time"
+
+	"stv-providers/internal/model"
 )
 
 // cacheEntry holds a cached adapter result and its expiration timestamp.
@@ -43,45 +42,21 @@ func NewSources(max int, ttl time.Duration) *Sources {
 func CloneResult(result model.AdapterResult) model.AdapterResult {
 	cloned := result
 	cloned.Issues = slices.Clone(result.Issues)
-	cloned.Candidates = slices.Clone(result.Candidates)
-	for index := range cloned.Candidates {
-		candidate := &cloned.Candidates[index]
-		candidate.Title.MyAnimeListID = clonePointer(candidate.Title.MyAnimeListID)
-		candidate.Title.Season = clonePointer(candidate.Title.Season)
-		candidate.Title.Episode = clonePointer(candidate.Title.Episode)
-		candidate.ExpiresAt = clonePointer(candidate.ExpiresAt)
-		candidate.Context.Scopes = slices.Clone(candidate.Context.Scopes)
-		for scopeIndex := range candidate.Context.Scopes {
-			candidate.Context.Scopes[scopeIndex].Headers = maps.Clone(candidate.Context.Scopes[scopeIndex].Headers)
-		}
-		candidate.Context.PublicResources = clonePointer(candidate.Context.PublicResources)
-		candidate.Metadata.Tracks = slices.Clone(candidate.Metadata.Tracks)
-		candidate.Metadata.Variants = slices.Clone(candidate.Metadata.Variants)
-		for variantIndex := range candidate.Metadata.Variants {
-			variant := &candidate.Metadata.Variants[variantIndex]
-			variant.Width = clonePointer(variant.Width)
-			variant.Height = clonePointer(variant.Height)
-			variant.Bitrate = clonePointer(variant.Bitrate)
-			variant.Codecs = slices.Clone(variant.Codecs)
-		}
-		candidate.Metadata.ProviderData = maps.Clone(candidate.Metadata.ProviderData)
-		for field, raw := range candidate.Metadata.ProviderData {
-			candidate.Metadata.ProviderData[field] = bytes.Clone(raw)
+	if result.Candidates != nil {
+		cloned.Candidates = make([]model.Candidate, len(result.Candidates))
+		for i, candidate := range result.Candidates {
+			cloned.Candidates[i] = candidate.Clone()
 		}
 	}
 	return cloned
 }
 
-func clonePointer[Value any](value *Value) *Value {
-	if value == nil {
-		return nil
-	}
-	copied := *value
-	return &copied
-}
-
 // Get retrieves an unexpired AdapterResult from the cache, if present.
 func (c *Sources) Get(key string) (model.AdapterResult, bool) {
+	if c == nil {
+		return model.AdapterResult{}, false
+	}
+
 	c.mu.Lock()
 	entry, found := c.entries[key]
 	if !found || !time.Now().Before(entry.expiresAt) {
@@ -96,7 +71,7 @@ func (c *Sources) Get(key string) (model.AdapterResult, bool) {
 
 // Put caches an AdapterResult, clamping its expiration to the earliest candidate expiry.
 func (c *Sources) Put(key string, result model.AdapterResult) {
-	if len(result.Candidates) == 0 {
+	if c == nil || len(result.Candidates) == 0 {
 		return
 	}
 
@@ -105,7 +80,7 @@ func (c *Sources) Put(key string, result model.AdapterResult) {
 
 	// Clamp cache expiration if any source candidate expires sooner (with a 5-second buffer).
 	for _, candidate := range result.Candidates {
-		if candidate.ExpiresAt != nil {
+		if candidate.ExpiresAt != nil && !candidate.ExpiresAt.IsZero() {
 			bufferedExpiry := candidate.ExpiresAt.Add(-5 * time.Second)
 			if bufferedExpiry.Before(effectiveExpiry) {
 				effectiveExpiry = bufferedExpiry
@@ -145,7 +120,21 @@ func (c *Sources) Put(key string, result model.AdapterResult) {
 
 // Delete drops a provider result whose entire returned source set failed access.
 func (c *Sources) Delete(key string) {
+	if c == nil {
+		return
+	}
 	c.mu.Lock()
 	delete(c.entries, key)
 	c.mu.Unlock()
 }
+
+// Len returns the current number of cached candidate entries.
+func (c *Sources) Len() int {
+	if c == nil {
+		return 0
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.entries)
+}
+

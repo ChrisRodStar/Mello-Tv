@@ -3,9 +3,10 @@ package cache
 import (
 	"bytes"
 	"encoding/json"
-	"family-stream-providers/internal/model"
 	"testing"
 	"time"
+
+	"stv-providers/internal/model"
 )
 
 func TestExpiryAndIsolation(t *testing.T) {
@@ -16,6 +17,7 @@ func TestExpiryAndIsolation(t *testing.T) {
 	if _, ok := c.Get("expired"); ok {
 		t.Fatal("expired URL cached")
 	}
+
 	r.Candidates[0].ExpiresAt = nil
 	c.Put("fresh", r)
 	r.Candidates[0].ID = "changed"
@@ -23,14 +25,35 @@ func TestExpiryAndIsolation(t *testing.T) {
 	if !ok || got.Candidates[0].ID != "x" {
 		t.Fatal("caller mutated cache")
 	}
+
 	got.Candidates[0].ID = "again"
 	next, _ := c.Get("fresh")
 	if next.Candidates[0].ID != "x" {
 		t.Fatal("cache result not isolated")
 	}
+
 	c.Put("failure", model.AdapterResult{})
 	if _, ok := c.Get("failure"); ok {
 		t.Fatal("empty result cached")
+	}
+
+	if c.Len() != 1 {
+		t.Fatalf("expected 1 cached entry, got %d", c.Len())
+	}
+	c.Delete("fresh")
+	if c.Len() != 0 {
+		t.Fatalf("expected 0 cached entries after Delete, got %d", c.Len())
+	}
+
+	// Nil Sources safety
+	var nilSources *Sources
+	if _, ok := nilSources.Get("key"); ok {
+		t.Fatal("nil Sources should return false from Get")
+	}
+	nilSources.Put("key", r)
+	nilSources.Delete("key")
+	if nilSources.Len() != 0 {
+		t.Fatal("nil Sources should return 0 from Len")
 	}
 }
 
@@ -40,8 +63,9 @@ func TestClonePreservesAndIsolatesNestedMetadata(t *testing.T) {
 	expiry := time.Now().UTC()
 	original := model.AdapterResult{
 		Candidates: []model.Candidate{{
-			ID: "fixture", ExpiresAt: &expiry,
-			Title: model.Title{MyAnimeListID: &animeID, Season: &season, Episode: &episode},
+			ID:        "fixture",
+			ExpiresAt: &expiry,
+			Title:     model.Title{MyAnimeListID: &animeID, Season: &season, Episode: &episode},
 			Context: model.FetchContext{
 				Scopes:          []model.FetchScope{{Headers: map[string]string{"Authorization": "fixture"}}},
 				PublicResources: &model.PublicResourceContext{Origin: "https://public.example"},
@@ -54,12 +78,14 @@ func TestClonePreservesAndIsolatesNestedMetadata(t *testing.T) {
 		}},
 		Issues: []model.Failure{{Detail: "fixture"}},
 	}
+
 	before, _ := json.Marshal(original)
 	cloned := CloneResult(original)
 	after, _ := json.Marshal(cloned)
 	if !bytes.Equal(before, after) {
 		t.Fatal("clone changed wire data")
 	}
+
 	candidate := &cloned.Candidates[0]
 	*candidate.Title.MyAnimeListID = 0
 	*candidate.Title.Season = 0
@@ -74,6 +100,7 @@ func TestClonePreservesAndIsolatesNestedMetadata(t *testing.T) {
 	candidate.Metadata.Variants[0].Codecs[0] = "changed"
 	candidate.Metadata.ProviderData["field"][0] = 'x'
 	cloned.Issues[0].Detail = "changed"
+
 	after, _ = json.Marshal(original)
 	if !bytes.Equal(before, after) {
 		t.Fatal("clone aliases nested source data")

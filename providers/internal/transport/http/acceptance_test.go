@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"family-stream-providers/internal/model"
-	"family-stream-providers/internal/provider"
-	"family-stream-providers/internal/search"
+	"stv-providers/internal/model"
+	"stv-providers/internal/provider"
+	"stv-providers/internal/search"
 )
 
 type fixtureAdapter struct {

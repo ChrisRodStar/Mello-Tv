@@ -1,8 +1,9 @@
 package selection
 
 import (
-	"family-stream-providers/internal/model"
 	"sort"
+
+	"stv-providers/internal/model"
 )
 
 // Select evaluates all probed candidates, eliminates ineligible streams, scores the remainder,
@@ -37,8 +38,12 @@ func Select(lookup model.Lookup, items []model.Probed) model.Selection {
 	})
 
 	if len(rankedCandidates) > 0 {
-		result.Selected = &rankedCandidates[0]
-		result.Backups = append(result.Backups, rankedCandidates[1:]...)
+		selected := rankedCandidates[0]
+		result.Selected = &selected
+		if len(rankedCandidates) > 1 {
+			result.Backups = make([]model.Ranked, len(rankedCandidates)-1)
+			copy(result.Backups, rankedCandidates[1:])
+		}
 	}
 
 	return result

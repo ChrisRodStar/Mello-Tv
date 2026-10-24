@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"family-stream-providers/internal/model"
-	"family-stream-providers/internal/network"
+	"stv-providers/internal/model"
+	"stv-providers/internal/network"
 )
 
 const playerSHA256 = "97f52b92a9f7a1c6066f8b6ff3e2ad79f283f2e44f603de379912963f10809d0"

@@ -11,8 +11,8 @@ import (
 	"strings"
 	"testing"
 
-	"family-stream-providers/internal/model"
-	"family-stream-providers/internal/network"
+	"stv-providers/internal/model"
+	"stv-providers/internal/network"
 )
 
 const fixturePlayerSHA256 = "ec8e48186134e2d088456999c8931601825a1d9e05f3913c3e7b76e94553fad1"

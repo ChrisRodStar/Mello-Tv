@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"family-stream-providers/internal/model"
-	"family-stream-providers/internal/network"
+	"stv-providers/internal/model"
+	"stv-providers/internal/network"
 )
 
 type protocolFixture func(context.Context, network.Request) (network.Response, error)

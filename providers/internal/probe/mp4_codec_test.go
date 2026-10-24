@@ -6,8 +6,8 @@ import (
 	"slices"
 	"testing"
 
-	"family-stream-providers/internal/model"
-	"family-stream-providers/internal/selection"
+	"stv-providers/internal/model"
+	"stv-providers/internal/selection"
 )
 
 func fixtureDescriptor(tag byte, payload []byte) []byte {

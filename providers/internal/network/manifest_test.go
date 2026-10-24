@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"family-stream-providers/internal/model"
+	"stv-providers/internal/model"
 )
 
 type manifestTransport struct {

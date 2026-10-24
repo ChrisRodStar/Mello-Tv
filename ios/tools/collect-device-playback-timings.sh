@@ -5,9 +5,8 @@ root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 output=${1:-$(mktemp -d /tmp/family-stream-phone-timings.XXXXXX)}
 mkdir -p "$output/raw"
 chmod 700 "$output" "$output/raw"
-device_id=${2:-${DEVICE_ID:-booted}}
 if ! xcrun devicectl device copy from \
-  --device "$device_id" \
+  --device ${DEVICE_ID:-booted} \
   --domain-type appDataContainer --domain-identifier com.streamtv.familystream \
   --source Library/Caches/PlaybackTiming/ --destination "$output/raw" \
   --timeout 30 > "$output/device-copy.log" 2>&1; then

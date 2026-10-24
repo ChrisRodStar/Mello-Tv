@@ -1,9 +1,34 @@
 package vidcore
 
 import (
-	"family-stream-providers/internal/model"
+	"context"
+	"errors"
 	"testing"
+
+	"stv-providers/internal/model"
 )
+
+func TestAdapterInputAndContextGuards(t *testing.T) {
+	adapter := New(nil)
+
+	// Nil context safety
+	var nilCtx context.Context
+	if _, err := adapter.Resolve(nilCtx, model.Lookup{}); err == nil {
+		t.Fatal("expected error with nil context")
+	}
+
+	// Canceled context
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := adapter.Resolve(ctx, model.Lookup{}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled, got %v", err)
+	}
+
+	// Invalid title validation
+	if _, err := adapter.Resolve(context.Background(), model.Lookup{Title: model.Title{TMDBID: 0}}); err == nil {
+		t.Fatal("expected error with invalid title")
+	}
+}
 
 func TestNormalizeObservedWebVTTTracks(t *testing.T) {
 	payload := []byte(`{"url":"https://media.example.com/movie.m3u8","tracks":[{"file":"https://subtitles.example.com/en.vtt","label":"English"},{"file":"https://subtitles.example.com/other.vtt","label":"Unmapped language"},{"file":"http://127.0.0.1/private.vtt","label":"English"},{"file":"https://subtitles.example.com/unknown.srt","label":"English"}]}`)

@@ -5,7 +5,7 @@ import (
 	"net/url"
 	"testing"
 
-	"family-stream-providers/internal/model"
+	"stv-providers/internal/model"
 )
 
 func TestPlaybackEnvironmentHeaderRemainsOriginAndPathScoped(t *testing.T) {
@@ -66,3 +66,43 @@ func TestCSRFHeaderRemainsOriginAndPathScoped(t *testing.T) {
 		}
 	}
 }
+
+func TestApplyContextEdgeCases(t *testing.T) {
+	validURL, _ := url.Parse("https://example.com/api/test")
+	headers := make(http.Header)
+
+	if applyContext(nil, validURL, model.FetchContext{}) == nil {
+		t.Fatal("nil header accepted")
+	}
+	if applyContext(headers, nil, model.FetchContext{}) == nil {
+		t.Fatal("nil URL accepted")
+	}
+
+	invalidOriginCtx := model.FetchContext{
+		Scopes: []model.FetchScope{
+			{Origin: "invalid origin://", PathPrefix: "/"},
+		},
+	}
+	if applyContext(headers, validURL, invalidOriginCtx) == nil {
+		t.Fatal("invalid scope origin accepted")
+	}
+
+	unsupportedHeaderCtx := model.FetchContext{
+		Scopes: []model.FetchScope{
+			{Origin: "https://example.com", PathPrefix: "/", Headers: map[string]string{"X-Unsafe-Header": "value"}},
+		},
+	}
+	if applyContext(headers, validURL, unsupportedHeaderCtx) == nil {
+		t.Fatal("unsupported header accepted")
+	}
+
+	missingCookiePathCtx := model.FetchContext{
+		Scopes: []model.FetchScope{
+			{Origin: "https://example.com", PathPrefix: "/", Cookies: "foo=bar", CookiePath: ""},
+		},
+	}
+	if applyContext(headers, validURL, missingCookiePathCtx) == nil {
+		t.Fatal("cookie with empty path accepted")
+	}
+}
+

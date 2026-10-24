@@ -11,8 +11,8 @@ import (
 	"strings"
 	"testing"
 
-	"family-stream-providers/internal/model"
-	"family-stream-providers/internal/network"
+	"stv-providers/internal/model"
+	"stv-providers/internal/network"
 )
 
 type fixtureClient struct {
@@ -312,6 +312,10 @@ func TestInputValidationBeforeNetwork(t *testing.T) {
 	_, err := adapter.Resolve(context.Background(), model.Lookup{Title: testTitle(model.Movie)})
 	if model.Category(err) != model.Unavailable {
 		t.Fatal("unguarded client accepted")
+	}
+	var nilCtx context.Context
+	if _, err := adapter.Resolve(nilCtx, model.Lookup{}); err == nil {
+		t.Fatal("nil context accepted")
 	}
 	_, err = adapter.Resolve(context.Background(), model.Lookup{})
 	if model.Category(err) != model.Unsupported {

@@ -2,8 +2,8 @@ package vidcore
 
 import (
 	"context"
-	"family-stream-providers/internal/model"
-	"family-stream-providers/internal/network"
+	"stv-providers/internal/model"
+	"stv-providers/internal/network"
 	"fmt"
 	"os"
 	"path/filepath"

@@ -6,7 +6,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
-	"family-stream-providers/internal/model"
+	"stv-providers/internal/model"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -17,9 +17,13 @@ import (
 // player bytecode versions. If upstream deploys modified obfuscation or instructions,
 // compilation fails fast with model.ProtocolChange rather than executing unverified code.
 const (
-	materialDigest = "52dbf762faf5d6f5fee0aa71e8cffda15567a7640fd217610eb8a13fda8ff8d5"
-	listDigest     = "e5872b95b115bc1ab52e148454837d0354cbd96c73c8fbf28fa75c6808c749d1"
-	unlockDigest   = "18948e99225f9d2fd88a05e0615a64b5d34e80ed3a9597a75da6beb560e560e4"
+	materialDigest = "af13d5c75ee77178a31554392c906bd94ee3e979d62691690108f3ded337a885"
+	listDigest     = "a39fcc5958024e588c963ebd34ece56b49f59e37539edab7df082288b28a23e3"
+	unlockDigest   = "ac9a1f7e7b5b4d2b28a32c2e73f6dc494f2596ed8dfedac3e6ed86b5f6545086"
+
+	legacyMaterialDigest = "52dbf762faf5d6f5fee0aa71e8cffda15567a7640fd217610eb8a13fda8ff8d5"
+	legacyListDigest     = "e5872b95b115bc1ab52e148454837d0354cbd96c73c8fbf28fa75c6808c749d1"
+	legacyUnlockDigest   = "18948e99225f9d2fd88a05e0615a64b5d34e80ed3a9597a75da6beb560e560e4"
 )
 
 // byteStage represents a single transformation round in the ticket generation pipeline.
@@ -51,12 +55,13 @@ func protocolError(detail string) error {
 }
 
 var (
-	codecDeclaration     = regexp.MustCompile(`([\w$]+)=\[([\d,]+)\]\.map\(function\([\w$]+\)\{return String\.fromCharCode\((\d+)\^[\w$]+\)\}\)\.join\(""\)`)
-	byteArrayDeclaration = regexp.MustCompile(`([\w$]+)=new Uint8Array\(\[([\d,]+)\]\)`)
-	blobDeclaration      = regexp.MustCompile(`([\w$]+)=[\w$]+\.from\("([^"]+)",([\w$]+)\)`)
-	xorBlobDeclaration   = regexp.MustCompile(`([\w$]+)=function\([^)]*\)\{[^}]*\.from\(e,([\w$]+)\)[^}]*\^=(\d+);return [\w$]+\}\("([^"]+)",0\)`)
-	orderDeclaration     = regexp.MustCompile(`case \d+:[\w$]+\[(\d+)\]=([\w$]+)`)
-	maskDeclaration      = regexp.MustCompile(`a=(0x[\da-f]+),r=0;r<256;r\+\+\)\{var s=a=a\+(0x[\da-f]+)>>>0;`)
+	codecDeclaration      = regexp.MustCompile(`([\w$]+)=\[([\d,]+)\]\.map\(function\([\w$]+\)\{return String\.fromCharCode\((\d+)\^[\w$]+\)\}\)\.join\(""\)`)
+	shiftCodecDeclaration = regexp.MustCompile(`([\w$]+)="([^"]+)"\.split\(""\)\.map\(function\([\w$]+\)\{return String\.fromCharCode\([\w$]+\.charCodeAt\(0\)-(\d+)\)\}\)\.join\(""\)`)
+	byteArrayDeclaration  = regexp.MustCompile(`([\w$]+)=new Uint8Array\(\[([\d,]+)\]\)`)
+	blobDeclaration       = regexp.MustCompile(`([\w$]+)=[\w$]+\.from\("([^"]+)",([\w$]+)\)`)
+	xorBlobDeclaration    = regexp.MustCompile(`([\w$]+)=function\([^)]*\)\{[^}]*\.from\(e,([\w$]+)\)[^}]*\^=(\d+);return [\w$]+\}\("([^"]+)",0\)`)
+	orderDeclaration      = regexp.MustCompile(`case \d+:[\w$]+\[(\d+)\]=([\w$]+)`)
+	maskDeclaration       = regexp.MustCompile(`a=(0x[\da-f]+),r=0;r<256;r\+\+\)\{var s=a=a\+(0x[\da-f]+)>>>0;`)
 )
 
 // decodeLiteral decodes a base64 or hex encoded string literal from static player source.
@@ -106,6 +111,18 @@ func decodeProgram(prefix, stage string, expectedParts int) ([]byte, error) {
 				return nil, err
 			}
 			builder.WriteRune(rune(codePoint ^ xorKey))
+		}
+		codecs[match[1]] = builder.String()
+	}
+
+	for _, match := range shiftCodecDeclaration.FindAllStringSubmatch(prefix, -1) {
+		shift, err := strconv.Atoi(match[3])
+		if err != nil {
+			return nil, err
+		}
+		var builder strings.Builder
+		for _, r := range match[2] {
+			builder.WriteRune(rune(int(r) - shift))
 		}
 		codecs[match[1]] = builder.String()
 	}
@@ -202,7 +219,10 @@ func decodeProgram(prefix, stage string, expectedParts int) ([]byte, error) {
 
 // stringConstant extracts a length-prefixed string constant from verified bytecode at a known offset.
 func stringConstant(code []byte, offset int) (string, error) {
-	if offset < 0 || offset+4 > len(code) || code[offset] != 103 || code[offset+1] != 188 {
+	if offset < 0 || offset+4 > len(code) {
+		return "", protocolError("mapped constant absent")
+	}
+	if (code[offset] != 103 || code[offset+1] != 188) && (code[offset] != 89 || code[offset+1] != 4) {
 		return "", protocolError("mapped constant absent")
 	}
 
@@ -237,7 +257,7 @@ func compileProtocol(source string) (*protocol, error) {
 
 	// Validate raw material fingerprint.
 	materialFingerprint := fmt.Sprintf("%x", sha256.Sum256([]byte(prefix+"\n"+source[listStart:listEnd]+"\n"+unlockCode)))
-	if materialFingerprint != materialDigest {
+	if materialFingerprint != materialDigest && materialFingerprint != legacyMaterialDigest {
 		return nil, protocolError("unmapped player material version")
 	}
 
@@ -255,7 +275,8 @@ func compileProtocol(source string) (*protocol, error) {
 	// Validate compiled bytecode digests.
 	listFingerprint := fmt.Sprintf("%x", sha256.Sum256(listBytecode))
 	unlockFingerprint := fmt.Sprintf("%x", sha256.Sum256(unlockBytecode))
-	if listFingerprint != listDigest || unlockFingerprint != unlockDigest {
+	if (listFingerprint != listDigest || unlockFingerprint != unlockDigest) &&
+		(listFingerprint != legacyListDigest || unlockFingerprint != legacyUnlockDigest) {
 		return nil, protocolError("unmapped player instruction version")
 	}
 
@@ -270,23 +291,54 @@ func compileProtocol(source string) (*protocol, error) {
 		return val
 	}
 
-	if readConstant(45636) != material.Base || readConstant(51272) != material.Base {
-		return nil, protocolError("catalog/unlock base mismatch")
-	}
+	var stageKeyOffsets, prefixOffsets, rc4Offsets []int
 
-	proto.ChallengeAction = readConstant(45754)
-	proto.ListAction = readConstant(51390)
-	proto.Key, _ = decodeLiteral(readConstant(36941), "hex")
-	proto.IV, _ = decodeLiteral(readConstant(37067), "hex")
-	proto.Seed, _ = decodeLiteral(readConstant(37161), "hex")
-	proto.ResponseSeed, _ = decodeLiteral(readConstant(47943), "hex")
-
-	for _, offset := range []int{48351, 48453} {
-		num, err := strconv.ParseUint(readConstant(offset), 10, 64)
-		if err != nil {
-			return nil, protocolError("invalid response-key component")
+	if materialFingerprint == materialDigest {
+		if readConstant(45623) != material.Base || readConstant(51230) != material.Base {
+			return nil, protocolError("catalog/unlock base mismatch")
 		}
-		proto.ResponseNumbers = append(proto.ResponseNumbers, num)
+
+		proto.ChallengeAction = readConstant(45706)
+		proto.ListAction = readConstant(51313)
+		proto.Key, _ = decodeLiteral(readConstant(36912), "hex")
+		proto.IV, _ = decodeLiteral(readConstant(37038), "hex")
+		proto.Seed, _ = decodeLiteral(readConstant(37132), "hex")
+		proto.ResponseSeed, _ = decodeLiteral(readConstant(47894), "hex")
+
+		for _, offset := range []int{48303, 48405} {
+			num, err := strconv.ParseUint(readConstant(offset), 10, 64)
+			if err != nil {
+				return nil, protocolError("invalid response-key component")
+			}
+			proto.ResponseNumbers = append(proto.ResponseNumbers, num)
+		}
+
+		stageKeyOffsets = []int{29963, 31265, 32632, 34070, 35495}
+		prefixOffsets = []int{30046, 31348, 32715, 34153, 35578}
+		rc4Offsets = []int{46598, 47114, 47372, 47629, 46856}
+	} else {
+		if readConstant(45636) != material.Base || readConstant(51272) != material.Base {
+			return nil, protocolError("catalog/unlock base mismatch")
+		}
+
+		proto.ChallengeAction = readConstant(45754)
+		proto.ListAction = readConstant(51390)
+		proto.Key, _ = decodeLiteral(readConstant(36941), "hex")
+		proto.IV, _ = decodeLiteral(readConstant(37067), "hex")
+		proto.Seed, _ = decodeLiteral(readConstant(37161), "hex")
+		proto.ResponseSeed, _ = decodeLiteral(readConstant(47943), "hex")
+
+		for _, offset := range []int{48351, 48453} {
+			num, err := strconv.ParseUint(readConstant(offset), 10, 64)
+			if err != nil {
+				return nil, protocolError("invalid response-key component")
+			}
+			proto.ResponseNumbers = append(proto.ResponseNumbers, num)
+		}
+
+		stageKeyOffsets = []int{29980, 31282, 32650, 34087, 35525}
+		prefixOffsets = []int{30063, 31365, 32733, 34170, 35608}
+		rc4Offsets = []int{46646, 47162, 47420, 47678, 46904}
 	}
 
 	// Parse URL alphabet substitution mapping.
@@ -320,18 +372,15 @@ func compileProtocol(source string) (*protocol, error) {
 		{10, 6, 9, 4, 10, 4, 0, 9, 6, 2},
 	}
 
-	stageKeyOffsets := []int{29980, 31282, 32650, 34087, 35525}
 	for i, offset := range stageKeyOffsets {
 		proto.Stages[i].Key, _ = decodeLiteral(readConstant(offset), "base64")
 		proto.Stages[i].Operations = stageOperations[i]
 	}
 
-	prefixOffsets := []int{30063, 31365, 32733, 34170, 35608}
 	for i, offset := range prefixOffsets {
 		proto.Stages[i].Prefix, _ = decodeLiteral(readConstant(offset), "base64")
 	}
 
-	rc4Offsets := []int{46646, 47162, 47420, 47678, 46904}
 	for i, offset := range rc4Offsets {
 		proto.RC4Keys[i], _ = decodeLiteral(readConstant(offset), "base64")
 	}

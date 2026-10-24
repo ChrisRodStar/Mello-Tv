@@ -5,12 +5,14 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"family-stream-providers/internal/model"
-	"family-stream-providers/internal/network"
-	"family-stream-providers/internal/provider/vidcore"
+	"flag"
 	"fmt"
 	"os"
 	"time"
+
+	"stv-providers/internal/model"
+	"stv-providers/internal/network"
+	"stv-providers/internal/provider/vidcore"
 )
 
 func main() {
@@ -53,30 +55,47 @@ func run() error {
 
 	fmt.Println("Mullvad egress verified: provider and DNS sockets are securely bound to the tunnel")
 
-	tmpDir, err := os.MkdirTemp("", "family-stream-vidcore-")
-	if err != nil {
-		return fmt.Errorf("failed to create temporary capture directory: %w", err)
-	}
+	outputDir := flag.String("output", "", "optional output directory to store captured files")
+	mediaType := flag.String("type", "tv", "media type: movie or tv")
+	tmdbID := flag.Int64("tmdb", 1622, "canonical TMDB title ID")
+	imdbID := flag.String("imdb", "", "optional IMDb cross-ID")
+	season := flag.Int("season", 1, "TV season number")
+	episode := flag.Int("episode", 1, "TV episode number")
+	flag.Parse()
 
-	season, episode := 1, 1
 	sampleTitle := model.Title{
-		Type:    model.TV,
-		TMDBID:  60625,
-		IMDbID:  "tt2861424",
-		Season:  &season,
-		Episode: &episode,
+		Type:   model.MediaType(*mediaType),
+		TMDBID: *tmdbID,
+		IMDbID: *imdbID,
+	}
+	if sampleTitle.Type == model.TV {
+		sampleTitle.Season = season
+		sampleTitle.Episode = episode
 	}
 
-	report, err := vidcore.Capture(ctx, client, sampleTitle, tmpDir)
+	targetDir := *outputDir
+	if targetDir == "" {
+		tmpDir, err := os.MkdirTemp("", "family-stream-vidcore-")
+		if err != nil {
+			return fmt.Errorf("failed to create temporary capture directory: %w", err)
+		}
+		targetDir = tmpDir
+	} else {
+		if err := os.MkdirAll(targetDir, 0755); err != nil {
+			return fmt.Errorf("failed to create target capture directory: %w", err)
+		}
+	}
+
+	report, err := vidcore.Capture(ctx, client, sampleTitle, targetDir)
 	if err != nil {
-		return fmt.Errorf("capture failed: %w", err)
+		return fmt.Errorf("vidcore capture failed: %w", err)
 	}
 
 	fmt.Printf(
 		"Embed HTTP %d; %d chunks; private capture directory: %s\n",
 		report.EmbedStatus,
 		report.ChunkCount,
-		tmpDir,
+		targetDir,
 	)
 
 	for _, fileName := range report.MatchingFiles {

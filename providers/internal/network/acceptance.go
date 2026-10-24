@@ -1,7 +1,5 @@
 package network
 
-// This acceptance-only ledger bounds admitted HTTP response allowances and
-// requests in this Go process. It is separate from the Rust TCP receive ledger.
 import (
 	"bufio"
 	"context"
@@ -23,8 +21,8 @@ type allowance struct {
 }
 
 // AcceptanceBudget is an append-only, fsynced, exclusive-owner allowance. The
-// operator creates its first JSON line once; opening never creates/resets it.
-// Credits are charged in full before HTTP, never refunded on failure/restart.
+// operator creates its first JSON line once; opening never creates or resets it.
+// Credits are charged in full before HTTP and never refunded on failure or restart.
 type AcceptanceBudget struct {
 	file      *os.File
 	state     allowance // Accessed only by the command owner after Open returns.
@@ -44,6 +42,7 @@ type allowanceCommand struct {
 	result  chan error
 }
 
+// OpenAcceptanceBudget opens and validates the specified acceptance allowance file.
 func OpenAcceptanceBudget(path string) (*AcceptanceBudget, error) {
 	file, err := os.OpenFile(path, os.O_RDWR|os.O_APPEND|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
 	if err != nil {
@@ -91,10 +90,9 @@ func OpenAcceptanceBudget(path string) (*AcceptanceBudget, error) {
 		return reject()
 	}
 	budget := &AcceptanceBudget{
-		file:  file,
-		state: previous,
-		end:   time.Now().Add(remaining),
-
+		file:     file,
+		state:    previous,
+		end:      time.Now().Add(remaining),
 		commands: make(chan allowanceCommand),
 		stop:     make(chan struct{}),
 		joined:   make(chan struct{}),
@@ -141,6 +139,7 @@ func (b *AcceptanceBudget) check() error {
 	}
 	return nil
 }
+
 func (b *AcceptanceBudget) command(bytes int64, debit bool, prepaid bool) error {
 	if b == nil {
 		return nil
@@ -163,18 +162,23 @@ func (b *AcceptanceBudget) command(bytes int64, debit bool, prepaid bool) error 
 		return err
 	}
 }
+
+// Check validates that the acceptance budget remains active and unexhausted.
 func (b *AcceptanceBudget) Check() error {
 	return b.command(0, false, false)
 }
+
+// Take debits the specified byte count from the remaining allowance.
 func (b *AcceptanceBudget) Take(bytes int64) error {
 	return b.command(bytes, true, false)
 }
 
 // WorkCheck protects already-reserved work without requiring unused credits.
-// Deadlines, file failure and owner closure still fail closed.
+// Deadlines, file failure, and owner closure still fail closed.
 func (b *AcceptanceBudget) WorkCheck() error {
 	return b.command(0, false, true)
 }
+
 func (b *AcceptanceBudget) checkWork() error {
 	if b.failed || time.Now().After(b.end) || time.Now().UnixMilli() >= b.state.DeadlineMS {
 		return errors.New("acceptance allowance ended")
@@ -216,6 +220,9 @@ func (b *AcceptanceBudget) Context(ctx context.Context) (context.Context, contex
 // Close releases ownership without restoring credits. The acceptance owner must
 // seal the ledger at overall completion; orderly provider restarts reuse it.
 func (b *AcceptanceBudget) Close() error {
+	if b == nil {
+		return nil
+	}
 	b.closeOnce.Do(func() {
 		close(b.stop)
 	})

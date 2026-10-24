@@ -2,8 +2,8 @@ package probe
 
 import (
 	"context"
-	"family-stream-providers/internal/cache"
-	"family-stream-providers/internal/model"
+	"stv-providers/internal/cache"
+	"stv-providers/internal/model"
 	"testing"
 	"time"
 )

@@ -18,6 +18,7 @@ struct TitleDetailSheet: View {
         .presentationDetents([.large])
         .presentationDragIndicator(.hidden)
         .presentationBackground(FamilyStreamTheme.background)
+        .background { FamilyStreamTheme.background.ignoresSafeArea() }
     }
 
     private func content(for title: MediaTitle, showsBackButton: Bool) -> some View {
@@ -47,6 +48,7 @@ private struct TitleDetailContent: View {
     @State private var errorMessage: String?
     @State private var episodeErrorMessage: String?
     @State private var hasRestoredSavedSeason = false
+    @State private var episodeRequestID = UUID()
     @State private var selectedTab: DetailTab = .episodes
     @State private var suggestions: CatalogSection?
     @State private var isLoadingSuggestions = true
@@ -83,7 +85,7 @@ private struct TitleDetailContent: View {
                     playbackButton
                     detailStatus
                 }
-                .padding(.horizontal, 16)
+                .padding(.horizontal, 20)
                 .padding(.top, 16)
                 .padding(.bottom, 8)
 
@@ -91,7 +93,7 @@ private struct TitleDetailContent: View {
                     Section {
                         tvTabContent
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal, 16)
+                            .padding(.horizontal, 20)
                             .padding(.top, 16)
                             .padding(.bottom, 24)
                     } header: {
@@ -102,13 +104,13 @@ private struct TitleDetailContent: View {
                         aboutContent
                         suggestionsSection
                     }
-                    .padding(.horizontal, 16)
+                    .padding(.horizontal, 20)
                     .padding(.top, 8)
                     .padding(.bottom, 24)
                 }
             }
         }
-        .background(FamilyStreamTheme.background)
+        .background { DetailPageSurface(title: title).ignoresSafeArea() }
         .foregroundStyle(FamilyStreamTheme.text)
         .tint(FamilyStreamTheme.accent)
         .task {
@@ -117,50 +119,71 @@ private struct TitleDetailContent: View {
                 await loadSuggestions()
             }
         }
-        .onChange(of: selectedSeason) { _, newSeason in
-            Task {
-                await loadEpisodes(for: newSeason)
-            }
+        .task(id: episodeLoadKey) {
+            guard episodeLoadKey != nil else { return }
+            await loadEpisodes(for: selectedSeason)
         }
     }
 
+    private var episodeLoadKey: String? {
+        guard title.type == .tv, let details,
+              details.seasons.contains(where: { $0.number == selectedSeason }) else { return nil }
+        return "\(title.id)-\(selectedSeason)"
+    }
+
     private var artworkHeader: some View {
-        // The text sizes the header, so long titles and Dynamic Type can grow it.
         VStack(alignment: .leading, spacing: 0) {
             headerControls
-            Spacer(minLength: verticalSizeClass == .compact ? 40 : 76)
-            Text(title.title)
-                .font(.title2.bold())
-                .foregroundStyle(.white)
-                .shadow(color: .black.opacity(0.85), radius: 5, x: 0, y: 2)
-                .multilineTextAlignment(.leading)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 16)
-                .padding(.top, 16)
-                .padding(.bottom, 20)
-                .accessibilityAddTraits(.isHeader)
+            Spacer(minLength: verticalSizeClass == .compact ? 130 : 210)
+            VStack(alignment: .leading, spacing: 10) {
+                Text(title.title)
+                    .font(.largeTitle.weight(.bold))
+                    .tracking(-0.8)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityAddTraits(.isHeader)
+                let summary = [title.year, title.genres.first ?? ""].filter { !$0.isEmpty }
+                if !summary.isEmpty {
+                    Text(summary.joined(separator: " · "))
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(FamilyStreamTheme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 20)
+            .padding(.top, 32)
+            .padding(.bottom, 8)
         }
-        .frame(minHeight: verticalSizeClass == .compact ? 160 : 206)
+        .frame(minHeight: verticalSizeClass == .compact ? 300 : 400)
         .background {
             GeometryReader { geometry in
                 AsyncImage(url: title.backdropURL ?? title.posterURL) { phase in
                     if case .success(let image) = phase {
                         image.resizable().scaledToFill()
                     } else {
-                        FamilyStreamTheme.secondaryBackground
+                        LinearGradient(colors: [FamilyStreamTheme.secondaryBackground, FamilyStreamTheme.background],
+                                       startPoint: .top, endPoint: .bottom)
                     }
                 }
-                .frame(width: geometry.size.width, height: geometry.size.height)
+                .frame(width: geometry.size.width, height: verticalSizeClass == .compact ? 240 : 340)
                 .clipped()
-                .overlay {
-                    // Contrast only where image-overlay text and controls need it.
+                .layerEffect(ShaderLibrary.detailArtworkBlur(
+                    .float2(Float(geometry.size.width), verticalSizeClass == .compact ? 240 : 340)
+                ), maxSampleOffset: CGSize(width: 26, height: 26))
+                .clipped()
+                .mask {
                     LinearGradient(stops: [
-                        .init(color: .black.opacity(0.55), location: 0),
-                        .init(color: .clear, location: 0.35),
-                        .init(color: .black.opacity(0.2), location: 0.55),
-                        .init(color: .black.opacity(0.85), location: 1)
+                        .init(color: .black.opacity(0.88), location: 0),
+                        .init(color: .black, location: 0.52),
+                        .init(color: .black.opacity(0.85), location: 0.65),
+                        .init(color: .black.opacity(0.30), location: 0.80),
+                        .init(color: .clear, location: 0.94),
+                        .init(color: .clear, location: 1)
                     ], startPoint: .top, endPoint: .bottom)
+                }
+                .overlay(alignment: .top) {
+                    LinearGradient(colors: [.black.opacity(0.12), .clear], startPoint: .top, endPoint: .bottom)
+                        .frame(height: 110)
                 }
                 .accessibilityHidden(true)
             }
@@ -173,9 +196,8 @@ private struct TitleDetailContent: View {
                 Button { dismiss() } label: {
                     PhosphorIcon("caret-left", size: 16, weight: .bold)
                         .foregroundStyle(.white)
-                        .frame(width: 34, height: 34)
-                        .background(.ultraThinMaterial.opacity(0.85), in: Circle())
-                        .touchTarget(minWidth: 44, minHeight: 44)
+                        .frame(width: 44, height: 44)
+                        .detailGlass(in: Circle())
                 }
                 .accessibilityLabel("Back to previous title")
             }
@@ -185,9 +207,8 @@ private struct TitleDetailContent: View {
             } label: {
                 PhosphorIcon("bookmark-simple", size: 16, weight: libraryStore.isInMyList(title) ? .fill : .regular)
                     .foregroundStyle(.white)
-                    .frame(width: 34, height: 34)
-                    .background(.ultraThinMaterial.opacity(0.85), in: Circle())
-                    .touchTarget(minWidth: 44, minHeight: 44)
+                    .frame(width: 44, height: 44)
+                    .detailGlass(in: Circle())
             }
             .accessibilityLabel(libraryStore.isInMyList(title) ? "Remove from My List" : "Add to My List")
             .accessibilityValue(libraryStore.isInMyList(title) ? "Saved" : "Not saved")
@@ -195,14 +216,14 @@ private struct TitleDetailContent: View {
             Button(action: onClose) {
                 PhosphorIcon("x", size: 16, weight: .bold)
                     .foregroundStyle(.white)
-                    .frame(width: 34, height: 34)
-                    .background(.ultraThinMaterial.opacity(0.85), in: Circle())
-                    .touchTarget(minWidth: 44, minHeight: 44)
+                    .frame(width: 44, height: 44)
+                    .detailGlass(in: Circle())
             }
             .accessibilityLabel("Close title details")
         }
         .buttonStyle(.plain)
-        .padding(.horizontal, 14)
+        .environment(\.colorScheme, .dark)
+        .padding(.horizontal, 20)
         .padding(.top, 14)
     }
 
@@ -215,11 +236,11 @@ private struct TitleDetailContent: View {
             }
                 .font(.subheadline.weight(.semibold))
                 .multilineTextAlignment(.center)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
+                .padding(.horizontal, 20)
+                .padding(.vertical, 16)
                 .frame(maxWidth: .infinity, minHeight: 44)
                 .foregroundStyle(Color.dynamic(lightHex: "ffffff", darkHex: "16171a"))
-                .background(Color.dynamic(lightHex: "16171a", darkHex: "f5f5f7"), in: RoundedRectangle(cornerRadius: 10))
+                .background(Color.dynamic(lightHex: "16171a", darkHex: "f5f5f7"), in: Capsule())
                 .shadow(color: Color.black.opacity(0.12), radius: 4, y: 2)
                 .contentShape(Rectangle())
         }
@@ -231,7 +252,9 @@ private struct TitleDetailContent: View {
     private var playButtonTitle: String {
         if let saved = savedProgress {
             if title.type == .tv {
-                return isEpisodeWatched(saved.episode, season: saved.season) ? "Next Episode" : "Resume"
+                guard saved.season == selectedSeason, let episode = resumeEpisode else { return "Play" }
+                if episode.number == saved.episode && !isEpisodeWatched(saved.episode) { return "Resume" }
+                return episode.number > saved.episode ? "Next Episode" : "Play"
             }
             if !saved.completed { return "Resume" }
         }
@@ -259,52 +282,41 @@ private struct TitleDetailContent: View {
     private enum DetailTab: String, CaseIterable, Identifiable {
         case episodes = "Episodes"
         case about = "About"
-        case related = "More Like This"
+        case related = "Related"
         var id: Self { self }
     }
 
     private var detailTabs: some View {
-        ViewThatFits(in: .horizontal) {
-            detailTabButtons
-                .fixedSize(horizontal: true, vertical: false)
-                .frame(maxWidth: .infinity, alignment: .center)
-            ScrollView(.horizontal) {
-                detailTabButtons
-            }
-            .scrollIndicators(.hidden)
-        }
-        .frame(maxWidth: .infinity, alignment: .center)
-        .padding(.horizontal, 16)
-        .background(FamilyStreamTheme.background)
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("Title detail sections")
-    }
-
-    private var detailTabButtons: some View {
-        HStack(spacing: 24) {
-            ForEach(DetailTab.allCases) { tab in
-                Button {
-                    selectedTab = tab
-                } label: {
-                    Text(tab.rawValue)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(selectedTab == tab ? FamilyStreamTheme.text : FamilyStreamTheme.muted)
-                        .fixedSize(horizontal: true, vertical: false)
-                        .frame(minHeight: 48)
-                        .overlay(alignment: .bottom) {
-                            if selectedTab == tab {
-                                Rectangle()
-                                    .fill(FamilyStreamTheme.accent)
-                                    .frame(height: 2)
+        Group {
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(spacing: 4) {
+                    ForEach(DetailTab.allCases) { tab in
+                        Button { selectedTab = tab } label: {
+                            HStack {
+                                Text(tab.rawValue)
+                                Spacer()
+                                if selectedTab == tab { Image(systemName: "checkmark") }
                             }
+                            .padding(12)
+                            .contentShape(Rectangle())
                         }
-                        .contentShape(Rectangle())
+                        .buttonStyle(.plain)
+                        .accessibilityAddTraits(selectedTab == tab ? .isSelected : [])
+                    }
                 }
-                .buttonStyle(.plain)
-                .accessibilityAddTraits(selectedTab == tab ? .isSelected : [])
-                .accessibilityHint("Shows \(tab.rawValue.lowercased())")
+            } else {
+                Picker("Title detail sections", selection: $selectedTab) {
+                    ForEach(DetailTab.allCases) { tab in Text(tab.rawValue).tag(tab) }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .padding(4)
+                .detailGlass(in: Capsule())
             }
         }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 12)
+        .frame(maxWidth: .infinity)
     }
 
     @ViewBuilder
@@ -406,7 +418,7 @@ private struct TitleDetailContent: View {
                                             .clipped()
                                         }
                                     }
-                                    .clipShape(.rect(cornerRadius: 8))
+                                    .artworkCardSurface()
                                     .accessibilityHidden(true)
                                 Text(suggestion.title)
                                     .font(.caption.weight(.semibold))
@@ -473,7 +485,7 @@ private struct TitleDetailContent: View {
             } else if let episodeErrorMessage {
                 retryStatus(episodeErrorMessage) { await loadEpisodes(for: selectedSeason) }
             } else if let episodes, !episodes.isEmpty {
-                LazyVStack(alignment: .leading, spacing: 24) {
+                LazyVStack(alignment: .leading, spacing: 12) {
                     ForEach(episodes) { episode in
                         EpisodeRowView(
                             episode: episode,
@@ -484,6 +496,7 @@ private struct TitleDetailContent: View {
                                 $0.episode == episode.number
                             }),
                             isWatched: isEpisodeWatched(episode.number),
+                            isNextUp: resumeEpisode?.number == episode.number && !isEpisodeWatched(episode.number),
                             hasManualWatchedMark: libraryStore.hasManualWatchedMark(
                                 profileID: profileID, title: title, season: selectedSeason, episode: episode.number),
                             onPlay: { playEpisode(episode) },
@@ -519,10 +532,13 @@ private struct TitleDetailContent: View {
         Menu {
             ForEach(seasons) { season in
                 Button {
+                    guard selectedSeason != season.number else { return }
+                    episodes = nil
+                    isLoadingEpisodes = true
                     selectedSeason = season.number
                 } label: {
                     if season.number == selectedSeason {
-                        Label(seasonName(season), image: "check-bold")
+                        Label(seasonName(season), systemImage: "checkmark")
                     } else {
                         Text(seasonName(season))
                     }
@@ -537,7 +553,9 @@ private struct TitleDetailContent: View {
                 }
             }
             .font(.subheadline.weight(.semibold))
-            .touchTarget()
+            .padding(.horizontal, 16)
+            .frame(minHeight: 44)
+            .detailGlass(in: Capsule())
         }
         .disabled(seasons.count < 2)
         .accessibilityLabel("Choose season, currently season \(selectedSeason)")
@@ -632,19 +650,17 @@ private struct TitleDetailContent: View {
         errorMessage = nil
         do {
             let loaded = try await api.details(for: title)
-            self.details = loaded
-            self.isLoading = false
-
+            try Task.checkCancellation()
             if title.type == .tv {
                 let initialSeason: Int
-                if !hasRestoredSavedSeason, let saved = savedProgress {
+                if !hasRestoredSavedSeason, let saved = savedProgress,
+                   loaded.seasons.contains(where: { $0.number == saved.season }) {
                     initialSeason = saved.season
                     hasRestoredSavedSeason = true
                 } else {
-                    initialSeason = loaded.seasons.first(where: { $0.number > 0 })?.number ?? 1
+                    initialSeason = loaded.seasons.first(where: { $0.number > 0 })?.number ?? loaded.seasons.first?.number ?? 1
                 }
                 self.selectedSeason = initialSeason
-                await loadEpisodes(for: initialSeason)
             } else {
                 let req = PlaybackRequest(
                     titleID: title.tmdbID,
@@ -655,18 +671,25 @@ private struct TitleDetailContent: View {
                 )
                 preparedPlayback.preload(request: req)
             }
+            self.details = loaded
+            self.isLoading = false
         } catch {
+            guard !Task.isCancelled else { return }
             self.errorMessage = error.localizedDescription
             self.isLoading = false
         }
     }
 
     private func loadEpisodes(for seasonNumber: Int) async {
+        let requestID = UUID()
+        episodeRequestID = requestID
         isLoadingEpisodes = true
+        episodes = nil
         episodeErrorMessage = nil
         do {
             let epList = try await api.seasonEpisodes(tvID: title.tmdbID, season: seasonNumber)
-            self.episodes = epList
+            guard !Task.isCancelled, episodeRequestID == requestID, selectedSeason == seasonNumber else { return }
+            self.episodes = epList.sorted { $0.number < $1.number }
             self.isLoadingEpisodes = false
 
             // Preload resume episode or first episode only
@@ -674,8 +697,55 @@ private struct TitleDetailContent: View {
                 preloadEpisode(resumeEpisode ?? first)
             }
         } catch {
+            guard !Task.isCancelled, episodeRequestID == requestID, selectedSeason == seasonNumber else { return }
             self.episodeErrorMessage = error.localizedDescription
             self.isLoadingEpisodes = false
+        }
+    }
+}
+
+/// A quiet, artwork-tinted canvas for reading and browsing episodes.
+private struct DetailPageSurface: View {
+    let title: MediaTitle
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack(alignment: .top) {
+                FamilyStreamTheme.background
+                AsyncImage(url: title.backdropURL ?? title.posterURL) { phase in
+                    if case .success(let image) = phase {
+                        image.resizable()
+                            .scaledToFill()
+                            .frame(width: geometry.size.width, height: min(640, geometry.size.height))
+                            .clipped()
+                            .blur(radius: 80, opaque: true)
+                            .saturation(0.30)
+                            .opacity(colorScheme == .dark ? 0.22 : 0.10)
+                            .mask {
+                                LinearGradient(stops: [
+                                    .init(color: .black, location: 0),
+                                    .init(color: .black.opacity(0.65), location: 0.45),
+                                    .init(color: .clear, location: 1)
+                                ], startPoint: .top, endPoint: .bottom)
+                            }
+                    }
+                }
+            }
+            .clipped()
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func detailGlass<S: Shape>(in shape: S) -> some View {
+        if #available(iOS 26.0, *) {
+            self.glassEffect(.regular, in: shape)
+        } else {
+            self.background(.regularMaterial, in: shape)
         }
     }
 }

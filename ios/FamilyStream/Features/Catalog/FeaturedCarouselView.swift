@@ -1,18 +1,50 @@
 import SwiftUI
 
 /// A 3D showroom stage hero carousel inspired by multi-car showroom platforms.
-/// Features an active hero card front-and-center flanked by side cards angled inward
-/// toward the center spotlight using hinged inner-edge perspective anchors.
+/// Four visible depth layers with gentle, centered perspective and graduated lighting.
 struct FeaturedCarouselView: View {
     let titles: [MediaTitle]
+    let viewportSize: CGSize
     var onSelect: (MediaTitle) -> Void
     var onPlay: (MediaTitle) -> Void
 
-    @State private var currentIndex: Int = 0
+    @State private var position: Int = 0
+    @State private var dragProgress: CGFloat = 0
+    @State private var pausedProgress: Double = 0
     @State private var dragOffset: CGFloat = 0
     @State private var isDragging: Bool = false
+    @State private var suppressTapUntil = Date.distantPast
     @State private var timer: Timer?
+    @State private var advanceStartedAt: Date?
+    private let advanceInterval: TimeInterval = 8
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityVoiceOverEnabled) private var voiceOverEnabled
+    @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    private var currentIndex: Int { titleIndex(for: position) }
+
+    private func titleIndex(for slot: Int) -> Int {
+        let count = featuredTitles.count
+        return count == 0 ? 0 : ((slot % count) + count) % count
+    }
+
+    // Stable occurrences keep moving in one direction through the wrap boundary.
+    // Repeated titles use different occurrence IDs and recycle only offstage.
+    private var visibleSlots: [Int] {
+        featuredTitles.count > 1 ? Array((position - 5)...(position + 5)) : [position]
+    }
+
+    private var isLandscape: Bool { viewportSize.width > viewportSize.height }
+
+    private var stageHeight: CGFloat {
+        FeaturedCarouselLayout.stageHeight(viewport: viewportSize, accessibility: dynamicTypeSize.isAccessibilitySize)
+    }
+
+    private var settleAnimation: Animation {
+        reduceMotion ? .easeOut(duration: 0.18) : .spring(response: 0.48, dampingFraction: 0.88)
+    }
 
     private var featuredTitles: [MediaTitle] {
         Array(titles.prefix(7))
@@ -22,33 +54,43 @@ struct FeaturedCarouselView: View {
         if !featuredTitles.isEmpty {
             GeometryReader { geo in
                 let availableWidth = geo.size.width
-                let cardWidth: CGFloat = min(availableWidth * 0.70, 275)
-                let cardHeight: CGFloat = cardWidth * 1.45
-                let stepX: CGFloat = cardWidth * 0.44
-                let swipeThreshold: CGFloat = cardWidth * 0.65
+                let layout = FeaturedCarouselLayout(
+                    viewport: viewportSize,
+                    width: availableWidth,
+                    accessibility: dynamicTypeSize.isAccessibilitySize
+                )
+                let cardWidth = layout.cardWidth
+                let cardHeight = layout.cardHeight
+                let stepX = layout.stepX
+                let swipeThreshold: CGFloat = cardWidth * 0.49
 
                 // 3D Showroom Stage Container
                 ZStack {
-                    // Showroom floor spotlight aura centered beneath the stage
-                    EllipticalGradient(
-                        colors: [
-                            FamilyStreamTheme.accent.opacity(0.12),
-                            Color.black.opacity(0.05),
-                            Color.clear
-                        ],
-                        center: .center,
-                        startRadiusFraction: 0.05,
-                        endRadiusFraction: 0.70
-                    )
-                    .frame(width: availableWidth, height: cardHeight * 0.95)
-                    .offset(y: 16)
-                    .allowsHitTesting(false)
+                    // The page owns light-mode atmosphere so no local gradient
+                    // rectangle can end abruptly behind the indicator.
+                    if colorScheme == .dark {
+                        // Showroom floor spotlight aura centered beneath the stage
+                        EllipticalGradient(
+                            colors: [
+                                FamilyStreamTheme.accent.opacity(colorScheme == .dark ? 0.09 : 0.04),
+                                Color.black.opacity(0.05),
+                                Color.clear
+                            ],
+                            center: .center,
+                            startRadiusFraction: 0.05,
+                            endRadiusFraction: 0.70
+                        )
+                        .frame(width: availableWidth, height: cardHeight * 0.95)
+                        .offset(y: 16)
+                        .allowsHitTesting(false)
 
-                    // Staged Cards (Center hero + perspective-anchored flanking cards)
-                    ForEach(Array(featuredTitles.enumerated()), id: \.element.id) { index, title in
+                    }
+
+                    // Staged Cards (Center hero + flanking cards)
+                    ForEach(visibleSlots, id: \.self) { slot in
                         stageCard(
-                            title: title,
-                            index: index,
+                            title: featuredTitles[titleIndex(for: slot)],
+                            index: slot,
                             cardWidth: cardWidth,
                             cardHeight: cardHeight,
                             stepX: stepX,
@@ -57,22 +99,52 @@ struct FeaturedCarouselView: View {
                     }
                 }
                 .frame(width: availableWidth, height: cardHeight)
+                .padding(.top, isLandscape ? 6 : 54)
                 .contentShape(Rectangle())
-                .gesture(
-                    DragGesture()
+                // Observe the drag alongside poster buttons and vertical scrolling.
+                // A recognized movement suppresses the button's release action.
+                .simultaneousGesture(
+                    DragGesture(minimumDistance: 10)
                         .onChanged { value in
+                            suppressTapUntil = Date().addingTimeInterval(0.25)
+                            guard featuredTitles.count > 1 else { return }
+                            guard isDragging || abs(value.translation.width) > abs(value.translation.height) * 1.25 else { return }
                             if !isDragging {
                                 isDragging = true
                                 stopTimer()
                             }
-                            dragOffset = value.translation.width
+                            dragOffset = max(-swipeThreshold, min(swipeThreshold, value.translation.width))
+                            dragProgress = dragOffset / swipeThreshold
                         }
                         .onEnded { value in
+                            suppressTapUntil = Date().addingTimeInterval(0.25)
+                            guard isDragging else { return }
                             handleDragEnd(value: value, threshold: swipeThreshold)
                         }
                 )
+                .frame(height: stageHeight, alignment: .top)
+                .overlay(alignment: .bottom) {
+                    // Follow the outer edges of the second poster layer, with
+                    // extra spread in the wider landscape composition.
+                    pageIndicator(span: min(
+                        availableWidth - 24,
+                        cardWidth * (isLandscape ? 1.10 : 0.96) + stepX * 2
+                    ))
+                }
             }
-            .frame(height: 410)
+            .frame(height: stageHeight)
+            .onChange(of: scenePhase) { _, phase in
+                if phase == .active { startTimer() } else { stopTimer() }
+            }
+            .onChange(of: reduceMotion) { _, _ in startTimer() }
+            .onChange(of: voiceOverEnabled) { _, _ in startTimer() }
+            .onChange(of: featuredTitles.map(\.id)) { _, _ in
+                position = currentIndex
+                dragOffset = 0
+                dragProgress = 0
+                isDragging = false
+                startTimer()
+            }
             .onAppear {
                 startTimer()
             }
@@ -97,187 +169,213 @@ struct FeaturedCarouselView: View {
         let effectiveOffset = computeEffectiveOffset(index: index, count: count, threshold: swipeThreshold)
         let absOffset = abs(effectiveOffset)
 
-        if absOffset <= 2.2 {
-            let xOffset = effectiveOffset * stepX
-            let scale = max(0.68, 1.0 - absOffset * 0.16)
-            let zIndex = 100.0 - Double(absOffset) * 25.0
+        let depth = min(absOffset, 3)
+        let xOffset = effectiveOffset * stepX
+        let scale = 1.0 - depth * 0.10
+        let zIndex = 100.0 - Double(absOffset) * 20.0
 
-            // Showroom Perspective Angles:
-            // Flanking cards are hinged at their inner edge (tucked behind the center card)
-            // and angled inward by 15° toward the center spotlight.
-            let rotationY: Double = {
-                if absOffset < 0.01 { return 0 }
-                let sign: Double = effectiveOffset > 0 ? 1.0 : -1.0
-                return sign * 15.0 * min(1.0, absOffset)
-            }()
+        // 4°, 8°, and 12° give each layer a gentle, continuous turn.
+        // Center anchoring avoids the sharply hinged look of the inner edge.
+        let rotationY = Double(effectiveOffset) * 4.0
 
-            let rotationAnchor: UnitPoint = {
-                if effectiveOffset > 0.05 { return .leading }
-                if effectiveOffset < -0.05 { return .trailing }
-                return .center
-            }()
+        // Compensate for the scaled poster's inset, then lift each rear layer
+        // another 14 points. This makes the portrait stack rise on both sides.
+        let yOffset = isLandscape ? depth * 2.0 : -depth * (cardHeight * 0.05 + 14.0)
 
-            // Slight horizon elevation for depth staging
-            let yOffset = -absOffset * 6.0
+        // Keep four layers opaque; fade only as cards exit stage beyond layer four
+        let opacity = Double(max(0, 1 - max(0, absOffset - 3) * 2))
 
-            let opacity: Double = {
-                if absOffset <= 1.0 { return 1.0 }
-                if absOffset <= 2.0 { return max(0.0, 1.0 - (absOffset - 1.0) * 0.9) }
-                return 0.0
-            }()
+        let contentOpacity = max(0.0, 1.0 - Double(absOffset) * 1.8)
+        let isCenter = absOffset < 0.35
+        let proximity = Double(max(0, 1 - absOffset))
+        let focus = proximity * proximity * (3 - 2 * proximity)
 
-            let contentOpacity = max(0.0, 1.0 - Double(absOffset) * 2.8)
-            let isCenter = absOffset < 0.35
-
-            ZStack(alignment: .bottom) {
-                // High-resolution Artwork
+        Button {
+            handleCardTap(title: title, effectiveOffset: effectiveOffset, count: count)
+        } label: {
+            ZStack {
                 cardArtwork(title: title, width: cardWidth, height: cardHeight)
-
-                // Multi-Stage Apple Scrim Gradient for text readability
+                    // Gentle depth of field: 0 / 0.8 / 1.6 / 2.4 points.
+                    // Blur artwork only, keeping the rim and info control crisp.
+                    .blur(radius: depth * 0.8, opaque: true)
                 LinearGradient(
-                    stops: [
-                        .init(color: .clear, location: 0.28),
-                        .init(color: Color.black.opacity(0.32), location: 0.50),
-                        .init(color: Color.black.opacity(0.80), location: 0.72),
-                        .init(color: Color.black.opacity(0.96), location: 1.0)
+                    colors: [
+                        Color.black.opacity(Double(depth) * 0.07),
+                        Color.black.opacity(Double(depth) * 0.12)
                     ],
                     startPoint: .top,
                     endPoint: .bottom
                 )
-                .frame(width: cardWidth, height: cardHeight)
-
-                // Ambient dimming overlay for flanking background cards
-                Color.black.opacity(min(0.55, Double(absOffset) * 0.50))
-                    .frame(width: cardWidth, height: cardHeight)
-
-                // Bottom Content (Category kicker, Title, Subtitle, Apple Action Pills)
-                VStack(spacing: 8) {
-                    // Category / Genre Kicker
-                    if let genre = title.genres.first, !genre.isEmpty {
-                        Text(genre.uppercased())
-                            .font(.system(size: 10, weight: .bold))
-                            .foregroundStyle(Color.white.opacity(0.70))
-                            .tracking(1.0)
-                    }
-
-                    // Title
-                    Text(title.title)
-                        .font(.system(size: 20, weight: .bold, design: .rounded))
-                        .foregroundStyle(.white)
-                        .multilineTextAlignment(.center)
-                        .lineLimit(2)
-                        .shadow(color: .black.opacity(0.95), radius: 6, x: 0, y: 2)
-                        .padding(.horizontal, 10)
-
-                    // Minimal Editorial Subtitle Line
-                    let subtitle = cardSubtitle(for: title)
-                    if !subtitle.isEmpty {
-                        Text(subtitle)
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(Color.white.opacity(0.75))
-                            .lineLimit(1)
-                            .shadow(color: .black.opacity(0.8), radius: 3, x: 0, y: 1)
-                    }
-
-                    // Apple-Style Action Capsules (Play & Details)
-                    HStack(spacing: 10) {
-                        Button {
-                            onPlay(title)
-                        } label: {
-                            HStack(spacing: 6) {
-                                PhosphorIcon("play", size: 14, weight: .fill)
-                                Text("Play")
-                                    .font(.subheadline.weight(.bold))
-                            }
-                            .foregroundStyle(Color(red: 18/255, green: 18/255, blue: 20/255))
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 38)
-                            .background(Color.white, in: Capsule())
-                            .shadow(color: .black.opacity(0.35), radius: 4, y: 2)
-                        }
-                        .buttonStyle(CardScaleButtonStyle(scale: 0.96))
-
-                        Button {
-                            onSelect(title)
-                        } label: {
-                            HStack(spacing: 6) {
-                                PhosphorIcon("info", size: 16, weight: .bold)
-                                Text("Details")
-                                    .font(.subheadline.weight(.semibold))
-                            }
-                            .foregroundStyle(.white)
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 38)
-                            .background(Color.white.opacity(0.20), in: Capsule())
-                            .overlay(
-                                Capsule()
-                                    .stroke(Color.white.opacity(0.25), lineWidth: 0.5)
-                            )
-                        }
-                        .buttonStyle(CardScaleButtonStyle(scale: 0.96))
-                    }
-                    .padding(.horizontal, 14)
-                    .padding(.top, 4)
-                }
-                .padding(.bottom, 16)
-                .opacity(contentOpacity)
             }
             .frame(width: cardWidth, height: cardHeight)
-            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .stroke(
-                        isCenter
-                            ? LinearGradient(
-                                stops: [
-                                    .init(color: Color.white.opacity(0.35), location: 0.0),
-                                    .init(color: Color.white.opacity(0.08), location: 0.5),
-                                    .init(color: Color.black.opacity(0.40), location: 1.0)
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
+            .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        }
+        .buttonStyle(HeroPosterButtonStyle())
+        .accessibilityLabel(isCenter ? "Play \(title.title)" : "Show \(title.title)")
+        .allowsHitTesting(absOffset <= 3)
+        .overlay(alignment: .topTrailing) {
+            BrandTVMark()
+                .padding(12)
+                .opacity(contentOpacity)
+        }
+        .overlay(alignment: .bottomTrailing) {
+            Button {
+                guard !isDragging, Date() >= suppressTapUntil else { return }
+                onSelect(title)
+            } label: {
+                CardDetailsGlyph()
+            }
+            .buttonStyle(CardScaleButtonStyle(scale: 0.94))
+            .accessibilityLabel("Details for \(title.title)")
+            .padding(.trailing, 12)
+            .padding(.bottom, 2)
+            .opacity(contentOpacity)
+            .allowsHitTesting(isCenter)
+            .accessibilityHidden(!isCenter)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .strokeBorder(FamilyStreamTheme.subtleBorder, lineWidth: 0.75)
+                .allowsHitTesting(false)
+        }
+        .background {
+            posterLight(title: title, width: cardWidth, height: cardHeight, diffuse: false)
+                .opacity(focus)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+        }
+        .shadow(
+            color: Color.black.opacity(
+                colorScheme == .dark ? 0.20 + focus * 0.55 : 0.10 + focus * 0.22
+            ),
+            radius: 5 + 19 * focus,
+            x: 0,
+            y: 5 + 11 * focus
+        )
+        .background {
+            posterLight(title: title, width: cardWidth, height: cardHeight, diffuse: true)
+                .opacity(focus * (colorScheme == .dark ? 0.85 : 0.55))
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+        }
+        // Gentle perspective preserves readable artwork on every depth layer.
+        .rotation3DEffect(
+            .degrees(reduceMotion ? 0 : rotationY),
+            axis: (x: 0, y: 1, z: 0),
+            anchor: .center,
+            perspective: 0.35
+        )
+        .scaleEffect(scale)
+        .offset(x: xOffset, y: yOffset)
+        .zIndex(zIndex)
+        .opacity(opacity)
+        .accessibilityElement(children: isCenter ? .contain : .ignore)
+        .accessibilityLabel(isCenter ? "" : "Show \(title.title)")
+        .accessibilityHidden(!isCenter)
+    }
+
+    private func posterLight(title: MediaTitle, width: CGFloat, height: CGFloat, diffuse: Bool) -> some View {
+        // The poster itself supplies local edge colors instead of a fixed accent.
+        // Blur blends them into a soft frame and a wider wash behind the artwork.
+        cardArtwork(title: title, width: width + 12, height: height + 12)
+            .saturation(1.35)
+            .brightness(0.12)
+            .blur(radius: 10, opaque: true)
+            .overlay {
+                LinearGradient(
+                    colors: [.black.opacity(0.78), .black.opacity(0.25), .clear],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            }
+            .mask {
+                RoundedRectangle(cornerRadius: 28, style: .continuous)
+                    .strokeBorder(lineWidth: diffuse ? 14 : 6)
+            }
+            .blur(radius: diffuse ? 18 : 1.5)
+            .frame(width: width, height: height)
+    }
+
+    // MARK: - Page Indicator
+
+    @ViewBuilder
+    private func pageIndicator(span: CGFloat) -> some View {
+        let count = featuredTitles.count
+        let capsuleWidth: CGFloat = isLandscape ? 56.0 : 48.0
+        let arcRise: CGFloat = isLandscape ? 13.0 : 10.0
+
+        if count > 1 {
+            TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: advanceStartedAt == nil)) { context in
+                let progress = advanceStartedAt.map {
+                    min(1.0, max(0.0, context.date.timeIntervalSince($0) / advanceInterval))
+                } ?? pausedProgress
+
+                ZStack {
+                    ForEach(visibleSlots, id: \.self) { slot in
+                        let distance = CGFloat(slot - position) + dragProgress
+                        let emphasis = max(0.0, 1.0 - abs(distance))
+                        let depth = min(abs(distance), 4.0)
+                        // A shallow arc: smaller, closer-spaced dots recede behind
+                        // the active capsule using the same gentle turn as the cards.
+                        let dotScale = max(0.40, 1.0 - depth * 0.16)
+                        // Map the outer visible dots to the second-layer footprint.
+                        // Sinusoidal spacing gives the arc a mild perspective taper.
+                        let arcX = CGFloat(sin(Double(distance) * 0.22) / sin(0.66)) * (span / 2.0 - 8.0)
+                        let arcDepth = min(abs(distance) / 3.0, 1.5)
+
+                        Capsule()
+                            .fill(FamilyStreamTheme.text.opacity(0.16))
+                            .overlay(alignment: .leading) {
+                                GeometryReader { geometry in
+                                    Rectangle()
+                                        .fill(FamilyStreamTheme.accent)
+                                        .frame(width: geometry.size.width * progress)
+                                }
+                                .opacity(emphasis)
+                                .transaction { $0.animation = nil }
+                            }
+                            .frame(width: 8.0 + (capsuleWidth - 8.0) * emphasis, height: 8.0)
+                            .clipShape(Capsule())
+                            .scaleEffect(dotScale)
+                            .rotation3DEffect(
+                                .degrees(reduceMotion ? 0 : Double(distance) * 4.0),
+                                axis: (x: 0, y: 1, z: 0),
+                                perspective: 0.35
                             )
-                            : LinearGradient(
-                                colors: [FamilyStreamTheme.subtleBorder, FamilyStreamTheme.subtleBorder],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            ),
-                        lineWidth: 0.75
+                            .offset(x: arcX, y: 5.0 - arcDepth * arcDepth * arcRise)
+                            .opacity(max(0.35, 1.0 - Double(depth) * 0.15))
+                            .zIndex(-Double(abs(distance)))
+                            .accessibilityHidden(true)
+                    }
+                }
+                .frame(width: max(capsuleWidth + 16.0, span), height: 32)
+                .mask {
+                    LinearGradient(
+                        stops: [
+                            .init(color: .clear, location: 0.0),
+                            .init(color: .black, location: 0.04),
+                            .init(color: .black, location: 0.96),
+                            .init(color: .clear, location: 1.0)
+                        ],
+                        startPoint: .leading,
+                        endPoint: .trailing
                     )
-            )
-            // Center card drop shadows
-            .shadow(
-                color: (isCenter && colorScheme == .dark) ? Color.white.opacity(0.12) : Color.clear,
-                radius: 8,
-                x: -4,
-                y: -4
-            )
-            .shadow(
-                color: isCenter
-                    ? Color.black.opacity(colorScheme == .dark ? 0.70 : 0.28)
-                    : Color.black.opacity(colorScheme == .dark ? 0.35 : 0.16),
-                radius: isCenter ? 22 : 10,
-                x: 0,
-                y: isCenter ? 12 : 5
-            )
-            // 3D Showroom Transforms: Inward-hinged rotation + subtle easel lean
-            .rotation3DEffect(
-                .degrees(rotationY),
-                axis: (x: 0, y: 1, z: 0),
-                anchor: rotationAnchor,
-                perspective: 0.65
-            )
-            .rotation3DEffect(
-                .degrees(3.0),
-                axis: (x: 1, y: 0, z: 0),
-                perspective: 0.85
-            )
-            .scaleEffect(scale)
-            .offset(x: xOffset, y: yOffset)
-            .zIndex(zIndex)
-            .opacity(opacity)
-            .onTapGesture {
-                handleCardTap(title: title, effectiveOffset: effectiveOffset, count: count)
+                }
+            }
+            .frame(height: 32)
+            .frame(maxWidth: .infinity)
+            .contentShape(Rectangle())
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Featured titles")
+            .accessibilityValue("\(currentIndex + 1) of \(featuredTitles.count)")
+            .accessibilityAdjustableAction { direction in
+                guard featuredTitles.count > 1 else { return }
+                let step = direction == .increment ? 1 : -1
+                withAnimation(settleAnimation) {
+                    position += step
+                }
+                startTimer()
             }
         }
     }
@@ -296,106 +394,89 @@ struct FeaturedCarouselView: View {
                             .frame(width: width, height: height)
                             .clipped()
                     case .failure:
-                        artworkPlaceholder(width: width, height: height)
+                        artworkPlaceholder(title: title, width: width, height: height)
                     case .empty:
                         ZStack {
-                            artworkPlaceholder(width: width, height: height)
+                            artworkPlaceholder(title: title, width: width, height: height)
                             ProgressView()
                                 .tint(.white.opacity(0.6))
                         }
                     @unknown default:
-                        artworkPlaceholder(width: width, height: height)
+                        artworkPlaceholder(title: title, width: width, height: height)
                     }
                 }
             } else {
-                artworkPlaceholder(width: width, height: height)
+                artworkPlaceholder(title: title, width: width, height: height)
             }
         }
         .frame(width: width, height: height)
     }
 
-    private func artworkPlaceholder(width: CGFloat, height: CGFloat) -> some View {
+    private func artworkPlaceholder(title: MediaTitle, width: CGFloat, height: CGFloat) -> some View {
         ZStack {
             FamilyStreamTheme.cardBackground
-            PhosphorIcon("film-slate", size: 36)
-                .foregroundStyle(FamilyStreamTheme.muted.opacity(0.5))
+            VStack(spacing: 8) {
+                PhosphorIcon("film-slate", size: 36)
+                    .foregroundStyle(FamilyStreamTheme.muted.opacity(0.5))
+                Text(title.title)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(FamilyStreamTheme.muted)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 8)
+                    .lineLimit(2)
+            }
         }
         .frame(width: width, height: height)
-    }
-
-    // MARK: - Metadata Subtitle
-
-    private func cardSubtitle(for title: MediaTitle) -> String {
-        var segments: [String] = []
-        if !title.year.isEmpty {
-            segments.append(title.year)
-        }
-        segments.append(title.type == .movie ? "Movie" : "Series")
-        if title.rating > 0 {
-            segments.append(String(format: "%.1f", title.rating))
-        }
-        return segments.joined(separator: "  •  ")
     }
 
     // MARK: - Gesture & Offset Math
 
     private func computeEffectiveOffset(index: Int, count: Int, threshold: CGFloat) -> CGFloat {
         guard count > 0 else { return 0 }
-
-        var diff = (index - currentIndex) % count
-        if diff > count / 2 {
-            diff -= count
-        } else if diff < -count / 2 {
-            diff += count
-        }
-
-        let dragProgress = dragOffset / threshold
-        return CGFloat(diff) + dragProgress
+        let baseOffset = CGFloat(index - position)
+        return baseOffset + dragProgress
     }
 
     private func handleDragEnd(value: DragGesture.Value, threshold: CGFloat) {
         let dragDistance = value.translation.width
         let velocity = value.velocity.width
-        let triggerDistance = threshold * 0.45
+        let triggerDistance = threshold * 0.35
 
         var stepChange = 0
-        if dragDistance < -triggerDistance || velocity < -300 {
+        if dragDistance < -triggerDistance || velocity < -250 {
             stepChange = 1
-        } else if dragDistance > triggerDistance || velocity > 300 {
+        } else if dragDistance > triggerDistance || velocity > 250 {
             stepChange = -1
         }
 
         if stepChange != 0 {
-            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            UISelectionFeedbackGenerator().selectionChanged()
         }
 
-        withAnimation(.spring(response: 0.38, dampingFraction: 0.82)) {
-            let count = featuredTitles.count
-            if count > 0 && stepChange != 0 {
-                currentIndex = (currentIndex + stepChange + count) % count
-            }
+        withAnimation(settleAnimation) {
+            position += stepChange
             dragOffset = 0
+            dragProgress = 0
             isDragging = false
         }
         startTimer()
     }
 
     private func handleCardTap(title: MediaTitle, effectiveOffset: CGFloat, count: Int) {
+        guard !isDragging, Date() >= suppressTapUntil else { return }
+
         if abs(effectiveOffset) < 0.35 {
-            // Center card tapped -> open title details
-            onSelect(title)
+            onPlay(title)
         } else if effectiveOffset < -0.35 {
-            // Left card tapped -> navigate to left card
-            UIImpactFeedbackGenerator(style: .light).impactOccurred()
-            withAnimation(.spring(response: 0.38, dampingFraction: 0.82)) {
-                currentIndex = (currentIndex - 1 + count) % count
+            UISelectionFeedbackGenerator().selectionChanged()
+            withAnimation(settleAnimation) {
+                position -= 1
             }
             startTimer()
         } else if effectiveOffset > 0.35 {
-            // Right card tapped -> navigate to right card
-            UIImpactFeedbackGenerator(style: .light).impactOccurred()
-            withAnimation(.spring(response: 0.38, dampingFraction: 0.82)) {
-                currentIndex = (currentIndex + 1) % count
+            UISelectionFeedbackGenerator().selectionChanged()
+            withAnimation(settleAnimation) {
+                position += 1
             }
             startTimer()
         }
@@ -405,19 +486,110 @@ struct FeaturedCarouselView: View {
 
     private func startTimer() {
         stopTimer()
-        guard featuredTitles.count > 1 else { return }
-        timer = Timer.scheduledTimer(withTimeInterval: 6.5, repeats: true) { _ in
+        guard featuredTitles.count > 1, !reduceMotion, !voiceOverEnabled else { return }
+        pausedProgress = 0
+        advanceStartedAt = Date()
+        timer = Timer.scheduledTimer(withTimeInterval: advanceInterval, repeats: true) { _ in
             Task { @MainActor in
                 guard !isDragging else { return }
-                withAnimation(.spring(response: 0.42, dampingFraction: 0.82)) {
-                    currentIndex = (currentIndex + 1) % featuredTitles.count
+                withAnimation(settleAnimation) {
+                    position += 1
                 }
+                advanceStartedAt = Date()
             }
         }
     }
 
     private func stopTimer() {
+        if let start = advanceStartedAt {
+            pausedProgress = min(1.0, max(0.0, Date().timeIntervalSince(start) / advanceInterval))
+        }
         timer?.invalidate()
         timer = nil
+        advanceStartedAt = nil
+    }
+}
+
+// Shared sizing keeps loading and loaded artwork in exactly the same positions.
+private struct FeaturedCarouselLayout {
+    let viewport: CGSize
+    let width: CGFloat
+    let accessibility: Bool
+
+    var isLandscape: Bool { viewport.width > viewport.height }
+    static func stageHeight(viewport: CGSize, accessibility: Bool) -> CGFloat {
+        viewport.width > viewport.height
+            ? max(100, min(440, viewport.height - 24))
+            : (accessibility ? 594 : 494)
+    }
+    var height: CGFloat { Self.stageHeight(viewport: viewport, accessibility: accessibility) }
+    var cardWidth: CGFloat {
+        isLandscape ? min(286, width * 0.32, (height - 42) / 1.5) : min(width * 0.70, 286)
+    }
+    var cardHeight: CGFloat {
+        isLandscape ? cardWidth * 1.5 : min(height - 94, cardWidth * 1.46 + (accessibility ? 100 : 0))
+    }
+    var stepX: CGFloat { min(cardWidth * 0.64, max(1, (width - cardWidth * 0.70 - 16) / 6)) }
+}
+
+struct FeaturedCarouselSkeleton: View {
+    let viewportSize: CGSize
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        GeometryReader { geometry in
+            let layout = FeaturedCarouselLayout(
+                viewport: viewportSize,
+                width: geometry.size.width,
+                accessibility: dynamicTypeSize.isAccessibilitySize
+            )
+            TimelineView(.animation(minimumInterval: 1.0 / 30, paused: reduceMotion)) { context in
+                let pulse = reduceMotion ? 0.5 : (sin(context.date.timeIntervalSinceReferenceDate * .pi / 1.2) + 1) / 2
+                ZStack {
+                    ForEach(-3...3, id: \.self) { layer in
+                        let depth = CGFloat(abs(layer))
+                        RoundedRectangle(cornerRadius: 22, style: .continuous)
+                            .fill(FamilyStreamTheme.secondaryBackground)
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                                    .fill(FamilyStreamTheme.text.opacity(0.025 + pulse * 0.035))
+                            }
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                                    .strokeBorder(FamilyStreamTheme.subtleBorder, lineWidth: 0.75)
+                            }
+                            .frame(width: layout.cardWidth, height: layout.cardHeight)
+                            .rotation3DEffect(
+                                .degrees(reduceMotion ? 0 : Double(layer) * 4),
+                                axis: (x: 0, y: 1, z: 0),
+                                perspective: 0.35
+                            )
+                            .scaleEffect(1 - depth * 0.10)
+                            .offset(
+                                x: CGFloat(layer) * layout.stepX,
+                                y: layout.isLandscape ? depth * 2 : -depth * (layout.cardHeight * 0.05 + 14)
+                            )
+                            .opacity(1 - Double(depth) * 0.15)
+                            .zIndex(-Double(depth))
+                    }
+                }
+                .frame(width: geometry.size.width, height: layout.cardHeight)
+                .padding(.top, layout.isLandscape ? 6 : 54)
+            }
+        }
+        .frame(height: FeaturedCarouselLayout.stageHeight(
+            viewport: viewportSize, accessibility: dynamicTypeSize.isAccessibilitySize
+        ))
+        .allowsHitTesting(false)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Loading featured titles")
+    }
+}
+
+/// Artwork is a solid stage surface, including while a touch is held.
+private struct HeroPosterButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
     }
 }

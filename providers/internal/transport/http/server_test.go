@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"family-stream-providers/internal/model"
+	"stv-providers/internal/model"
 )
 
 const testBearer = "synthetic-service-01234567890123456789"
@@ -29,9 +29,14 @@ func (e *testEngine) Check(ctx context.Context) error {
 	}
 	return nil
 }
+
 func (e *testEngine) Resolve(ctx context.Context, lookup model.Lookup) (model.Selection, error) {
-	return e.resolve(ctx, lookup)
+	if e.resolve != nil {
+		return e.resolve(ctx, lookup)
+	}
+	return model.Selection{Version: model.ContractVersion}, nil
 }
+
 func requestBody() []byte {
 	body, _ := json.Marshal(ResolveRequest{
 		Version:    model.ContractVersion,
@@ -46,6 +51,7 @@ func requestBody() []byte {
 	})
 	return body
 }
+
 func invoke(handler http.Handler, method, path string, body []byte) *httptest.ResponseRecorder {
 	request := httptest.NewRequest(method, path, bytes.NewReader(body))
 	request.Header.Set("Authorization", "Bearer "+testBearer)
@@ -54,6 +60,56 @@ func invoke(handler http.Handler, method, path string, body []byte) *httptest.Re
 	handler.ServeHTTP(recorder, request)
 	return recorder
 }
+
+func TestNew_Validation(t *testing.T) {
+	engine := &testEngine{}
+	if _, err := New(nil, []byte(testBearer)); err == nil {
+		t.Error("expected error for nil engine")
+	}
+	if _, err := New(engine, []byte("too-short")); err == nil {
+		t.Error("expected error for short bearer")
+	}
+	if _, err := New(engine, []byte(strings.Repeat("a", 4097))); err == nil {
+		t.Error("expected error for long bearer")
+	}
+	nonASCII := append([]byte(testBearer[:31]), 0x1f)
+	if _, err := New(engine, nonASCII); err == nil {
+		t.Error("expected error for non-ASCII bearer")
+	}
+}
+
+func TestNilGuards(t *testing.T) {
+	var nilHandler *Handler
+	nilHandler.Drain() // Must not panic
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/health/livez", nil)
+	nilHandler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("expected 500 for nil handler, got %d", rec.Code)
+	}
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+
+	ctx := context.Background()
+	handler, _ := New(&testEngine{}, []byte(testBearer))
+
+	var nilCtx context.Context
+	if err := Serve(nilCtx, listener, handler); err == nil || err.Error() != "context cannot be nil" {
+		t.Errorf("expected 'context cannot be nil', got %v", err)
+	}
+	if err := Serve(ctx, nil, handler); err == nil || err.Error() != "listener and handler required" {
+		t.Errorf("expected 'listener and handler required', got %v", err)
+	}
+	if err := Serve(ctx, listener, nil); err == nil || err.Error() != "listener and handler required" {
+		t.Errorf("expected 'listener and handler required', got %v", err)
+	}
+}
+
 func TestAuthenticationValidationAndUnavailableGuard(t *testing.T) {
 	engine := &testEngine{check: func(context.Context) error {
 		return errors.New("secret upstream")
@@ -84,42 +140,36 @@ func TestAuthenticationValidationAndUnavailableGuard(t *testing.T) {
 			nil,
 			503,
 		},
-
 		{
 			"POST",
 			"/internal/v1/resolve",
 			requestBody(),
 			503,
 		},
-
 		{
 			"POST",
 			"/internal/v1/resolve",
 			[]byte(`{"unknown":1}`),
 			400,
 		},
-
 		{
 			"POST",
 			"/internal/v1/resolve",
 			append(requestBody(), []byte(` {}`)...),
 			400,
 		},
-
 		{
 			"POST",
 			"/internal/v1/resolve",
 			bytes.Repeat([]byte("x"), MaxRequestBytes+1),
 			413,
 		},
-
 		{
 			"POST",
 			"/internal/v1/resolve?token=secret",
 			requestBody(),
 			400,
 		},
-
 		{
 			"GET",
 			"/internal/v1/resolve",
@@ -136,6 +186,7 @@ func TestAuthenticationValidationAndUnavailableGuard(t *testing.T) {
 		}
 	}
 }
+
 func TestSelectionScopeAndGuardTransition(t *testing.T) {
 	checks := 0
 	engine := &testEngine{
@@ -166,6 +217,7 @@ func TestSelectionScopeAndGuardTransition(t *testing.T) {
 		t.Fatal("result escaped lost guard")
 	}
 }
+
 func TestOverloadDiagnosticsAndDrain(t *testing.T) {
 	handler, _ := New(&testEngine{}, []byte(testBearer))
 	for index := 0; index < MaxResolutions; index++ {
@@ -185,6 +237,7 @@ func TestOverloadDiagnosticsAndDrain(t *testing.T) {
 		t.Fatal("drain hid health")
 	}
 }
+
 func TestResponseLimitAndCancellation(t *testing.T) {
 	engine := &testEngine{resolve: func(context.Context, model.Lookup) (model.Selection, error) {
 		return model.Selection{
@@ -242,7 +295,6 @@ func TestCaseAliasesAreRejectedBeforeResolution(t *testing.T) {
 	handler, _ := New(&testEngine{}, []byte(testBearer))
 	for _, body := range []string{
 		strings.Replace(string(requestBody()), `"lookup":{`, `"lookup":{"refresh":false,"Refresh":true,`, 1),
-
 		strings.Replace(string(requestBody()), `"version":`, `"Version":`, 1),
 	} {
 		if invoke(handler, "POST", "/internal/v1/resolve", []byte(body)).Code != 400 {
@@ -330,5 +382,116 @@ func TestListenerFailureAndForcedDrainJoinHandlersBeforeReturn(t *testing.T) {
 		cancel()
 		listener.Close()
 		<-clientDone
+	}
+}
+
+func BenchmarkHandler_HealthLivez(b *testing.B) {
+	handler, _ := New(&testEngine{}, []byte(testBearer))
+	req := httptest.NewRequest("GET", "/health/livez", nil)
+	req.Header.Set("Authorization", "Bearer "+testBearer)
+	w := httptest.NewRecorder()
+
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for b.Loop() {
+		w.Body.Reset()
+		handler.ServeHTTP(w, req)
+	}
+}
+
+func BenchmarkHandler_HealthReadyz(b *testing.B) {
+	handler, _ := New(&testEngine{}, []byte(testBearer))
+	req := httptest.NewRequest("GET", "/health/readyz", nil)
+	req.Header.Set("Authorization", "Bearer "+testBearer)
+	w := httptest.NewRecorder()
+
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for b.Loop() {
+		w.Body.Reset()
+		handler.ServeHTTP(w, req)
+	}
+}
+
+func BenchmarkHandler_Resolve(b *testing.B) {
+	engine := &testEngine{
+		resolve: func(ctx context.Context, lookup model.Lookup) (model.Selection, error) {
+			return model.Selection{
+				Version: model.ContractVersion,
+				Selected: &model.Ranked{
+					Candidate: model.Probed{
+						Source: model.Candidate{
+							ID:       "bench-stream",
+							Provider: model.VidLink,
+							Title:    lookup.Title,
+							URL:      "https://stream.example.com/live.m3u8",
+							Format:   model.HLS,
+						},
+						Observation: model.Observation{
+							Accessible: true,
+							Format:     model.HLS,
+						},
+					},
+					Score: 100.0,
+				},
+			}, nil
+		},
+	}
+	handler, _ := New(engine, []byte(testBearer))
+	body := requestBody()
+	w := httptest.NewRecorder()
+
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for b.Loop() {
+		w.Body.Reset()
+		req := httptest.NewRequest("POST", "/internal/v1/resolve", bytes.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+testBearer)
+		req.Header.Set("Content-Type", "application/json")
+		handler.ServeHTTP(w, req)
+	}
+}
+
+func BenchmarkUniqueJSON(b *testing.B) {
+	body := requestBody()
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for b.Loop() {
+		if !uniqueJSON(body) {
+			b.Fatal("unexpected false from uniqueJSON")
+		}
+	}
+}
+
+func BenchmarkResponseFits(b *testing.B) {
+	selection := model.Selection{
+		Version: model.ContractVersion,
+		Selected: &model.Ranked{
+			Candidate: model.Probed{
+				Source: model.Candidate{
+					ID:       "bench-stream",
+					Provider: model.VidLink,
+					URL:      "https://stream.example.com/live.m3u8",
+					Format:   model.HLS,
+				},
+				Observation: model.Observation{
+					Accessible: true,
+					Format:     model.HLS,
+				},
+			},
+			Score: 100.0,
+		},
+	}
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for b.Loop() {
+		if !responseFits(selection) {
+			b.Fatal("unexpected false from responseFits")
+		}
 	}
 }

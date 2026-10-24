@@ -3,7 +3,7 @@ package selection
 import (
 	"testing"
 
-	"family-stream-providers/internal/model"
+	"stv-providers/internal/model"
 )
 
 func TestCodecEligibilityKeepsHVC1DistinctFromHEV1(t *testing.T) {

@@ -10,14 +10,19 @@ import (
 // AssetLifetime bounds reuse of validated static protocol material. Responses
 // that install session state or require revalidation must be fetched again.
 func AssetLifetime(header http.Header, maximum time.Duration) time.Duration {
-	if len(header.Values("Set-Cookie")) != 0 {
+	if maximum <= 0 || len(header.Values("Set-Cookie")) != 0 {
 		return 0
 	}
+
 	lifetime := maximum
 	for _, raw := range strings.Split(strings.Join(header.Values("Cache-Control"), ","), ",") {
-		directive := strings.SplitN(strings.TrimSpace(strings.ToLower(raw)), "=", 2)
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			continue
+		}
+		directive := strings.SplitN(strings.ToLower(raw), "=", 2)
 		switch directive[0] {
-		case "no-store", "no-cache":
+		case "no-store", "no-cache", "must-revalidate":
 			return 0
 		case "max-age":
 			if len(directive) != 2 {

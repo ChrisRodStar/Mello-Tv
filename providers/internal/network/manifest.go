@@ -6,13 +6,14 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
-	"family-stream-providers/internal/cache"
-	"family-stream-providers/internal/model"
 	"net/http"
 	"net/url"
 	"strings"
 	"sync"
 	"time"
+
+	"stv-providers/internal/cache"
+	"stv-providers/internal/model"
 )
 
 type manifestCacheKey struct{}
@@ -29,7 +30,7 @@ type manifestCache struct {
 }
 
 // WithManifestCache shares bounded, short-lived manifest bodies only within one
-// resolution round. Session jars, media samples and failures are never cached.
+// resolution round. Session jars, media samples, and failures are never cached.
 func WithManifestCache(ctx context.Context) context.Context {
 	return context.WithValue(ctx, manifestCacheKey{}, &manifestCache{
 		entries: make(map[[32]byte]manifestEntry),
@@ -39,6 +40,10 @@ func WithManifestCache(ctx context.Context) context.Context {
 // Fetch retains the guarded transport for every miss and checks current VPN
 // health on hits too. Cache identity includes the complete credential context.
 func (c *Client) Fetch(ctx context.Context, request Request) (Response, error) {
+	if c == nil {
+		return Response{}, errors.New("nil network client")
+	}
+
 	roundCache, _ := ctx.Value(manifestCacheKey{}).(*manifestCache)
 	parsedURL, err := url.Parse(request.URL)
 	eligible := roundCache != nil && err == nil && ValidateURL(parsedURL) == nil &&
@@ -48,6 +53,7 @@ func (c *Client) Fetch(ctx context.Context, request Request) (Response, error) {
 	if !eligible {
 		return c.fetch(ctx, request)
 	}
+
 	identity, err := json.Marshal(struct {
 		URL     string
 		Context model.FetchContext
@@ -60,23 +66,30 @@ func (c *Client) Fetch(ctx context.Context, request Request) (Response, error) {
 	if err != nil {
 		return c.fetch(ctx, request)
 	}
+
 	key := sha256.Sum256(identity)
 	limit := request.Limit
 	if limit <= 0 || limit > c.maxBytes {
 		limit = c.maxBytes
 	}
+
 	roundCache.mutex.Lock()
 	entry, found := roundCache.entries[key]
 	roundCache.mutex.Unlock()
+
 	if found && time.Now().Before(entry.expires) && int64(len(entry.response.Body)) <= limit {
 		if err := ctx.Err(); err != nil {
 			return Response{}, err
+		}
+		if c.guard == nil {
+			return Response{}, errors.New("VPN route unavailable")
 		}
 		if err := c.guard.Check(ctx); err != nil {
 			return Response{}, errors.New("VPN route unavailable")
 		}
 		return cloneResponse(entry.response), nil
 	}
+
 	response, err := c.fetch(ctx, request)
 	if err != nil || response.Status != http.StatusOK ||
 		!bytes.HasPrefix(response.Body, []byte("#EXTM3U")) ||
@@ -84,6 +97,7 @@ func (c *Client) Fetch(ctx context.Context, request Request) (Response, error) {
 		strings.Contains(strings.ToLower(response.Header.Get("Cache-Control")), "no-store") {
 		return response, err
 	}
+
 	// Live media playlists may advance; keep reuse below two seconds. Masters
 	// are reusable for this round, which itself has a fixed overall deadline.
 	lifetime := 2 * time.Second
@@ -94,18 +108,31 @@ func (c *Client) Fetch(ctx context.Context, request Request) (Response, error) {
 	if lifetime <= 0 {
 		return response, nil
 	}
+
 	cloned := cloneResponse(response)
 	roundCache.mutex.Lock()
 	defer roundCache.mutex.Unlock()
+
+	now := time.Now()
+	// Purge expired entries to keep memory and entry count strictly bounded.
+	for k, e := range roundCache.entries {
+		if !now.Before(e.expires) {
+			roundCache.bytes -= len(e.response.Body)
+			delete(roundCache.entries, k)
+		}
+	}
+
 	if previous, exists := roundCache.entries[key]; exists {
 		roundCache.bytes -= len(previous.response.Body)
 		delete(roundCache.entries, key)
 	}
+
 	// Hard caps prevent signed URLs or large manifests accumulating in a round.
 	if len(roundCache.entries) < 16 && roundCache.bytes+len(cloned.Body) <= 2*1024*1024 {
-		roundCache.entries[key] = manifestEntry{response: cloned, expires: time.Now().Add(lifetime)}
+		roundCache.entries[key] = manifestEntry{response: cloned, expires: now.Add(lifetime)}
 		roundCache.bytes += len(cloned.Body)
 	}
+
 	return response, nil
 }
 

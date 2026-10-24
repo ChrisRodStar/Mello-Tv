@@ -1,9 +1,10 @@
 package selection
 
 import (
-	"family-stream-providers/internal/model"
 	"math"
 	"slices"
+
+	"stv-providers/internal/model"
 )
 
 // rank calculates a composite candidate score within a given preference and resolution tier,
@@ -34,7 +35,7 @@ func rank(lookup model.Lookup, probed model.Probed) model.Ranked {
 
 	// Measured delivery headroom (up to 40 points).
 	obs := probed.Observation
-	if obs.Variant != nil && obs.Variant.Bitrate != nil {
+	if obs.Variant != nil && obs.Variant.Bitrate != nil && *obs.Variant.Bitrate > 0 && obs.DeliveryBPS != nil && *obs.DeliveryBPS > 0 {
 		headroomRatio := *obs.DeliveryBPS / float64(*obs.Variant.Bitrate)
 		ranked.Score += math.Min(headroomRatio, 4.0) * 10.0
 		ranked.Reasons = append(ranked.Reasons, "estimated delivery exceeds declared bitrate with headroom")
@@ -87,9 +88,10 @@ func resolutionHeight(candidate model.Probed) int {
 // 1. Language preference matching (audio and subtitle tiers).
 // 2. Established delivery viability (confirmed bitrate headroom over unmeasured).
 // 3. Resolution height (e.g. 1080p > 720p > 480p).
-// 4. Composite score (delivery headroom ratio + historical probe reliability).
-// 5. Time-to-first-byte latency (lower is preferred).
-// 6. Source ID lexicographical tie-breaker.
+// 4. Verified same-source adaptive rendition availability.
+// 5. Composite score (delivery headroom ratio + historical probe reliability).
+// 6. Time-to-first-byte latency (lower is preferred).
+// 7. Source ID lexicographical tie-breaker.
 func prefer(lookup model.Lookup, first, second model.Ranked) bool {
 	for _, trackKind := range []string{"audio", "subtitles"} {
 		languages := preferredLanguages(lookup, trackKind)

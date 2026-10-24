@@ -3,8 +3,8 @@ package search
 import (
 	"context"
 	"encoding/json"
-	"family-stream-providers/internal/model"
-	"family-stream-providers/internal/provider"
+	"stv-providers/internal/model"
+	"stv-providers/internal/provider"
 	"sync"
 	"sync/atomic"
 	"testing"

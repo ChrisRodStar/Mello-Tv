@@ -10,10 +10,19 @@ type readyEngine interface {
 	Ready(context.Context) error
 }
 
+var (
+	livezPayload  = []byte("{\"live\":true}\n")
+	readyzPayload = []byte("{\"ready\":true,\"version\":\"providers.v1\"}\n")
+)
+
 func (h *Handler) health(w http.ResponseWriter, r *http.Request) {
+	if h == nil || h.engine == nil {
+		problem(w, http.StatusInternalServerError, "handler_unavailable")
+		return
+	}
 	if r.URL.Path == "/health/livez" {
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte("{\"live\":true}\n"))
+		_, _ = w.Write(livezPayload)
 		return
 	}
 	select {
@@ -40,5 +49,5 @@ func (h *Handler) health(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	_, _ = w.Write([]byte("{\"ready\":true,\"version\":\"providers.v1\"}\n"))
+	_, _ = w.Write(readyzPayload)
 }

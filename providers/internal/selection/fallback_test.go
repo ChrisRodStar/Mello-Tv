@@ -1,8 +1,9 @@
 package selection
 
 import (
-	"family-stream-providers/internal/model"
 	"testing"
+
+	"stv-providers/internal/model"
 )
 
 func TestSustainableSourceBeatsUnsustainableResolution(t *testing.T) {
@@ -11,7 +12,16 @@ func TestSustainableSourceBeatsUnsustainableResolution(t *testing.T) {
 	bitrate := int64(2_000_000)
 	good := float64(6_000_000)
 	bad := float64(1_000_000)
-	base := model.Probed{Source: model.Candidate{ID: "good", Provider: model.VidLink, Title: title, Format: model.HLS}, Observation: model.Observation{Accessible: true, Format: model.HLS, ProtectionKnown: true, DeliveryBPS: &good, Variant: &model.Variant{Height: &h, Bitrate: &bitrate, Codecs: []string{"avc1.4d401f"}}}}
+	base := model.Probed{
+		Source: model.Candidate{ID: "good", Provider: model.VidLink, Title: title, Format: model.HLS},
+		Observation: model.Observation{
+			Accessible:      true,
+			Format:          model.HLS,
+			ProtectionKnown: true,
+			DeliveryBPS:     &good,
+			Variant:         &model.Variant{Height: &h, Bitrate: &bitrate, Codecs: []string{"avc1.4d401f"}},
+		},
+	}
 	other := base
 	other.Source.ID = "bad"
 	other.Source.Provider = model.VidCore

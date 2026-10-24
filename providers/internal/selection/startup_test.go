@@ -1,9 +1,10 @@
 package selection
 
 import (
-	"family-stream-providers/internal/model"
 	"testing"
 	"time"
+
+	"stv-providers/internal/model"
 )
 
 func TestStartupRequiresEligibleTargetAndMeasuredHeadroom(t *testing.T) {

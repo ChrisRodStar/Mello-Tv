@@ -3,9 +3,9 @@ package vidcore
 import (
 	"context"
 	"errors"
-	"family-stream-providers/internal/cache"
-	"family-stream-providers/internal/model"
-	"family-stream-providers/internal/network"
+	"stv-providers/internal/cache"
+	"stv-providers/internal/model"
+	"stv-providers/internal/network"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
@@ -23,12 +23,12 @@ const (
 
 var (
 	tokenPattern     = regexp.MustCompile(`\\\"en\\\":\\\"([^\\\"]+)\\\"`)
-	chunkPattern     = regexp.MustCompile(`/_next/static/chunks/[\w.-]+\.js`)
+	chunkPattern     = regexp.MustCompile(`/_next/static/chunks/[\w./%-]+\.js`)
 	modulePattern    = regexp.MustCompile(`var ([\w$]+)=([\w$]+)\((\d+)\),[\w$]+=([\w$]+)\((\d+)\)\.Buffer;`)
 	boundaryPattern  = regexp.MustCompile(`let [\w$]+=[\w$]+=>\{let [\w$]+=Math\.floor\(`)
-	listPattern      = regexp.MustCompile(`var [\w$]+=0;[\w$]+\[\[[\d,]+\]\.map\(function\([\w$]+\)`)
+	listPattern      = regexp.MustCompile(`var [\w$]+=0[;,](?:[\w$]+=function\(\)\{for\(var e=Array\(6\)|[\w$]+\[\[[\d,]+\]\.map\(function\([\w$]+\))`)
 	routePattern     = regexp.MustCompile(`fetch\(""\.concat\("([^"]+)","/"\)\.concat\("([^"]+)","/"\)`)
-	unlockPattern    = regexp.MustCompile(`let ([\w$]+)=\[\];var [\w$,]+=0,`)
+	unlockPattern    = regexp.MustCompile(`let ([\w$]+)=\[\];var [\w$,]+=0[;,]`)
 	unlockEndPattern = regexp.MustCompile(`;await ([\w$]+),[\w$]+\.current=`)
 	bindingPattern   = regexp.MustCompile(`[\w$]+\[\[([\d,]+)\]\.map\(function\([\w$]+\)\{return String\.fromCharCode\((\d+)\^[\w$]+\)\}\)\.join\(""\)\]=([^,;]+)`)
 )
@@ -180,14 +180,14 @@ func (a *Adapter) resolve(ctx context.Context, embedPath string, title model.Tit
 
 	// Consult all freshly declared chunk identities before downloading framework
 	// chunks that precede a previously validated player in the embed.
-	for _, chunkRelPath := range embed.Chunks {
+	for _, chunkRelPath := range candidateChunks(embed.Chunks) {
 		chunkURL := origin + chunkRelPath
 		if cached, found := a.protocols.Get(chunkURL); found {
 			return a.resolveNative(ctx, cached, embed, chunkURL, jar, title)
 		}
 	}
-	// Cold discovery retains the upstream script order and strict parser.
-	for _, chunkRelPath := range embed.Chunks {
+	// Cold discovery prioritizes feature/player chunks over framework runtimes.
+	for _, chunkRelPath := range candidateChunks(embed.Chunks) {
 		chunkURL := origin + chunkRelPath
 		chunkResp, err := a.client.Fetch(ctx, network.Request{
 			URL:     chunkURL,
@@ -211,12 +211,39 @@ func (a *Adapter) resolve(ctx context.Context, embedPath string, title model.Tit
 			if err != nil {
 				return model.AdapterResult{}, err
 			}
-			a.protocols.Put(chunkURL, proto, cache.AssetLifetime(chunkResp.Header, 2*time.Minute), 8)
+			a.protocols.Put(chunkURL, proto, cache.AssetLifetime(chunkResp.Header, 24*time.Hour), 8)
 			return a.resolveNative(ctx, proto, embed, chunkURL, jar, title)
 		}
 	}
 
 	return model.AdapterResult{}, model.Fail(model.ProtocolChange, "player", "no supported player structure found")
+}
+
+// candidateChunks orders chunks to prioritize application feature scripts over framework runtimes.
+func candidateChunks(chunks []string) []string {
+	var prioritized []string
+	var framework []string
+
+	for _, relPath := range chunks {
+		lower := strings.ToLower(relPath)
+		if strings.Contains(lower, "webpack") ||
+			strings.Contains(lower, "framework") ||
+			strings.Contains(lower, "main-app") ||
+			strings.Contains(lower, "main-") ||
+			strings.Contains(lower, "main.") ||
+			strings.Contains(lower, "polyfills") ||
+			strings.Contains(lower, "layout") {
+			framework = append(framework, relPath)
+		} else {
+			prioritized = append(prioritized, relPath)
+		}
+	}
+
+	for i, j := 0, len(prioritized)-1; i < j; i, j = i+1, j-1 {
+		prioritized[i], prioritized[j] = prioritized[j], prioritized[i]
+	}
+
+	return append(prioritized, framework...)
 }
 
 func mustOrigin() *url.URL {

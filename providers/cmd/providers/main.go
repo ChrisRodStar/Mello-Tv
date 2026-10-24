@@ -14,9 +14,9 @@ import (
 	"strings"
 	"syscall"
 
-	"family-stream-providers/internal/config"
-	"family-stream-providers/internal/network"
-	httptransport "family-stream-providers/internal/transport/http"
+	"stv-providers/internal/config"
+	"stv-providers/internal/network"
+	httptransport "stv-providers/internal/transport/http"
 )
 
 type settings struct {
@@ -28,8 +28,8 @@ type settings struct {
 }
 
 func main() {
-	if run() != nil {
-		_, _ = fmt.Fprintln(os.Stderr, "providers stopped: configuration or listener unavailable")
+	if err := run(); err != nil {
+		_, _ = fmt.Fprintf(os.Stderr, "providers stopped: %v\n", err)
 		os.Exit(1)
 	}
 }

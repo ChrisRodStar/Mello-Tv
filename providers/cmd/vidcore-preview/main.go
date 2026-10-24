@@ -9,9 +9,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"family-stream-providers/internal/model"
-	"family-stream-providers/internal/network"
-	"family-stream-providers/internal/probe"
 	"flag"
 	"fmt"
 	"html"
@@ -23,6 +20,10 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"stv-providers/internal/model"
+	"stv-providers/internal/network"
+	"stv-providers/internal/probe"
 )
 
 // resourceEntry pairs an upstream resource URL with its functional type (e.g. playlist, segment, subtitle).

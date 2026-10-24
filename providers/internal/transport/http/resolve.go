@@ -10,7 +10,7 @@ import (
 	"net/http"
 	"strings"
 
-	"family-stream-providers/internal/model"
+	"stv-providers/internal/model"
 )
 
 // ResolveRequest isolates deduplication/cache scope supplied by the trusted caller.
@@ -21,6 +21,10 @@ type ResolveRequest struct {
 }
 
 func (h *Handler) resolve(w http.ResponseWriter, r *http.Request) {
+	if h == nil || h.engine == nil {
+		problem(w, http.StatusInternalServerError, "handler_unavailable")
+		return
+	}
 	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 	if err != nil || mediaType != "application/json" {
 		problem(w, http.StatusUnsupportedMediaType, "unsupported_media_type")

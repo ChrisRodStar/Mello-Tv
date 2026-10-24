@@ -14,6 +14,7 @@ struct SearchView: View {
     @State private var playbackRequest: PlaybackRequest?
     @FocusState private var isFieldFocused: Bool
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.dismiss) private var dismiss
 
     let api: FamilyStreamAPI
     let profileID: String?
@@ -29,13 +30,34 @@ struct SearchView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
+                HStack {
+                    Text("Search")
+                        .font(.title2.weight(.bold))
+                        .foregroundStyle(FamilyStreamTheme.text)
+                        .frame(maxWidth: .infinity)
+                }
+                .frame(height: 48)
+                .overlay(alignment: .trailing) {
+                    Button { dismiss() } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 14, weight: .semibold))
+                            .frame(width: 44, height: 44)
+                            .searchGlass()
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(FamilyStreamTheme.textSecondary)
+                    .accessibilityLabel("Close search")
+                }
+                .padding(.horizontal, 20)
+
                 searchHeaderBar
 
                 searchBody
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            .background(FamilyStreamTheme.background.ignoresSafeArea())
+            .padding(.top, 16)
             .toolbar(.hidden, for: .navigationBar)
+            .task { await store.loadDiscovery() }
             .task(id: query) {
                 let term = query.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !term.isEmpty else {
@@ -73,6 +95,8 @@ struct SearchView: View {
                 )
             }
         }
+        .background { CatalogPageSurface().ignoresSafeArea() }
+        .presentationBackground(.clear)
     }
 
     // MARK: - Search Header
@@ -83,7 +107,7 @@ struct SearchView: View {
                 PhosphorIcon("magnifying-glass", size: 16)
                     .foregroundStyle(FamilyStreamTheme.muted)
 
-                TextField("Search movies, TV series, genres...", text: $query)
+                TextField("Movies, shows, and more", text: $query)
                     .font(.subheadline)
                     .foregroundStyle(FamilyStreamTheme.text)
                     .tint(FamilyStreamTheme.accent)
@@ -109,9 +133,9 @@ struct SearchView: View {
                     .accessibilityLabel("Clear search text")
                 }
             }
-            .padding(.horizontal, 12)
-            .frame(height: 42)
-            .appleNeumorphicRecessed(cornerRadius: 12)
+            .padding(.horizontal, 16)
+            .frame(height: 52)
+            .searchGlass()
 
             if isFieldFocused || !query.isEmpty {
                 Button("Cancel") {
@@ -127,9 +151,9 @@ struct SearchView: View {
                 .transition(.move(edge: .trailing).combined(with: .opacity))
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.top, 8)
-        .padding(.bottom, 12)
+        .padding(.horizontal, 20)
+        .padding(.top, 12)
+        .padding(.bottom, 20)
         .animation(.easeInOut(duration: 0.2), value: isFieldFocused || !query.isEmpty)
     }
 
@@ -152,29 +176,24 @@ struct SearchView: View {
         }
     }
 
+    @ViewBuilder
     private var idleView: some View {
-        VStack(spacing: 12) {
-            Spacer()
-
-            PhosphorIcon("magnifying-glass", size: 40)
-                .foregroundStyle(FamilyStreamTheme.muted.opacity(0.4))
-                .padding(.bottom, 4)
-
-            Text("Search Movies & TV")
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(FamilyStreamTheme.textSecondary)
-
-            Text("Find titles and categories across your library and discovery catalog.")
-                .font(.caption)
-                .foregroundStyle(FamilyStreamTheme.mutedSubtle)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 40)
-
-            Spacer()
+        if store.discoveryTitles.isEmpty {
+            VStack(spacing: 10) {
+                Spacer()
+                Text("What are you in the mood for?")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(FamilyStreamTheme.text)
+                Text("Find a favorite. Discover your next one.")
+                    .font(.subheadline)
+                    .foregroundStyle(FamilyStreamTheme.textSecondary)
+                Spacer()
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, 24)
+        } else {
+            posterGrid(store.discoveryTitles, heading: "Explore your catalog", paginates: false)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("Search movies and TV shows")
     }
 
     private var loadingView: some View {
@@ -256,68 +275,68 @@ struct SearchView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    // MARK: - Shelves View (Netflix-Style Categories)
-
     private var shelvesView: some View {
-        ScrollView(.vertical) {
-            LazyVStack(alignment: .leading, spacing: 22) {
-                ForEach(store.shelves) { shelf in
-                    shelfSection(shelf)
-                }
-            }
-            .padding(.top, 4)
-            .padding(.bottom, 28)
-        }
-        .scrollDismissesKeyboard(.interactively)
-        .scrollIndicators(.hidden)
+        posterGrid(store.titles, heading: "Results", paginates: true)
     }
 
-    private func shelfSection(_ shelf: SearchShelf) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(shelf.heading)
-                .font(.headline.weight(.bold))
-                .foregroundStyle(FamilyStreamTheme.text)
-                .padding(.horizontal, 16)
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(spacing: 8) {
-                    ForEach(shelf.titles) { title in
-                        SearchPosterCard(title: title) {
-                            selectedTitle = title
+    private func posterGrid(_ titles: [MediaTitle], heading: String, paginates: Bool) -> some View {
+        GeometryReader { geometry in
+            let gap: CGFloat = 12
+            let available = max(1, geometry.size.width - 40)
+            let minimum: CGFloat = dynamicTypeSize.isAccessibilitySize ? 160 : 108
+            let count = max(1, min(6, Int((available + gap) / (minimum + gap))))
+            let width = max(1, (available - CGFloat(count - 1) * gap) / CGFloat(count))
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 16) {
+                    HStack(spacing: 8) {
+                        Text(heading)
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(FamilyStreamTheme.textSecondary)
+                        if paginates && store.isLoading {
+                            ProgressView().controlSize(.small)
                         }
-                        .onAppear {
-                            // When near the end of Top Results, continuously load more search results
-                            if shelf.id == "top-results", title.id == shelf.titles.last?.id {
-                                Task {
-                                    await store.loadMore()
+                    }
+                    LazyVGrid(columns: Array(repeating: GridItem(.fixed(width), spacing: gap), count: count), spacing: 16) {
+                        ForEach(titles) { title in
+                            SearchPosterCard(title: title, width: width) {
+                                isFieldFocused = false
+                                selectedTitle = title
+                            }
+                            .onAppear {
+                                if paginates && title.id == titles.last?.id {
+                                    Task { await store.loadMore() }
                                 }
                             }
                         }
                     }
-
-                    if shelf.id == "top-results" && store.isLoadingMore {
+                    if paginates && store.isLoadingMore {
                         ProgressView()
                             .tint(FamilyStreamTheme.accent)
-                            .scaleEffect(0.8)
-                            .frame(width: 44, height: 162)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 12)
                     }
                 }
-                .padding(.horizontal, 16)
+                .padding(.horizontal, 20)
+                .padding(.bottom, 24)
             }
+            .scrollDismissesKeyboard(.interactively)
+            .scrollIndicators(.hidden)
         }
     }
+
 }
 
 // MARK: - Search Poster Card (Pure Artwork, No Under-Card Labels)
 
 private struct SearchPosterCard: View {
     let title: MediaTitle
+    var width: CGFloat? = nil
     let action: () -> Void
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     private var cardWidth: CGFloat {
-        dynamicTypeSize.isAccessibilitySize ? 148 : 108
+        width ?? (dynamicTypeSize.isAccessibilitySize ? 148 : 108)
     }
 
     private var cardHeight: CGFloat {
@@ -328,8 +347,7 @@ private struct SearchPosterCard: View {
         Button(action: action) {
             posterArtwork
                 .frame(width: cardWidth, height: cardHeight)
-                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                .appleNeumorphic(cornerRadius: 10, elevation: .subtle)
+                .artworkCardSurface()
                 .contentShape(Rectangle())
         }
         .buttonStyle(CardScaleButtonStyle(scale: 0.96))
@@ -357,12 +375,7 @@ private struct SearchPosterCard: View {
                     case .failure:
                         placeholder
                     case .empty:
-                        ZStack {
-                            FamilyStreamTheme.cardBackground
-                            ProgressView()
-                                .tint(FamilyStreamTheme.muted)
-                                .scaleEffect(0.7)
-                        }
+                        FamilyStreamTheme.cardBackground
                     @unknown default:
                         placeholder
                     }
@@ -395,6 +408,7 @@ private struct SearchPosterCard: View {
 @MainActor
 @Observable
 final class SearchStore {
+    private(set) var discoveryTitles: [MediaTitle] = []
     private(set) var shelves: [SearchShelf] = []
     private(set) var titles: [MediaTitle] = []
     private(set) var isLoading = false
@@ -417,6 +431,21 @@ final class SearchStore {
     init(api: FamilyStreamAPI, profileID: String?) {
         self.api = api
         self.profileID = profileID
+    }
+
+    func loadDiscovery() async {
+        guard discoveryTitles.isEmpty else { return }
+        do {
+            let sections = try await loadCatalogSections()
+            guard !Task.isCancelled else { return }
+            cachedCatalogSections = sections
+            var seen = Set<String>()
+            discoveryTitles = Array(sections.flatMap(\.titles).filter {
+                $0.posterURL != nil && seen.insert($0.id).inserted
+            }.prefix(24))
+        } catch {
+            // Search remains available when the discovery catalog cannot load.
+        }
     }
 
     func clear() {
@@ -682,3 +711,14 @@ enum SearchRanker {
     }
 }
 
+
+private extension View {
+    @ViewBuilder
+    func searchGlass() -> some View {
+        if #available(iOS 26.0, *) {
+            self.glassEffect(.regular, in: Capsule())
+        } else {
+            self.background(.regularMaterial, in: Capsule())
+        }
+    }
+}

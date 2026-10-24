@@ -1,7 +1,7 @@
 package vidcore
 
 import (
-	"family-stream-providers/internal/model"
+	"stv-providers/internal/model"
 	"os"
 	"testing"
 )

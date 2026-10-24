@@ -9,11 +9,12 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"family-stream-providers/internal/model"
+	"stv-providers/internal/model"
 )
 
 const (
@@ -31,8 +32,8 @@ type Engine interface {
 }
 
 type Handler struct {
-	engine Engine
-	bearer [32]byte
+	engine      Engine
+	bearer      [32]byte
 	// The capacity is the admission limit, not a queue. Admission never waits.
 	resolutions chan struct{}
 	diagnostics chan struct{}
@@ -49,30 +50,68 @@ func New(engine Engine, bearer []byte) (*Handler, error) {
 		}
 	}
 	return &Handler{
-		engine: engine,
-
-		bearer: sha256.Sum256(bearer),
-
+		engine:      engine,
+		bearer:      sha256.Sum256(bearer),
 		resolutions: make(chan struct{}, MaxResolutions),
-
 		diagnostics: make(chan struct{}, 1),
 	}, nil
 }
 
 func (h *Handler) Drain() {
+	if h == nil {
+		return
+	}
 	h.draining.Store(true)
 }
 
+var problemPayloads = map[string][]byte{
+	"unauthorized":           []byte("{\"code\":\"unauthorized\"}\n"),
+	"invalid_input":          []byte("{\"code\":\"invalid_input\"}\n"),
+	"not_found":              []byte("{\"code\":\"not_found\"}\n"),
+	"method_not_allowed":     []byte("{\"code\":\"method_not_allowed\"}\n"),
+	"overloaded":             []byte("{\"code\":\"overloaded\"}\n"),
+	"draining":               []byte("{\"code\":\"draining\"}\n"),
+	"vpn_unavailable":        []byte("{\"code\":\"vpn_unavailable\"}\n"),
+	"timeout":                []byte("{\"code\":\"timeout\"}\n"),
+	"cancelled":              []byte("{\"code\":\"cancelled\"}\n"),
+	"resolution_unavailable": []byte("{\"code\":\"resolution_unavailable\"}\n"),
+	"response_too_large":     []byte("{\"code\":\"response_too_large\"}\n"),
+	"unsupported_media_type": []byte("{\"code\":\"unsupported_media_type\"}\n"),
+	"request_too_large":      []byte("{\"code\":\"request_too_large\"}\n"),
+}
+
+func problem(w http.ResponseWriter, status int, code string) {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(status)
+	if payload, ok := problemPayloads[code]; ok {
+		_, _ = w.Write(payload)
+		return
+	}
+	// Fall back to encoder for any non-standard code.
+	_ = json.NewEncoder(w).Encode(struct {
+		Code string `json:"code"`
+	}{Code: code})
+}
+
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if h == nil {
+		problem(w, http.StatusInternalServerError, "handler_unavailable")
+		return
+	}
 	w.Header().Set("Cache-Control", "private, no-store")
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	authorization := r.Header.Values("Authorization")
-	if len(authorization) != 1 || len(authorization[0]) < 7 || authorization[0][:7] != "Bearer " {
+	if len(authorization) != 1 {
 		problem(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
-	digest := sha256.Sum256([]byte(authorization[0][7:]))
+	token, ok := strings.CutPrefix(authorization[0], "Bearer ")
+	if !ok || len(token) == 0 {
+		problem(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	digest := sha256.Sum256([]byte(token))
 	if subtle.ConstantTimeCompare(digest[:], h.bearer[:]) != 1 {
 		problem(w, http.StatusUnauthorized, "unauthorized")
 		return
@@ -115,15 +154,6 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func problem(w http.ResponseWriter, status int, code string) {
-	w.Header().Set("Content-Type", "application/problem+json")
-	w.WriteHeader(status)
-	// Only fixed internal categories reach this function.
-	_ = json.NewEncoder(w).Encode(struct {
-		Code string `json:"code"`
-	}{Code: code})
-}
-
 // Serve owns accepted connections and cancels handlers before joining shutdown.
 // The caller closes the engine only after Serve returns.
 func Serve(ctx context.Context, listener net.Listener, handler *Handler) error {
@@ -131,6 +161,12 @@ func Serve(ctx context.Context, listener net.Listener, handler *Handler) error {
 }
 
 func serveWithDrain(ctx context.Context, listener net.Listener, handler *Handler, drain time.Duration) error {
+	if listener == nil || handler == nil {
+		return errors.New("listener and handler required")
+	}
+	if ctx == nil {
+		return errors.New("context cannot be nil")
+	}
 	requestContext, cancel := context.WithCancel(context.Background())
 	owned := &handlerOwner{handler: handler}
 	defer cancel()

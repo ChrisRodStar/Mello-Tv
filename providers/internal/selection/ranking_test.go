@@ -1,11 +1,12 @@
 package selection
 
 import (
-	"family-stream-providers/internal/model"
 	"math"
 	"reflect"
 	"testing"
 	"time"
+
+	"stv-providers/internal/model"
 )
 
 func selectionLookup() model.Lookup {
@@ -170,9 +171,8 @@ func BenchmarkSelect(b *testing.B) {
 	for i := 0; i < 20; i++ {
 		candidates[i] = selectionCandidate(string(rune('a'+i)), 1080-(i%3)*360, float64(10_000_000+i*500_000))
 	}
-	b.ResetTimer()
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_ = Select(lookup, candidates)
 	}
 }

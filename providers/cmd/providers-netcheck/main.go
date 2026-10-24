@@ -11,7 +11,7 @@ import (
 	"os"
 	"time"
 
-	"family-stream-providers/internal/network"
+	"stv-providers/internal/network"
 )
 
 func main() {
@@ -21,6 +21,7 @@ func main() {
 		os.Exit(1)
 	}
 }
+
 func run() error {
 	if len(os.Args) != 2 {
 		return errors.New("private acceptance ledger required")
@@ -44,6 +45,7 @@ func run() error {
 	fmt.Println("Go guarded Mullvad egress attested: IPv4 and IPv6; DNS remains tunnel-bound")
 	return nil
 }
+
 func attest(ctx context.Context, budget *network.AcceptanceBudget, family string) error {
 	endpoint, err := attestationEndpoint(family)
 	if err != nil {
@@ -56,7 +58,9 @@ func attest(ctx context.Context, budget *network.AcceptanceBudget, family string
 	options.AddressFamily = family
 	client, err := network.New(options)
 	if err != nil {
-		options.Cleanup()
+		if options.Cleanup != nil {
+			options.Cleanup()
+		}
 		return errors.New("guarded client unavailable")
 	}
 	defer client.Close()

@@ -1,17 +1,18 @@
 package cache
 
 import (
-	"family-stream-providers/internal/model"
 	"net/url"
 	"sync"
 	"time"
+
+	"stv-providers/internal/model"
 )
 
 // reliabilityStats tracks recent probe success metrics with decay over time.
 type reliabilityStats struct {
+	updatedAt time.Time
 	successes int
 	samples   int
-	updatedAt time.Time
 }
 
 // Observations maintains an in-memory history of recent probe outcomes per server hostname.
@@ -44,8 +45,13 @@ func observationKey(candidate model.Candidate) string {
 // All renditions receive the same history snapshot; three variants are not three independent rounds.
 // A mixed success/failure round is conservatively recorded as a failure for that endpoint.
 func (o *Observations) RecordRound(candidates []model.Probed) {
+	if o == nil || len(candidates) == 0 {
+		return
+	}
+
 	roundOutcomes := make(map[string]bool)
 	for _, candidate := range candidates {
+
 		key := observationKey(candidate.Source)
 		if key == "" {
 			continue
@@ -122,3 +128,14 @@ func (o *Observations) record(key string, success bool, now time.Time) *float64 
 	rate := float64(stats.successes) / float64(stats.samples)
 	return &rate
 }
+
+// Len returns the current count of tracked endpoint records.
+func (o *Observations) Len() int {
+	if o == nil {
+		return 0
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return len(o.entries)
+}
+

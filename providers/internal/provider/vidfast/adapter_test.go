@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"family-stream-providers/internal/model"
-	"family-stream-providers/internal/network"
+	"stv-providers/internal/model"
+	"stv-providers/internal/network"
 )
 
 type fixtureClient struct {
@@ -124,6 +124,10 @@ func TestAdapterRejectsUnrecognizedPlayer(t *testing.T) {
 
 func TestAdapterInputAndCancellation(t *testing.T) {
 	adapter := New(nil)
+	var nilCtx context.Context
+	if _, err := adapter.Resolve(nilCtx, model.Lookup{}); err == nil {
+		t.Fatal("nil context accepted")
+	}
 	_, err := adapter.Resolve(context.Background(), model.Lookup{Title: television()})
 	if model.Category(err) != model.Unavailable {
 		t.Fatal(err)
@@ -169,11 +173,14 @@ func TestAdapterHTTPAndRedirects(t *testing.T) {
 				}, nil
 			}}}
 			_, err := adapter.Resolve(context.Background(), model.Lookup{Title: television()})
-			expected := model.UpstreamFailure
-			if status == http.StatusNotFound || status == http.StatusGone {
+			var expected model.ErrorCategory
+			switch status {
+			case http.StatusNotFound, http.StatusGone:
 				expected = model.Unavailable
-			} else if status == http.StatusOK {
+			case http.StatusOK:
 				expected = model.ProtocolChange
+			default:
+				expected = model.UpstreamFailure
 			}
 			if model.Category(err) != expected {
 				t.Fatal(err)

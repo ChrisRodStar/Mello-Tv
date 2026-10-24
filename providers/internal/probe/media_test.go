@@ -3,9 +3,9 @@ package probe
 import (
 	"context"
 	"encoding/json"
-	"family-stream-providers/internal/model"
-	"family-stream-providers/internal/network"
-	"family-stream-providers/internal/selection"
+	"stv-providers/internal/model"
+	"stv-providers/internal/network"
+	"stv-providers/internal/selection"
 	"net/http"
 	"net/url"
 	"reflect"
