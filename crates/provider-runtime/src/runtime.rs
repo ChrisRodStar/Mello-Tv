@@ -16,6 +16,7 @@ use stream_core::{
     packages::{ArtifactDigest, PackageError, ProviderManifest},
     providers::{AdapterResult, Lookup, ProviderId},
 };
+use subtle::ConstantTimeEq;
 use thiserror::Error;
 use tokio::{
     sync::{OwnedSemaphorePermit, Semaphore},
@@ -294,7 +295,11 @@ impl ProviderRuntime {
     ) -> Result<StagedPackage, RuntimeError> {
         manifest.validate_for_host(&self.inner.host_version)?;
         if artifact.len() as u64 != manifest.artifact_bytes
-            || digest(&artifact) != manifest.artifact_sha256.as_str()
+            || !bool::from(
+                digest(&artifact)
+                    .as_bytes()
+                    .ct_eq(manifest.artifact_sha256.as_str().as_bytes()),
+            )
         {
             return Err(RuntimeError::ArtifactMismatch);
         }

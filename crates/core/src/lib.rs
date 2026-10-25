@@ -1,5 +1,7 @@
 //! Shared Stream TV contracts and pure validation. No runtime or I/O ownership.
 
+#![forbid(unsafe_code)]
+
 pub mod accounts;
 pub mod catalog;
 pub mod domain;

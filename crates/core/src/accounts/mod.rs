@@ -380,7 +380,14 @@ impl Progress {
         validate_finite_nonnegative(self.duration_seconds, "duration_seconds")?;
         // Stored watched_seconds accumulates across playback IDs and may exceed
         // the per-update one-week cap. Do not reject legitimate stored history.
-        validate_finite_nonnegative(self.watched_seconds, "watched_seconds")
+        validate_finite_nonnegative(self.watched_seconds, "watched_seconds")?;
+        if self.updated_at.timestamp() < 0
+            || (self.updated_at.timestamp() == -62_135_596_800
+                && self.updated_at.timestamp_subsec_nanos() == 0)
+        {
+            return Err(invalid("updated_at", "must not be before Unix epoch"));
+        }
+        Ok(())
     }
 }
 

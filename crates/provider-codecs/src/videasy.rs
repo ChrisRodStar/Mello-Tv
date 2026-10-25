@@ -138,6 +138,9 @@ pub fn decrypt_payload(
             other => other,
         })
         .collect();
+    if normalized.len() % 4 == 1 {
+        return Err(CryptoError::Encoding);
+    }
     while !normalized.len().is_multiple_of(4) {
         normalized.push(b'=');
     }

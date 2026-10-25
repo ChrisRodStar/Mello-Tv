@@ -2470,6 +2470,7 @@ dependencies = [
  "serde_json",
  "sha2 0.11.1",
  "stream-core",
+ "subtle",
  "thiserror",
  "zeroize",
 ]
@@ -2487,6 +2488,7 @@ dependencies = [
  "sha2 0.11.1",
  "stream-core",
  "stream-provider-sdk",
+ "subtle",
  "thiserror",
  "tokio",
  "tokio-util",

@@ -478,7 +478,7 @@ impl HttpClient {
     }
     fn admit_origin(&self, url: &Url) -> Result<(), TransportError> {
         let now = Instant::now();
-        let mut origins = self.origins.lock().map_err(|_| TransportError::Capacity)?;
+        let mut origins = self.origins.lock().unwrap_or_else(|e| e.into_inner());
         origins.retain(|_, expiry| *expiry > now);
         let key = url.origin().ascii_serialization();
         if !origins.contains_key(&key) && origins.len() >= self.config.max_origins {

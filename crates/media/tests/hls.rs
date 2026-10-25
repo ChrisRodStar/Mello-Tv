@@ -503,3 +503,41 @@ fn errors_and_sample_debug_do_not_reveal_signed_urls() -> TestResult {
     assert!(!format!("{error:?} {error}").contains("do-not-log"));
     Ok(())
 }
+
+#[test]
+fn hls_parser_edge_cases_empty_and_unclosed_quotes() -> TestResult {
+    // Empty body
+    assert!(matches!(parse_playlist(b"", &base()?), Err(HlsError::InvalidHeader)));
+    // Header only (no media or master variants)
+    assert!(matches!(parse_playlist(b"#EXTM3U\n", &base()?), Err(HlsError::Empty)));
+    // Target duration but 0 segments
+    assert!(matches!(
+        parse_playlist(b"#EXTM3U\n#EXT-X-TARGETDURATION:10\n", &base()?),
+        Err(HlsError::Empty)
+    ));
+    // Unclosed quote in attribute
+    assert!(matches!(
+        parse_playlist(
+            b"#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000,CODECS=\"avc1.4d401f\nvariant.m3u8\n",
+            &base()?
+        ),
+        Err(HlsError::Malformed("attribute quote"))
+    ));
+    // Empty URI in attribute
+    assert!(matches!(
+        parse_playlist(
+            b"#EXTM3U\n#EXT-X-MAP:URI=\"\"\n#EXTINF:4,\nseg.ts\n",
+            &base()?
+        ),
+        Err(HlsError::Malformed("required attribute"))
+    ));
+    // Trailing comma in attributes
+    assert!(matches!(
+        parse_playlist(
+            b"#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000,\nvariant.m3u8\n",
+            &base()?
+        ),
+        Err(HlsError::Malformed("attribute pair"))
+    ));
+    Ok(())
+}

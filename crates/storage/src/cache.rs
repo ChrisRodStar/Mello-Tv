@@ -158,7 +158,7 @@ impl<K: Ord + Clone, V> State<K, V> {
 
     fn remove(&mut self, key: &K) -> Option<Arc<V>> {
         let entry = self.entries.remove(key)?;
-        self.bytes -= entry.bytes;
+        self.bytes = self.bytes.saturating_sub(entry.bytes);
         Some(entry.value)
     }
 

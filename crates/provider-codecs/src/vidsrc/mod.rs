@@ -96,7 +96,7 @@ fn digest_matches(value: &[u8], expected: &str) -> bool {
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect();
-    actual == expected
+    crate::ct_eq(actual.as_bytes(), expected.as_bytes())
 }
 
 /// Recognize only the traced type/memory/function/export/data arrangement.
@@ -360,7 +360,10 @@ fn normalize_block(body: &[u8]) -> Result<(Vec<u8>, u32), VidSrcError> {
             }) else {
                 break;
             };
-            let position = cursor + relative + prefix.len();
+            let position = cursor
+                .checked_add(relative)
+                .and_then(|pos| pos.checked_add(prefix.len()))
+                .ok_or(VidSrcError::Module("key load bounds"))?;
             let remaining = body
                 .get(position..)
                 .ok_or(VidSrcError::Module("key load bounds"))?;
@@ -382,12 +385,17 @@ fn normalize_block(body: &[u8]) -> Result<(Vec<u8>, u32), VidSrcError> {
             }
             mask = base;
             let canonical = 3584 + word * 4;
+            let end = position
+                .checked_add(2)
+                .ok_or(VidSrcError::Module("key load bounds"))?;
             let output = normalized
-                .get_mut(position..position + 2)
+                .get_mut(position..end)
                 .ok_or(VidSrcError::Module("key load bounds"))?;
             output.copy_from_slice(&[(canonical & 127) as u8 | 128, (canonical >> 7) as u8]);
             count += 1;
-            cursor = position + consumed;
+            cursor = position
+                .checked_add(consumed)
+                .ok_or(VidSrcError::Module("key load bounds"))?;
         }
         if count != 2 {
             return Err(VidSrcError::Module("key load count"));
@@ -402,8 +410,11 @@ fn normalize_decrypt(body: &[u8], block_index: u32) -> Result<Vec<u8>, VidSrcErr
         .windows(prefix.len())
         .enumerate()
         .filter(|(_, candidate)| *candidate == prefix)
-        .map(|(position, _)| position + prefix.len());
-    let position = positions.next().ok_or(VidSrcError::Module("block call"))?;
+        .map(|(position, _)| position.checked_add(prefix.len()));
+    let position = positions
+        .next()
+        .flatten()
+        .ok_or(VidSrcError::Module("block call"))?;
     if positions.next().is_some() || body.get(position).copied() != u8::try_from(block_index).ok() {
         return Err(VidSrcError::Module("block call index"));
     }

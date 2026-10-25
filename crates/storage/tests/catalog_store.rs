@@ -531,3 +531,31 @@ async fn backup_creates_consistent_sqlite_copy_and_rejects_existing() -> TestRes
 
     Ok(())
 }
+
+#[tokio::test]
+async fn invalid_cross_ids_writes_are_rejected() -> TestResult {
+    let store = memory_store().await?;
+    let instant = now()?;
+    // Malformed imdb_id
+    assert!(matches!(
+        store
+            .put(
+                write("cross_ids", "movie:550", json!({"imdb_id": "not_an_imdb_id", "mal_id": 10})),
+                instant
+            )
+            .await,
+        Err(StorageError::InvalidInput(_))
+    ));
+    // Negative mal_id
+    assert!(matches!(
+        store
+            .put(
+                write("cross_ids", "movie:550", json!({"imdb_id": "tt1234567", "mal_id": -5})),
+                instant
+            )
+            .await,
+        Err(StorageError::InvalidInput(_))
+    ));
+    store.close().await?;
+    Ok(())
+}

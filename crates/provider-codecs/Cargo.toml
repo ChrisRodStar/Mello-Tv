@@ -20,6 +20,7 @@ serde_json.workspace = true
 serde.workspace = true
 crypto_secretbox.workspace = true
 regex.workspace = true
+subtle.workspace = true
 
 [lints]
 workspace = true

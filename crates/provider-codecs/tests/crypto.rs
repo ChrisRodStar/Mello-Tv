@@ -123,5 +123,45 @@ fn videasy_accepts_observed_alphabets_and_tmdb_overflow_semantics() -> Result<()
         }
     }
     assert!(videasy::decrypt_payload("short", "seed", TmdbId::try_from(1)?).is_err());
+    assert!(videasy::decrypt_payload("a", "seed", TmdbId::try_from(1)?).is_err());
     Ok(())
+}
+
+#[test]
+fn pkcs7_padding_corruption_and_boundary_checks_reject_tampering() -> Result<(), Box<dyn Error>> {
+    let key = [0x5au8; 32];
+    let iv = [0x2bu8; 16];
+    let plaintext = b"exact-16-bytes!!";
+    let ciphertext = crypto::aes_cbc_encrypt(&key, &iv, plaintext)?;
+    assert_eq!(ciphertext.len(), 32); // 16 bytes plaintext + 16 bytes PKCS#7 padding block
+
+    // Flipping any bit in the final padding block must cause a PKCS#7 unpadding failure
+    for byte_offset in 16..32 {
+        let mut corrupted = ciphertext.clone();
+        corrupted[byte_offset] ^= 0x01;
+        assert_eq!(
+            crypto::aes_cbc_decrypt(&key, &iv, &corrupted),
+            Err(CryptoError::InvalidEnvelope)
+        );
+    }
+
+    // 128-bit key test
+    let key128 = [0x7eu8; 16];
+    let ct128 = crypto::aes_cbc_encrypt(&key128, &iv, b"sample")?;
+    for byte_offset in 0..ct128.len() {
+        let mut corrupted = ct128.clone();
+        corrupted[byte_offset] ^= 0x80;
+        assert!(crypto::aes_cbc_decrypt(&key128, &iv, &corrupted).is_err());
+    }
+
+    Ok(())
+}
+
+#[test]
+fn constant_time_equality_checks() {
+    assert!(crypto::ct_eq(b"hello", b"hello"));
+    assert!(!crypto::ct_eq(b"hello", b"world"));
+    assert!(!crypto::ct_eq(b"hello", b"hell"));
+    assert!(!crypto::ct_eq(b"", b"a"));
+    assert!(crypto::ct_eq(b"", b""));
 }

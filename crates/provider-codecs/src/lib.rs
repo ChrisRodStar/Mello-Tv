@@ -17,6 +17,7 @@ use aes_gcm::{
     aead::{Aead, Payload},
 };
 use sha2::{Digest, Sha256};
+use subtle::ConstantTimeEq;
 use thiserror::Error;
 use zeroize::Zeroizing;
 
@@ -50,6 +51,11 @@ pub fn sha256(parts: &[&[u8]]) -> [u8; 32] {
         digest.update(part);
     }
     digest.finalize().into()
+}
+
+/// Constant-time comparison between byte slices to prevent timing side-channels.
+pub fn ct_eq(a: &[u8], b: &[u8]) -> bool {
+    a.ct_eq(b).into()
 }
 
 pub fn aes_cbc_encrypt(key: &[u8], iv: &[u8], plaintext: &[u8]) -> Result<Vec<u8>, CryptoError> {

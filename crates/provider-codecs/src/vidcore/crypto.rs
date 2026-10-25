@@ -116,9 +116,10 @@ pub(super) fn challenge(
     let mut blocks = Vec::with_capacity(encrypted.len());
     for index in &block_order {
         let start = index.checked_mul(16).ok_or(ProtocolError::InputLimit)?;
+        let end = start.checked_add(16).ok_or(ProtocolError::InputLimit)?;
         blocks.extend_from_slice(
             encrypted
-                .get(start..start + 16)
+                .get(start..end)
                 .ok_or(ProtocolError::Invalid("block permutation"))?,
         );
     }
@@ -134,7 +135,8 @@ pub(super) fn challenge(
             .ok_or(ProtocolError::Invalid("byte permutation"))?;
     }
     let count = u16::try_from(block_order.len()).map_err(|_| ProtocolError::InputLimit)?;
-    let mut serialized = Vec::with_capacity(block_order.len() * 4);
+    let capacity = block_order.len().checked_mul(4).ok_or(ProtocolError::InputLimit)?;
+    let mut serialized = Vec::with_capacity(capacity);
     for index in block_order {
         serialized.extend_from_slice(
             &u32::try_from(index)
@@ -190,7 +192,8 @@ pub(super) fn ticket(
     {
         return Err(ProtocolError::Invalid("challenge response"));
     }
-    let mut current = Vec::with_capacity(response.len() * 2);
+    let capacity = response.len().checked_mul(2).ok_or(ProtocolError::InputLimit)?;
+    let mut current = Vec::with_capacity(capacity);
     const HEX: &[u8; 16] = b"0123456789abcdef";
     for byte in response.iter().rev() {
         current.push(HEX[usize::from(byte >> 4)]);

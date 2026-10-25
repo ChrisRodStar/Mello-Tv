@@ -688,7 +688,7 @@ impl AccountStore {
             let ProgressSession { request, total, sequence, created, expires, revoked, ready } = row.ok_or(StorageError::NotFound)?;
             if ready.as_ref().is_none_or(Vec::is_empty) { return Err(StorageError::Conflict("setup_pending")); }
             if revoked || now.timestamp() > expires.saturating_add(300) { return Err(StorageError::Conflict("session_expired")); }
-            if !total.is_finite() || total < 0.0 || sequence < 0 { return Err(StorageError::Corrupt("playback progress counters")); }
+            if !total.is_finite() || total < 0.0 || sequence < 0 || created <= 0 || expires <= 0 { return Err(StorageError::Corrupt("playback progress counters")); }
             let request: PlaybackRequest = serde_json::from_slice(&request)?;
             request.validate().map_err(|_| StorageError::Corrupt("playback request"))?;
             let mut progress = read_progress(&transaction, &profile_id, &request.target)?.unwrap_or_else(|| Progress {
@@ -796,6 +796,9 @@ impl AccountStore {
                         continue;
                     }
                     let title: Title = serde_json::from_slice(&data)?;
+                    title
+                        .validate()
+                        .map_err(|_| StorageError::Corrupt("recommendation feedback title"))?;
                     match kind.as_str() {
                         "recommendation-hidden" => hidden.push(title),
                         "recommendation-watched" => watched.push(title),
@@ -971,7 +974,10 @@ impl AccountStore {
                     .optional()?
                 };
                 if let Some((prior_kind, prior_revision, prior_result)) = prior {
-                    if prior_kind != kind || prior_revision as u64 != expected_revision {
+                    let Ok(prior_rev_u64) = u64::try_from(prior_revision) else {
+                        return Err(StorageError::Corrupt("mutation history revision"));
+                    };
+                    if prior_kind != kind || prior_rev_u64 != expected_revision {
                         return Err(StorageError::Conflict("idempotency_conflict"));
                     }
                     let ready: RelayReady = serde_json::from_slice(&prior_result)?;
@@ -986,12 +992,19 @@ impl AccountStore {
                     });
                 }
 
+                let Ok(expected_revision_i64) = i64::try_from(expected_revision) else {
+                    return Err(StorageError::InvalidInput("expected_revision"));
+                };
+                let Some(next_revision) = expected_revision.checked_add(1) else {
+                    return Err(StorageError::InvalidInput("expected_revision"));
+                };
+
                 if expected_revision != current_ready.revision {
                     return Err(StorageError::Conflict("revision_conflict"));
                 }
 
                 if new_ready.session_id != current_ready.session_id
-                    || new_ready.revision != expected_revision + 1
+                    || new_ready.revision != next_revision
                     || new_ready.auth_revision != current_ready.auth_revision
                 {
                     return Err(StorageError::InvalidInput("relay_invalid_transition"));
@@ -1010,7 +1023,7 @@ impl AccountStore {
                 let result_bytes = serde_json::to_vec(&new_ready)?;
                 transaction.execute(
                     "INSERT INTO mutation_history(playback,idem,kind,revision,result) VALUES(?1,?2,?3,?4,?5)",
-                    params![playback_id, idempotency_key, kind, expected_revision as i64, result_bytes],
+                    params![playback_id, idempotency_key, kind, expected_revision_i64, result_bytes],
                 )?;
                 transaction.execute(
                     "UPDATE playbacks SET ready=?1,expires=?2 WHERE id=?3 AND profile=?4",
@@ -1168,6 +1181,9 @@ fn schema_definitions(
 }
 
 fn decode_profile(id: &str, data: &[u8]) -> Result<Profile, StorageError> {
+    if data.len() > 64 * 1024 {
+        return Err(StorageError::Corrupt("profile data exceeds size limit"));
+    }
     let profile: Profile = serde_json::from_slice(data)?;
     profile
         .validate()
@@ -1228,7 +1244,10 @@ fn validate_new_playback(playback: &NewPlayback) -> Result<(), StorageError> {
     {
         return Err(StorageError::InvalidInput("fingerprint"));
     }
-    if playback.expires_at < playback.created_at {
+    if playback.created_at.timestamp() <= 0
+        || playback.expires_at.timestamp() <= 0
+        || playback.expires_at < playback.created_at
+    {
         return Err(StorageError::InvalidInput("playback expiry"));
     }
     if let Some(ready) = &playback.ready {
@@ -1255,6 +1274,9 @@ fn load_playback(
         )
         .optional()?;
     let (request, ready, revoked) = row.ok_or(StorageError::NotFound)?;
+    if request.len() > 256 * 1024 || ready.as_ref().is_some_and(|r| r.len() > 256 * 1024) {
+        return Err(StorageError::Corrupt("playback data exceeds size limit"));
+    }
     let request: PlaybackRequest = serde_json::from_slice(&request)?;
     request
         .validate()
@@ -1277,6 +1299,9 @@ fn load_playback(
 }
 
 fn decode_progress(target_key: &str, data: &[u8]) -> Result<Progress, StorageError> {
+    if data.len() > 64 * 1024 {
+        return Err(StorageError::Corrupt("progress data exceeds size limit"));
+    }
     let progress: Progress = serde_json::from_slice(data)?;
     progress
         .validate()
@@ -1335,6 +1360,9 @@ fn seal(key: &[u8; 32], aad: &str, plain: &[u8]) -> Result<Vec<u8>, StorageError
 }
 
 fn unseal(key: &[u8; 32], aad: &str, envelope: &[u8]) -> Result<Zeroizing<Vec<u8>>, StorageError> {
+    if envelope.len() > 16 * 1024 * 1024 {
+        return Err(StorageError::Capacity);
+    }
     let (nonce, ciphertext) = envelope.split_at_checked(12).ok_or(StorageError::Crypto)?;
     let nonce: [u8; 12] = nonce.try_into().map_err(|_| StorageError::Crypto)?;
     let cipher = Aes256Gcm::new_from_slice(key).map_err(|_| StorageError::Crypto)?;

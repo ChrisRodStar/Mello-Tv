@@ -544,8 +544,10 @@ impl StreamProber {
                     .and_then(|value| value.to_str().ok())
                     .is_some_and(|kind| {
                         let kind = kind.to_ascii_lowercase();
-                        kind.contains("text/html")
+                        kind.starts_with("text/")
+                            || kind.contains("text/html")
                             || kind.contains("json")
+                            || kind.contains("xml")
                             || kind.contains("mpegurl")
                     });
                 let is_ts = bmff::transport_stream(&response.body);
@@ -645,6 +647,9 @@ fn masquerades_as_text(body: &[u8]) -> bool {
         || prefix
             .get(..9)
             .is_some_and(|value| value.eq_ignore_ascii_case(b"<!doctype"))
+        || prefix
+            .get(..5)
+            .is_some_and(|value| value.eq_ignore_ascii_case(b"<?xml"))
 }
 
 fn merge_results(

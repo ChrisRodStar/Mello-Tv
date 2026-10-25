@@ -176,10 +176,11 @@ impl CatalogStore {
                 let mut record = get_record(&transaction, "title", &key, now)?;
                 match get_record(&transaction, "cross_ids", &key, now) {
                     Ok(cross) => {
-                        if let (Ok(mut title), Ok(ids)) = (
-                            serde_json::from_value::<Title>(record.data.clone()),
-                            serde_json::from_value::<CrossIds>(cross.data),
-                        ) {
+                        let title = serde_json::from_value::<Title>(record.data.clone()).ok();
+                        let ids = serde_json::from_value::<CrossIds>(cross.data).ok();
+                        if let (Some(mut title), Some(ids)) =
+                            (title, ids.filter(|ids| ids.validate().is_ok()))
+                        {
                             if !ids.imdb_id.is_empty() {
                                 title.imdb_id = ids.imdb_id;
                             }
@@ -246,6 +247,11 @@ impl CatalogStore {
                         "catalog title key does not match identity",
                     ));
                 }
+            } else if write.kind == "cross_ids" {
+                let cross: CrossIds = serde_json::from_value(write.data.clone())?;
+                cross
+                    .validate()
+                    .map_err(|_| StorageError::InvalidInput("invalid catalog cross_ids"))?;
             }
             let data = serde_json::to_vec(&write.data)?;
             encoded_bytes = encoded_bytes
@@ -325,7 +331,7 @@ impl CatalogStore {
     /// Backup creates a point-in-time SQLite database copy using VACUUM INTO.
     pub async fn backup(&self, path: impl AsRef<Path>) -> Result<(), StorageError> {
         let mut path = path.as_ref().to_path_buf();
-        if path.exists() {
+        if path.exists() || std::fs::symlink_metadata(&path).is_ok() {
             return Err(StorageError::InvalidInput(
                 "backup destination must not exist",
             ));
@@ -582,10 +588,16 @@ fn read_record(row: &Row<'_>, now: DateTime<Utc>) -> Result<CatalogRecord, Stora
     if revision < 0 {
         return Err(StorageError::Corrupt("negative catalog record revision"));
     }
+    let data_bytes = read_bytes(row, 2)?;
+    if data_bytes.len() > 16 * 1024 * 1024 {
+        return Err(StorageError::Corrupt(
+            "catalog record data exceeds size limit",
+        ));
+    }
     Ok(CatalogRecord {
         kind: row.get(0)?,
         key: row.get(1)?,
-        data: serde_json::from_slice(read_bytes(row, 2)?)?,
+        data: serde_json::from_slice(data_bytes)?,
         updated_at,
         expires_at,
         revision,

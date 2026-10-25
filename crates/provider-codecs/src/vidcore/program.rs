@@ -500,11 +500,15 @@ pub(super) fn compile(source: &str) -> Result<Protocol, ProtocolError> {
     ]);
     let layout = LAYOUTS
         .iter()
-        .find(|layout| layout.material == material_hash)
+        .find(|layout| crate::ct_eq(layout.material.as_bytes(), material_hash.as_bytes()))
         .ok_or(ProtocolError::UnknownMaterial)?;
     let list = decode_program(fragments.prefix, fragments.list, layout.list_parts)?;
     let unlock = decode_program(fragments.prefix, fragments.unlock, 5)?;
-    if fingerprint(&[&list]) != layout.list || fingerprint(&[&unlock]) != layout.unlock {
+    let list_fp = fingerprint(&[&list]);
+    let unlock_fp = fingerprint(&[&unlock]);
+    if !crate::ct_eq(list_fp.as_bytes(), layout.list.as_bytes())
+        || !crate::ct_eq(unlock_fp.as_bytes(), layout.unlock.as_bytes())
+    {
         return Err(ProtocolError::UnknownInstructions);
     }
     let read = |offset| string_constant(&list, offset);

@@ -25,3 +25,45 @@ pub fn public_url(raw:&str)->Result<Url,AdapterError>{
     }
     Ok(url)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_public_url_validation_and_ssrf_rejection() {
+        // Valid public URLs
+        assert!(public_url("https://example.com/api").is_ok());
+        assert!(public_url("http://8.8.8.8/").is_ok());
+        assert!(public_url("https://[2606:4700:4700::1111]/").is_ok());
+
+        // Private / Loopback IPv4
+        assert!(public_url("http://127.0.0.1/").is_err());
+        assert!(public_url("http://10.0.0.1/").is_err());
+        assert!(public_url("http://192.168.1.1/").is_err());
+        assert!(public_url("http://172.16.0.1/").is_err());
+        assert!(public_url("http://169.254.169.254/").is_err());
+
+        // Hex, octal, and single dword IPv4 representations
+        assert!(public_url("http://0x7f000001/").is_err());
+        assert!(public_url("http://0x08080808/").is_err());
+        assert!(public_url("http://0177.0.0.1/").is_err());
+        assert!(public_url("http://010.010.010.010/").is_err());
+        assert!(public_url("http://2130706433/").is_err());
+        assert!(public_url("http://8.8.8/").is_err());
+
+        // IPv6 loopback, private, and IPv4-mapped IPv6
+        assert!(public_url("http://[::1]/").is_err());
+        assert!(public_url("http://[fc00::1]/").is_err());
+        assert!(public_url("http://[fe80::1]/").is_err());
+        assert!(public_url("http://[::ffff:127.0.0.1]/").is_err());
+        assert!(public_url("http://[::ffff:8.8.8.8]/").is_err());
+        assert!(public_url("http://[2002:7f00:1::]/").is_err());
+
+        // Nonpublic domains and credentials
+        assert!(public_url("http://localhost/").is_err());
+        assert!(public_url("http://internal.lan/").is_err());
+        assert!(public_url("http://user:pass@example.com/").is_err());
+        assert!(public_url("http://example.com:8080/").is_err());
+    }
+}

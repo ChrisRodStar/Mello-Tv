@@ -820,3 +820,47 @@ async fn rejecting_legacy_key_does_not_switch_journal_or_rewrite_sentinel() -> T
     );
     Ok(())
 }
+
+#[tokio::test]
+async fn playback_allocation_rejects_nonpositive_or_inverted_timestamps() -> TestResult {
+    let (store, owner) = store_with_profiles().await?;
+    let mut bad_created = allocation("bad_created")?;
+    bad_created.created_at = DateTime::from_timestamp(0, 0).ok_or("valid zero timestamp")?;
+    assert!(matches!(
+        store.create_playback(&owner, "first", bad_created).await,
+        Err(StorageError::InvalidInput(_))
+    ));
+
+    let mut go_zero = allocation("go_zero")?;
+    go_zero.created_at = DateTime::from_timestamp(-62_135_596_800, 0).ok_or("valid go-zero timestamp")?;
+    assert!(matches!(
+        store.create_playback(&owner, "first", go_zero).await,
+        Err(StorageError::InvalidInput(_))
+    ));
+    Ok(())
+}
+
+#[tokio::test]
+async fn mutate_playback_rejects_overflowing_revision() -> TestResult {
+    let (store, owner) = store_with_profiles().await?;
+    store
+        .create_playback(&owner, "first", allocation("mutate_overflow")?)
+        .await?;
+    let mut new_ready = ready()?;
+    new_ready.revision = 2;
+    assert!(matches!(
+        store
+            .mutate_playback(
+                &owner,
+                "first",
+                "mutate_overflow",
+                "idem_mutate_overflow",
+                "refresh",
+                u64::MAX,
+                new_ready
+            )
+            .await,
+        Err(StorageError::InvalidInput(_))
+    ));
+    Ok(())
+}

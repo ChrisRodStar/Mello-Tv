@@ -73,7 +73,7 @@ fn recognize_player_version(
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect();
-    if digest != expected_digest {
+    if !crate::ct_eq(digest.as_bytes(), expected_digest.as_bytes()) {
         return Err(VidFastError::UnknownPlayer);
     }
     let source = std::str::from_utf8(body).map_err(|_| VidFastError::Invalid("player encoding"))?;

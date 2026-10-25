@@ -211,6 +211,11 @@ fn progress_bounds_match_go_and_do_not_forbid_seeking() -> TestResult {
         "watched_seconds":1_000_000,"completed":true,"updated_at":"2026-10-25T12:00:00Z"
     }))?;
     progress.validate()?;
+    let mut bad_progress = progress.clone();
+    bad_progress.updated_at = chrono::DateTime::from_timestamp(-1, 0).ok_or("valid pre-epoch timestamp")?;
+    assert!(bad_progress.validate().is_err());
+    bad_progress.updated_at = chrono::DateTime::from_timestamp(-62_135_596_800, 0).ok_or("valid go-zero timestamp")?;
+    assert!(bad_progress.validate().is_err());
     Ok(())
 }
 

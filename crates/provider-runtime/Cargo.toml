@@ -20,6 +20,7 @@ tokio.workspace = true
 tokio-util.workspace = true
 url.workspace = true
 wasmtime.workspace = true
+subtle.workspace = true
 
 [dev-dependencies]
 wat.workspace = true

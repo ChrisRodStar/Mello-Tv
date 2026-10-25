@@ -40,19 +40,24 @@ impl GuardedResolver {
 }
 async fn resolve_cached(host: &str) -> Result<Vec<SocketAddr>, TransportError> {
     let now = Instant::now();
-    let cached = dns_cache()
-        .read()
-        .ok()
-        .and_then(|c| c.get(host).filter(|e| e.expires_at > now).map(|e| e.addresses.clone()));
+    let cached = {
+        let cache = dns_cache().read().unwrap_or_else(|e| e.into_inner());
+        cache.get(host).filter(|e| e.expires_at > now).map(|e| e.addresses.clone())
+    };
     if let Some(addresses) = cached {
         return Ok(addresses);
     }
 
+    let lookup = tokio::time::timeout(
+        Duration::from_secs(5),
+        tokio::net::lookup_host((host, 0)),
+    )
+    .await
+    .map_err(|_| TransportError::Dns)?
+    .map_err(|_| TransportError::Dns)?;
+
     let mut addresses = Vec::new();
-    for address in tokio::net::lookup_host((host, 0))
-        .await
-        .map_err(|_| TransportError::Dns)?
-    {
+    for address in lookup {
         if addresses.len() >= 64 {
             return Err(TransportError::DestinationDenied);
         }
@@ -65,19 +70,26 @@ async fn resolve_cached(host: &str) -> Result<Vec<SocketAddr>, TransportError> {
     }
     validate_answers(&addresses)?;
 
-    if let Ok(mut cache) = dns_cache().write() {
-        if cache.len() >= DNS_CACHE_MAX_ENTRIES {
-            cache.retain(|_, v| v.expires_at > now);
-        }
-        if cache.len() < DNS_CACHE_MAX_ENTRIES {
-            cache.insert(
-                host.to_owned(),
-                CacheEntry {
-                    addresses: addresses.clone(),
-                    expires_at: now + DNS_CACHE_TTL,
-                },
-            );
-        }
+    let mut cache = dns_cache().write().unwrap_or_else(|e| e.into_inner());
+    if cache.len() >= DNS_CACHE_MAX_ENTRIES {
+        cache.retain(|_, v| v.expires_at > now);
+    }
+    if cache.len() >= DNS_CACHE_MAX_ENTRIES
+        && let Some(oldest_key) = cache
+            .iter()
+            .min_by_key(|(_, v)| v.expires_at)
+            .map(|(k, _)| k.clone())
+    {
+        cache.remove(&oldest_key);
+    }
+    if cache.len() < DNS_CACHE_MAX_ENTRIES {
+        cache.insert(
+            host.to_owned(),
+            CacheEntry {
+                addresses: addresses.clone(),
+                expires_at: now + DNS_CACHE_TTL,
+            },
+        );
     }
 
     Ok(addresses)

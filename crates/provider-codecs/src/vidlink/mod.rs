@@ -62,7 +62,7 @@ pub fn recognize_player(module: &[u8]) -> Result<RecognizedPlayer, VidLinkError>
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect();
-    if digest != PLAYER_SHA256 {
+    if !crate::ct_eq(digest.as_bytes(), PLAYER_SHA256.as_bytes()) {
         return Err(VidLinkError::UnknownPlayer);
     }
     Ok(RecognizedPlayer { _verified: () })
@@ -86,7 +86,10 @@ pub fn generate_token(tmdb_id: TmdbId, unix_seconds: i64) -> Result<String, VidL
     let sealed = cipher
         .encrypt(&nonce, message.as_slice())
         .map_err(|_| VidLinkError::Cipher)?;
-    let mut envelope = Vec::with_capacity(24 + sealed.len());
+    let envelope_cap = 24usize
+        .checked_add(sealed.len())
+        .ok_or(VidLinkError::Cipher)?;
+    let mut envelope = Vec::with_capacity(envelope_cap);
     envelope.extend_from_slice(&nonce);
     envelope.extend_from_slice(&sealed);
     Ok(URL_SAFE_NO_PAD.encode(envelope))
