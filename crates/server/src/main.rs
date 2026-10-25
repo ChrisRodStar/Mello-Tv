@@ -197,6 +197,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     let catalog_db = config.db_path.join("catalog.db");
     let catalog = CatalogStore::open(catalog_db).await?;
+    stream_server::seed::seed_if_empty(&catalog).await?;
 
     let key = [0x5cu8; 32];
     let accounts_db = config.db_path.join("accounts.db");
