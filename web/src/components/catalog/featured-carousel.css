@@ -43,7 +43,6 @@
   justify-content: center;
   width: 100%;
   height: var(--card-height);
-  transform-style: preserve-3d;
   z-index: 1;
 }
 
