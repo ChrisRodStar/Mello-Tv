@@ -591,7 +591,7 @@ impl Inner {
                 .collect::<FuturesUnordered<_>>();
             let mut statuses = Vec::with_capacity(providers.len());
             while let Some((mut status, candidates)) = outcomes.next().await {
-                for mut candidate in candidates {
+                for mut candidate in candidates.into_iter().take(6) {
                     if candidate.title.imdb_id.is_empty() {
                         candidate.title.imdb_id = lookup.title.imdb_id.clone();
                     }

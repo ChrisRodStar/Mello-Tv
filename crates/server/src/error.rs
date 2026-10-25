@@ -17,6 +17,8 @@ pub enum AppError {
     NotFound(String),
     #[error("bad request: {0}")]
     BadRequest(String),
+    #[error("unprocessable: {0}")]
+    Unprocessable(String),
     #[error("conflict: {0}")]
     Conflict(String),
     #[error("storage error: {0}")]
@@ -38,6 +40,7 @@ impl IntoResponse for AppError {
         let (status, code) = match self {
             AppError::NotFound(msg) => (StatusCode::NOT_FOUND, msg),
             AppError::BadRequest(msg) => (StatusCode::BAD_REQUEST, msg),
+            AppError::Unprocessable(msg) => (StatusCode::UNPROCESSABLE_ENTITY, msg),
             AppError::Conflict(msg) => {
                 if msg == "revoked" || msg == "session_expired" {
                     (StatusCode::GONE, msg)

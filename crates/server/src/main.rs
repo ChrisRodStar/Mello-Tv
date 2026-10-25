@@ -4,6 +4,8 @@ use std::{
     sync::Arc,
 };
 
+use stream_core::ports::MediaEngine;
+use stream_media::DiscoveryCoordinator;
 use stream_server::{
     routes,
     state::{AppState, NoopMediaEngine},
@@ -218,7 +220,16 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let household_id = accounts.select_household(None).await?;
     tracing::info!(%household_id, "household account selected");
 
-    let media = Arc::new(NoopMediaEngine);
+    let media: Arc<dyn MediaEngine> = match DiscoveryCoordinator::default_live() {
+        Ok(coordinator) => {
+            tracing::info!("initialized live media discovery engine with 5 native providers");
+            Arc::new(coordinator)
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "failed to initialize live media engine, falling back to noop");
+            Arc::new(NoopMediaEngine)
+        }
+    };
 
     let state = AppState::new(
         Arc::new(catalog),

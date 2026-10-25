@@ -7,8 +7,10 @@ publish.workspace = true
 
 [dependencies]
 stream-core = { path = "../core" }
+stream-provider-adapters = { path = "../provider-adapters" }
 stream-provider-codecs = { path = "../provider-codecs" }
 stream-provider-runtime = { path = "../provider-runtime" }
+stream-provider-sdk = { path = "../provider-sdk" }
 stream-storage = { path = "../storage" }
 reqwest.workspace = true
 tokio.workspace = true
@@ -23,10 +25,6 @@ async-trait.workspace = true
 chrono.workspace = true
 http.workspace = true
 semver.workspace = true
-
-[dev-dependencies]
-stream-provider-adapters = { path = "../provider-adapters" }
-stream-provider-sdk = { path = "../provider-sdk" }
 getrandom.workspace = true
 
 [lints]

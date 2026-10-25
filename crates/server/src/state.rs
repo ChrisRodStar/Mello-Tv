@@ -1,5 +1,6 @@
 use std::sync::Arc;
 use stream_core::ports::{CatalogRepository, MediaEngine};
+use stream_media::MediaRelay;
 use stream_storage::{AccountStore, CatalogStore};
 
 #[derive(Clone)]
@@ -7,6 +8,7 @@ pub struct AppState {
     pub catalog: Arc<CatalogStore>,
     pub accounts: Arc<AccountStore>,
     pub media: Arc<dyn MediaEngine>,
+    pub relay: Arc<MediaRelay>,
     pub household_account_id: String,
 }
 
@@ -21,6 +23,7 @@ impl AppState {
             catalog,
             accounts,
             media,
+            relay: Arc::new(MediaRelay::new()),
             household_account_id,
         }
     }

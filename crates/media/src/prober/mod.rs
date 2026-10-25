@@ -357,9 +357,10 @@ impl StreamProber {
         .await
         .map_err(|_| ProbeFailure::Timeout)??;
         if playlist.kind == PlaylistKind::Media {
+            let initial_variant = candidate.resolver_metadata.variants.first().cloned();
             let result = tokio::time::timeout_at(
                 deadline,
-                self.sample_playlist(candidate.clone(), playlist, None, round, cancel),
+                self.sample_playlist(candidate.clone(), playlist, initial_variant, round, cancel),
             )
             .await
             .unwrap_or_else(|_| failure(candidate, ProbeFailure::Timeout));
@@ -527,17 +528,19 @@ impl StreamProber {
                 return Err(ProbeFailure::Protocol);
             }
             let mut all_speeds = true;
-            for sample in samples {
-                let response = self
-                    .fetch_sample(
-                        &result.source,
-                        sample,
-                        self.limits.sample_bytes,
-                        &round.segments,
-                        false,
-                        cancel,
-                    )
-                    .await?;
+            let sample_futs = samples.into_iter().map(|sample| {
+                self.fetch_sample(
+                    &result.source,
+                    sample,
+                    self.limits.sample_bytes,
+                    &round.segments,
+                    false,
+                    cancel,
+                )
+            });
+            let responses = futures_util::future::join_all(sample_futs).await;
+            for response in responses {
+                let response = response?;
                 let textual = response
                     .headers
                     .get("content-type")
@@ -762,7 +765,10 @@ fn measure(
         .total
         .checked_sub(response.metrics.admission_wait)
         .ok_or(ProbeFailure::Protocol)?;
-    if response.body.len() < 16 * 1024 || elapsed < Duration::from_millis(1) {
+    if response.body.len() < 16 * 1024 {
+        return Ok(());
+    }
+    if elapsed < Duration::from_millis(1) {
         *all_speeds = false;
         return Ok(());
     }

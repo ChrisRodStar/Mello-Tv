@@ -17,4 +17,5 @@ pub use coordinator::{
 };
 pub use network::HttpClient;
 pub use prober::StreamProber;
-pub use relay::MediaRelay;
+pub use providers::NativeProviders;
+pub use relay::{MediaRelay, RelayError, RelayResponse};
