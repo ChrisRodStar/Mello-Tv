@@ -1,141 +1,109 @@
+<a id="readme-top"></a>
+
 <div align="center">
 
-# Stream TV
+[![Version](https://img.shields.io/badge/version-v0.5.0-e50914?style=for-the-badge)](https://github.com/ChrisRodStar/stream/releases)
+[![Contributors](https://img.shields.io/github/contributors/ChrisRodStar/stream?style=for-the-badge&color=green)](#top-contributors)
+[![Stars](https://img.shields.io/github/stars/ChrisRodStar/stream?style=for-the-badge&color=gold)](https://github.com/ChrisRodStar/stream/stargazers)
+[![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20iOS%20%7C%20Web-blue?style=for-the-badge)](#platforms)
 
-**A private, resilient, fail-closed household media architecture.**
+# Mello TV 🎬
 
-[Architecture](#system-architecture) &bull; [Projects](#the-project-fleet) &bull; [Privacy & Security](#privacy-and-fail-closed-routing) &bull; [Data Resilience](#data-and-resilience) &bull; [Development](#development-and-implementation-order)
+### _Support Mello TV’s development by starring this repository!_ ⭐
 
----
+#### Self-hosted streaming server and native apps built for your home.
+Powered by a single, lightweight Rust engine with zero-config network discovery across iPhone, Mac, and the web.
+
+**[🌐 Mello Watch](https://mellowatch.com)** · **[📖 Documentation](https://mellowatch.com/docs)** · **[💬 Discussions](https://github.com/ChrisRodStar/stream/discussions)** · **[🐛 Issues](https://github.com/ChrisRodStar/stream/issues)**
 
 </div>
 
-## Overview
-
-The backend has been completely migrated to a unified, high-performance, portable **Rust workspace** (`crates/`), replacing the legacy multi-service Go and standalone relay implementations with a single memory-safe binary suite:
-
-- **100% Native Codecs & Ciphers**: Zero headless browsers, zero node runtimes. Provider ciphers (VidCore, VidLink, VidSrc, VidFast, Videasy) run directly in Rust WebAssembly and native crypto crates.
-- **Sub-Second to Low-Latency Stream Resolution**: Integrated DNS caching, HTTP/2 connection pooling, parallel playlist promotion, and in-memory protocol compilation.
-- **Fail-Closed Privacy & Relay**: Streaming proxy with HLS rewriting, bounded backpressure buffers, and robust token authorization.
-- **Clients**: Native iOS (SwiftUI) and modern Web (React + Vite) frontends.
-
 ---
 
-## System Architecture
+**Mello TV** is a private, self-hosted streaming server and app suite for movies and TV shows. Run the server in your Mac menu bar (or on any home server), open the **Mello TV** app on your iPhone or browser, and start watching right away—no port forwarding, no manual IP setup, and no third-party ads or redirects.
 
-The repository is organized into a modular Rust workspace and client applications:
+It resolves streams across multiple providers in parallel and relays video cleanly to your devices while keeping your household profiles, watchlists, and playback progress in sync.
 
-<div align="center">
+**Instant access to multiple high-quality sources for any movie or TV show!**
 
-```mermaid
-flowchart TD
-    Client["Client Device (iPhone / Web Browser)"]
+> [!CAUTION]
+> Mello TV is designed for **personal and home use only.**  
+> While we do not prevent remote hosting, it is intended to run on your local network or private Tailscale mesh.*
+>
+> Users are responsible for ensuring compliance with applicable laws and the terms of service of upstream providers.
 
-    subgraph Clients ["Client Applications"]
-        Web["stream-web (React + Vite)"]
-        IOS["stream-ios (SwiftUI + AVKit)"]
-    end
+<details><summary>*:</summary>
 
-    subgraph RustWorkspace ["Unified Rust Backend (crates/)"]
-        Server["stream-server (API Gateway & Sessions)"]
-        Storage["stream-storage (Catalog, Profiles, SQLite)"]
-        Media["stream-media (Streaming Relay & Prober)"]
-        Adapters["stream-provider-adapters (VidCore, VidLink, etc.)"]
-        Runtime["stream-provider-runtime & codecs (Wasm Sandbox)"]
-        Core["stream-core (Domain Types & Contracts)"]
+Mello TV automatically resolves direct media streams from third-party providers while stripping out ads, popups, and malicious redirects, then proxies the clean video stream to your devices.
 
-        Server --> Storage
-        Server --> Media
-        Media --> Adapters
-        Adapters --> Runtime
-        Runtime --> Core
-    end
+Because resolving and relaying streams uses local compute and bandwidth, exposing an unprotected instance to the public internet can invite abuse. We strongly recommend running Mello TV on your home network and using [Tailscale](https://tailscale.com) when watching away from home.
 
-    Internet["Upstream Video Hosters & CDNs"]
+</details>
 
-    Client --> Web
-    Client --> IOS
-    Web -->|"API & Stream RPC"| Server
-    IOS -->|"API & Stream RPC"| Server
-    Media -->|"Protected Stream Ingestion"| Internet
+## Quick Start
+
+**Prerequisites:** Rust (stable), Node.js 20+, and a [TMDB API key](https://www.themoviedb.org/settings/api)
+
+```bash
+git clone https://github.com/ChrisRodStar/stream.git && cd stream
+cp deploy/.env.example .env   # add your TMDB_API_KEY
+cargo run -p stream-server    # http://localhost:8080
 ```
 
-</div>
+Want the native macOS menu bar app (`.app` & `.dmg`)?
 
----
-
-## The Project Fleet
-
-| Directory | Stack | Responsibility |
-|---|---|---|
-| [crates/](crates) | Rust 2024 Workspace | **The Unified Backend:** High-performance server, catalog database, media streaming relay, and reverse-engineered provider cipher engine. |
-| [deploy/](deploy) | Docker Compose | **The Orchestrator:** Container and service deployment configurations. |
-| [ios/](ios) | SwiftUI + AVKit | **The iOS Client:** Native mobile interface with speculative background player pre-warming. |
-| [web/](web) | React + Vite | **The Web Client:** Clean browser interface featuring keyboard navigation, tap-to-seek gestures, and continue-watching shelves. |
-
----
-
-## Privacy and Fail-Closed Routing
-
-Stream TV enforces absolute network isolation so that client devices never communicate directly with upstream video hosts.
-
-<div align="center">
-
-```mermaid
-flowchart TD
-    Device["Client Device (iPhone / Browser)"] -->|"1. Tailscale Encrypted Mesh"| Host["Tailscale Serve on Host"]
-    
-    Host -->|"Path /"| Web["Application Container: Web UI"]
-    Host -->|"Path /api/*"| API["Application Container: Go API"]
-    Host -->|"Path /stream/*"| Relay["Streaming Container: Rust Relay"]
-
-    subgraph VPNBoundary ["Streaming Container (Isolated Network Namespace)"]
-        Relay -->|"2. Fail-Closed iptables"| WireGuard["Mullvad VPN (wg0)"]
-    end
-
-    WireGuard -->|"3. Protected Outbound Traffic"| Hosters["Upstream Video Hosters"]
+```bash
+./macos/package-macos.sh
 ```
 
-</div>
+For full setup guides, iOS companion installation, and remote Tailscale streaming → **[Documentation](https://mellowatch.com/docs)**
 
-1. **Private Ingress:** Tailscale Serve acts as the single entry point. Remote devices connect over a private, authenticated mesh tunnel.
-2. **Fail-Closed VPN Egress:** All provider scraping and media fetching in the streaming container must route through the Mullvad WireGuard interface (`wg0`). If the tunnel disconnects, outbound traffic drops immediately via kernel firewall rules to prevent IP exposure.
-3. **Manifest Link Sanitization:** The Rust relay parses all `.m3u8` playlists and rewrites external segment URLs into local relay paths (`/stream/{session_id}/r/{resource_id}?st={token}`). Client devices never receive direct addresses to third-party CDNs.
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
 
----
+## Features
 
-## Data and Resilience
+* 📡 **Zero-Config Discovery** – iOS and web clients automatically find your Mello TV server on Wi-Fi via UDP broadcast and Bonjour
+* 🌍 **Seamless Tailscale Roaming** – learns your server’s Tailscale address automatically so you can keep watching away from home
+* 🎬 **Multi-Source Streaming** – resolves and ranks multiple movie and TV sources with automatic backup failover
+* 🛡️ **Clean Private Relay** – proxies playlists and segments locally so client devices never touch third-party ad networks or trackers
+* 📱 **Native iOS & Web Apps** – fluid SwiftUI iPhone app and responsive web interface with a matching cinema aesthetic
+* 👥 **Household Profiles** – personalized recommendations, watch history, Favorites, and Continue Watching shelves for everyone at home
+* ⚡ **Single Lightweight Binary** – 100% Rust backend with embedded SQLite storage and zero headless browser bloat
 
-The system is designed to survive upstream outages without breaking the home viewing experience:
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
 
-- **Offline-First Metadata:** The catalog service continuously pulls updates from TMDB, but the API maintains a cached read snapshot. If TMDB has an outage, family members can still browse shelves and watch saved titles.
-- **Direct Artwork Delivery:** Browsers and apps load poster and backdrop images directly from TMDB's edge CDN. The local database stores lightweight URL references only, avoiding server disk consumption.
-- **Self-Contained Resolution:** Playback requests include canonical TMDB IDs along with IMDb/MyAnimeList cross-IDs and TV coordinates. Providers resolve media without waiting on a synchronous catalog lookup.
-- **Ordered Fallback Streams:** When an episode begins, the API pre-stages ranked backup sources. If an upstream hoster stutters or drops, the player can trigger an instant failover.
+## Platforms
 
----
+Mello TV is built as an all-in-one ecosystem inside a single repository:
 
-## Development and Implementation Order
+* **🖥️ Mello TV Server (`crates/` & `macos/`)** – Runs silently in the macOS menu bar or as a standalone service on Linux, Windows, and Docker.
+* **📱 Mello TV for iOS (`ios/`)** – Native SwiftUI & AVKit player with instant local discovery, background stream pre-warming, and tactile controls.
+* **🌐 Mello TV Web (`web/`)** – Built-in web client served directly by your server at `http://localhost:8080`.
 
-Development and validation follow a strict dependency order:
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
 
-<div align="center">
+## Documentation
 
-```mermaid
-flowchart TD
-    Step1["1. Contracts & Identifiers<br/>Define canonical TMDB/IMDb IDs & JSON schemas"]
-    Step2["2. Catalog Persistence & Snapshot<br/>Implement SQLite storage & background sweeps"]
-    Step3["3. Native Provider Resolution<br/>Pure-Go cipher solvers & stream probing"]
-    Step4["4. Media Relay Delivery<br/>Rust HLS rewriting & bounded streaming"]
-    Step5["5. Public API Gateway<br/>Client auth, session control & failover"]
-    Step6["6. Client Integration<br/>Connect iOS and Web clients to public API"]
+Full setup guides, configuration options, and architecture notes are available on **[Mello Watch](https://mellowatch.com/docs)**.
 
-    Step1 --> Step2 --> Step3 --> Step4 --> Step5 --> Step6
-```
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
 
-</div>
+## Contributing
 
-### Working Conventions
+Pull requests, bug reports, and provider improvements are welcome! Feel free to open an [issue](https://github.com/ChrisRodStar/stream/issues) or start a [discussion](https://github.com/ChrisRodStar/stream/discussions).
 
-- All active development can run locally. Production deployment targets Docker Compose with optional Tailscale Serve routing.
-- Secrets, WireGuard private keys, and local SQLite databases must never be committed to source control.
+### Top Contributors
+
+<a href="https://github.com/ChrisRodStar/stream/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=ChrisRodStar/stream" alt="contrib.rocks image" />
+</a>
+
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
+
+## License
+
+Designed for personal, non-commercial household use.
+
+This software does not host, store, or distribute copyrighted media files. All metadata and artwork are provided by [TMDB](https://www.themoviedb.org).
+
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
