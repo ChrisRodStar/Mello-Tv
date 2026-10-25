@@ -1,0 +1,43 @@
+package stream-tv:provider@1.0.0;
+
+interface http {
+    record header {
+        name: string,
+        value: string,
+    }
+
+    record request {
+        url: string,
+        method: string,
+        headers: list<header>,
+        body: list<u8>,
+        max-response-bytes: u32,
+        timeout-ms: u32,
+    }
+
+    record response {
+        url: string,
+        status: u16,
+        headers: list<header>,
+        body: list<u8>,
+    }
+
+    enum failure {
+        invalid-request,
+        denied,
+        limit-exceeded,
+        cancelled,
+        timeout,
+        upstream-failure,
+    }
+
+    fetch: func(input: request) -> result<response, failure>;
+    fetch-batch: func(inputs: list<request>) -> result<list<result<response, failure>>, failure>;
+    now-unix-ms: func() -> result<s64, failure>;
+    random-bytes: func(length: u32) -> result<list<u8>, failure>;
+}
+
+world provider {
+    import http;
+    export resolve: func(lookup-json: string) -> result<string, string>;
+}

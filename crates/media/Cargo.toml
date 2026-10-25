@@ -1,0 +1,33 @@
+[package]
+name = "stream-media"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+stream-core = { path = "../core" }
+stream-provider-codecs = { path = "../provider-codecs" }
+stream-provider-runtime = { path = "../provider-runtime" }
+stream-storage = { path = "../storage" }
+reqwest.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+futures-util.workspace = true
+bytes.workspace = true
+url.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+async-trait.workspace = true
+chrono.workspace = true
+http.workspace = true
+semver.workspace = true
+
+[dev-dependencies]
+stream-provider-adapters = { path = "../provider-adapters" }
+stream-provider-sdk = { path = "../provider-sdk" }
+getrandom.workspace = true
+
+[lints]
+workspace = true

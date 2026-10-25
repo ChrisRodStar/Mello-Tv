@@ -1,0 +1,25 @@
+[package]
+name = "stream-provider-codecs"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+stream-core = { path = "../core" }
+base64.workspace = true
+sha2.workspace = true
+aes.workspace = true
+cbc.workspace = true
+rc4.workspace = true
+chacha20.workspace = true
+aes-gcm.workspace = true
+thiserror.workspace = true
+zeroize.workspace = true
+serde_json.workspace = true
+serde.workspace = true
+crypto_secretbox.workspace = true
+regex.workspace = true
+
+[lints]
+workspace = true

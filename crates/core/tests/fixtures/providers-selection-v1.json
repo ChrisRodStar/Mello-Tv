@@ -1,0 +1,60 @@
+{
+  "rejected": {"vidfast:old": "source expired"},
+  "selected": {
+    "candidate": {
+      "source": {
+        "expires_at": "2026-10-25T15:30:00Z",
+        "id": "vidlink:123",
+        "server": "primary",
+        "selected_variant_url": "https://media.example.com/1080.m3u8?token=secret-token",
+        "url": "https://media.example.com/master.m3u8?token=secret-token",
+        "provider": "vidlink",
+        "format": "hls",
+        "title": {
+          "type": "tv", "tmdb_id": 1622, "imdb_id": "tt0460681",
+          "my_anime_list_id": 456, "season": 0, "episode": 1
+        },
+        "fetch_context": {
+          "scopes": [{
+            "origin": "https://media.example.com", "path_prefix": "/",
+            "headers": {"Authorization": "Bearer secret-token"},
+            "cookies": "session=secret-cookie", "cookie_path": "/"
+          }],
+          "public_resources": {"origin": "https://vidlink.pro", "referer": "https://vidlink.pro/"}
+        },
+        "resolver_metadata": {"provider_data": {"raw": {"key": "value"}}, "tracks_known": false},
+        "content_verified": false
+      },
+      "observation": {
+        "at": "2026-10-25T15:00:00.123456789Z",
+        "delivery_bps": 12000000.0,
+        "reliability": 0.98,
+        "variant": {
+          "url": "https://media.example.com/1080.m3u8?token=secret-token",
+          "audio_group": "audio-1", "subtitle_group": "subs-1",
+          "codecs": ["avc1.640028", "mp4a.40.2"], "bitrate": 6000000, "width": 1920, "height": 1080
+        },
+        "first_byte": 125000001,
+        "sample_bytes": 393216,
+        "format": "hls",
+        "playlist_metadata": {
+          "tracks": [
+            {"kind": "audio", "language": "en", "name": "English", "group": "audio-1", "url": "https://media.example.com/audio.m3u8", "default": true},
+            {"kind": "subtitles", "language": "en", "group": "subs-1", "url": "https://media.example.com/subs.m3u8", "default": false}
+          ],
+          "tracks_known": true
+        },
+        "samples_completed": 3,
+        "accessible": true,
+        "encrypted": false,
+        "protection_known": true
+      }
+    },
+    "reasons": ["bounded media sample accessible", "device eligibility satisfied"],
+    "score": 95.5
+  },
+  "version": "providers.v1",
+  "backups": null,
+  "providers": [{"provider": "vidlink", "duration": 500000000, "candidate_count": 1}],
+  "pending": true
+}

@@ -1,0 +1,69 @@
+[workspace]
+members = [
+    "crates/core",
+    "crates/storage",
+    "crates/media",
+    "crates/server",
+    "crates/provider-sdk",
+    "crates/provider-runtime",
+    "crates/provider-codecs",
+    "crates/update",
+    "crates/provider-adapters",
+]
+# The production relay remains independently buildable while its platform-specific
+# egress and secret storage are migrated. It joins this workspace at that gate.
+exclude = ["relay"]
+resolver = "3"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99.1"
+publish = false
+
+[workspace.dependencies]
+async-trait = "0.1.92"
+chrono = { version = "0.4.45", default-features = false, features = ["serde", "std"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = { version = "1.0.154", features = ["arbitrary_precision"] }
+semver = { version = "1.0.28", features = ["serde"] }
+thiserror = "2.0.21"
+url = "2.5.8"
+tokio = { version = "1.54.1", features = ["macros", "rt-multi-thread", "sync", "time", "net", "signal", "io-util", "fs"] }
+reqwest = { version = "0.13.5", default-features = false, features = ["rustls", "json", "socks", "stream", "http2"] }
+axum = { version = "0.8.9", default-features = false, features = ["http1", "json", "tokio"] }
+tracing = "0.1.44"
+rusqlite = { version = "0.41.0", default-features = false, features = ["bundled", "cache", "limits"] }
+aes-gcm = { version = "0.11.1", features = ["zeroize"] }
+getrandom = "0.4.3"
+zeroize = "1.9.1"
+bytes = "1.12.1"
+futures-util = { version = "0.3.34", default-features = false, features = ["std"] }
+tokio-util = { version = "0.7.20", features = ["rt"] }
+base64 = "0.23.1"
+sha2 = "0.11.1"
+aes = { version = "0.9.3", features = ["zeroize"] }
+cbc = { version = "0.2.1", features = ["alloc", "zeroize"] }
+rc4 = { version = "0.2.0", features = ["zeroize"] }
+chacha20 = { version = "0.10.2", features = ["zeroize"] }
+http = "1.5.0"
+wasmtime = { version = "50.0.0", default-features = false, features = ["async", "component-model", "cranelift", "runtime", "std"] }
+wat = "1.262.0"
+regex = "1.13.1"
+tough = { version = "0.24.0", default-features = false }
+tempfile = "3.27.0"
+crypto_secretbox = { version = "0.1.1", default-features = false, features = ["alloc", "salsa20"] }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+panic = "abort"

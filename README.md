@@ -12,20 +12,18 @@
 
 ## Overview
 
-Think of **Stream TV** like building your very own private Netflix from scratch.
+The backend has been completely migrated to a unified, high-performance, portable **Rust workspace** (`crates/`), replacing the legacy multi-service Go and standalone relay implementations with a single memory-safe binary suite:
 
-Commercial streaming services often drop licenses, and public streaming sites are cluttered with pop-up ads, sketchy tracking scripts, and dead links. Stream TV replaces that chaos with a dedicated home server that does all the work behind the scenes:
-
-- Locates video sources across multiple providers.
-- Decodes and solves provider security challenges natively in pure code (no heavy headless browsers).
-- Streams video segments through an isolated, fail-closed VPN tunnel.
-- Serves clean, uninterrupted 1080p video directly to your iPhone, iPad, or browser.
+- **100% Native Codecs & Ciphers**: Zero headless browsers, zero node runtimes. Provider ciphers (VidCore, VidLink, VidSrc, VidFast, Videasy) run directly in Rust WebAssembly and native crypto crates.
+- **Sub-Second to Low-Latency Stream Resolution**: Integrated DNS caching, HTTP/2 connection pooling, parallel playlist promotion, and in-memory protocol compilation.
+- **Fail-Closed Privacy & Relay**: Streaming proxy with HLS rewriting, bounded backpressure buffers, and robust token authorization.
+- **Clients**: Native iOS (SwiftUI) and modern Web (React + Vite) frontends.
 
 ---
 
 ## System Architecture
 
-The workspace is organized into **six separately maintained projects** deployed across **three application containers**:
+The repository is organized into a modular Rust workspace and client applications:
 
 <div align="center">
 
@@ -33,56 +31,46 @@ The workspace is organized into **six separately maintained projects** deployed 
 flowchart TD
     Client["Client Device (iPhone / Web Browser)"]
 
-    subgraph AppContainer ["Container 1: Application"]
-        Web["family-stream-web (Built Assets)"]
-        API["family-stream-api (Go Service)"]
+    subgraph Clients ["Client Applications"]
+        Web["stream-web (React + Vite)"]
+        IOS["stream-ios (SwiftUI + AVKit)"]
     end
 
-    subgraph CatalogContainer ["Container 2: Catalog"]
-        Catalog["family-stream-catalog (Go + SQLite)"]
+    subgraph RustWorkspace ["Unified Rust Backend (crates/)"]
+        Server["stream-server (API Gateway & Sessions)"]
+        Storage["stream-storage (Catalog, Profiles, SQLite)"]
+        Media["stream-media (Streaming Relay & Prober)"]
+        Adapters["stream-provider-adapters (VidCore, VidLink, etc.)"]
+        Runtime["stream-provider-runtime & codecs (Wasm Sandbox)"]
+        Core["stream-core (Domain Types & Contracts)"]
+
+        Server --> Storage
+        Server --> Media
+        Media --> Adapters
+        Adapters --> Runtime
+        Runtime --> Core
     end
 
-    subgraph StreamingContainer ["Container 3: Streaming (Mullvad VPN)"]
-        Providers["family-stream-providers (Go)"]
-        Relay["family-stream-relay (Rust)"]
-        Providers -->|"Prepares Source"| Relay
-    end
+    Internet["Upstream Video Hosters & CDNs"]
 
-    Internet["Upstream Video Hosters"]
-
-    Client -->|"Web Request (/)"| Web
-    Client -->|"API Request (/api/*)"| API
-    Client -->|"Encrypted Stream (/stream/*)"| Relay
-
-    API -.->|"Private RPC"| Catalog
-    API -.->|"Private RPC"| Providers
-    Relay -->|"Fail-Closed Egress (wg0)"| Internet
+    Client --> Web
+    Client --> IOS
+    Web -->|"API & Stream RPC"| Server
+    IOS -->|"API & Stream RPC"| Server
+    Media -->|"Protected Stream Ingestion"| Internet
 ```
 
 </div>
 
 ---
 
-## Core Architecture Rules
-
-> [!IMPORTANT]
-> **Repository Boundary:** This root directory is an orchestrator, not a monolithic application. Each project maintains its own dependencies, releases, and contracts.
-
-> [!IMPORTANT]
-> **Three-Container Topology:** The production stack consists of exactly three containers (`application`, `catalog`, and `streaming`). Services inside the streaming container are supervised independently so provider updates do not restart the media relay or VPN.
-
----
-
 ## The Project Fleet
 
-| Project | Stack | Responsibility |
+| Directory | Stack | Responsibility |
 |---|---|---|
-| [api/](api) | Go | **The Gatekeeper:** Handles accounts, profiles, personal watch history, bookmark shelves, and issues Ed25519-signed digital playback passes (JWTs). |
-| [catalog/](catalog) | Go + SQLite | **The Librarian:** Manages persistent title metadata, seasons, episodes, and recommendations. Syncs with TMDB in the background. |
-| [deploy/](deploy) | Docker Compose | **The Orchestrator:** Multi-container production deployment for Application, Catalog, and Streaming containers. |
-| [providers/](providers) | Go | **The Detective:** Reverse-engineers provider ciphers (VidCore, VidLink, VidSrc, VidFast) in native Go. Probes candidate streams for 1080p resolution and codecs. |
-| [relay/](relay) | Rust + Tokio | **The Privacy Shield:** Validates playback tokens, fetches media through VPN, sanitizes HLS manifests, and relays video with bounded backpressure. |
-| [ios/](ios) | SwiftUI + AVKit | **The iOS Client:** Native mobile interface with speculative background player pre-warming (starting playback in as little as 115ms). |
+| [crates/](crates) | Rust 2024 Workspace | **The Unified Backend:** High-performance server, catalog database, media streaming relay, and reverse-engineered provider cipher engine. |
+| [deploy/](deploy) | Docker Compose | **The Orchestrator:** Container and service deployment configurations. |
+| [ios/](ios) | SwiftUI + AVKit | **The iOS Client:** Native mobile interface with speculative background player pre-warming. |
 | [web/](web) | React + Vite | **The Web Client:** Clean browser interface featuring keyboard navigation, tap-to-seek gestures, and continue-watching shelves. |
 
 ---
