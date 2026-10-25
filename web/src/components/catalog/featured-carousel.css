@@ -1,233 +1,379 @@
 .featured-carousel {
-  --featured-width: min(76%, 1600px);
-  margin: 0 -4.95% 32px;
+  --card-width: clamp(210px, 24vw, 286px);
+  --card-height: calc(var(--card-width) * 1.5);
+  position: relative;
+  margin: 0 -4.95% 28px;
+  user-select: none;
+  -webkit-user-select: none;
 }
+
 .featured-stage {
   position: relative;
-  height: clamp(460px, 64svh, 880px);
-  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: clamp(420px, 56svh, 520px);
+  padding-top: 6px;
+  overflow-x: clip;
+  overflow-y: visible;
   touch-action: pan-y;
 }
+
+/* Showroom elliptical floor spotlight aura centered beneath the stage */
+.featured-floor-aura {
+  position: absolute;
+  inset: auto 0 4%;
+  width: 100%;
+  height: 90%;
+  transform: translateY(16px);
+  background: radial-gradient(
+    ellipse at center,
+    rgba(41, 151, 255, 0.10) 5%,
+    rgba(0, 0, 0, 0.05) 45%,
+    transparent 70%
+  );
+  pointer-events: none;
+  z-index: 0;
+}
+
+.featured-stage-stack {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: var(--card-height);
+  transform-style: preserve-3d;
+  z-index: 1;
+}
+
 .featured-card {
   position: absolute;
-  top: 16px;
-  left: calc(50% - var(--featured-width) / 2);
-  width: var(--featured-width);
-  height: calc(100% - 32px);
-  overflow: hidden;
-  transform: translateX(calc(var(--offset) * 79%))
-    scale(calc(1 - var(--distance) * 0.08));
-  border-radius: 20px;
-  box-shadow:
-    0 18px 42px rgba(0, 0, 0, 0.65),
-    inset 0 0 0 1px rgba(255, 255, 255, 0.10);
-  transition: transform 500ms cubic-bezier(0.22, 1, 0.36, 1);
+  width: var(--card-width);
+  aspect-ratio: 2 / 3;
+  height: var(--card-height);
+  border-radius: 22px;
+  transform-origin: center center;
+  will-change: transform, opacity;
+  transition:
+    transform 480ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 360ms ease-out;
 }
-.featured-card::after {
+
+.featured-carousel.is-dragging .featured-card,
+.featured-carousel.is-dragging .featured-arc-dot {
+  transition: none;
+}
+
+/* Saturated, blurred ambient poster light behind the active center card */
+.featured-poster-light {
   position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  background: #000;
-  content: "";
-  opacity: calc(var(--distance) * 0.22);
+  inset: -6px;
+  border-radius: 28px;
   pointer-events: none;
-  transition: opacity 400ms ease-out;
+  z-index: -1;
+  transition: opacity 320ms ease-out;
+  mask-image: linear-gradient(
+    180deg,
+    rgba(0, 0, 0, 0.25) 0%,
+    rgba(0, 0, 0, 0.78) 45%,
+    rgba(0, 0, 0, 1) 100%
+  );
+  -webkit-mask-image: linear-gradient(
+    180deg,
+    rgba(0, 0, 0, 0.25) 0%,
+    rgba(0, 0, 0, 0.78) 45%,
+    rgba(0, 0, 0, 1) 100%
+  );
 }
-/* Recycle distant posters behind the stack, without crossing its center. */
-.featured-card.is-wrapping {
-  transition: none;
+
+.featured-poster-light > img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 28px;
+  filter: saturate(1.35) brightness(1.12) blur(22px);
+  transform: scale(1.03);
 }
-.featured-card.is-wrapping::after {
-  transition: none;
+
+/* Pure 2:3 portrait poster card surface */
+.featured-poster-surface {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  border-radius: 22px;
+  overflow: hidden;
+  background: var(--bg-secondary, #1c1c1e);
+  box-shadow: 0 calc(5px + var(--focus, 0) * 11px)
+    calc(12px + var(--focus, 0) * 36px)
+    rgba(0, 0, 0, calc(0.22 + var(--focus, 0) * 0.53));
 }
+
 .featured-poster {
   display: block;
   position: relative;
   width: 100%;
   height: 100%;
   padding: 0;
-  overflow: hidden;
   border: 0;
-  border-radius: inherit;
-  background: linear-gradient(135deg, #212328, #17181c);
-  color: var(--text);
-  text-align: left;
+  border-radius: 22px;
+  overflow: hidden;
+  background: var(--bg-secondary, #1c1c1e);
+  color: var(--text, #f5f5f7);
+  cursor: pointer;
 }
-.featured-poster > img {
+
+.featured-poster:disabled {
+  cursor: default;
+}
+
+.featured-poster:focus-visible {
+  outline: 2.5px solid #2997ff;
+  outline-offset: 4px;
+}
+
+.featured-poster-img {
   display: block;
   width: 100%;
   height: 100%;
   object-fit: cover;
-  transition: transform 500ms cubic-bezier(0.22, 1, 0.36, 1);
+  user-select: none;
+  -webkit-user-drag: none;
+  transition:
+    filter 360ms ease-out,
+    transform 420ms cubic-bezier(0.22, 1, 0.36, 1);
 }
-.featured-poster:focus-visible {
-  outline: 3px solid white;
-  outline-offset: 5px;
-}
-.featured-overlay {
-  display: flex;
+
+.featured-poster-depth-shade {
   position: absolute;
-  flex-direction: column;
-  inset: auto 0 0;
-  padding: 100px clamp(24px, 3.5vw, 56px) 36px;
-  transform: translateY(8px);
-  background: linear-gradient(transparent, #090909eb 35%, #090909fa);
-  opacity: 0;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(
+    180deg,
+    rgba(0, 0, 0, calc(var(--poster-depth, 0) * 0.07)) 0%,
+    rgba(0, 0, 0, calc(var(--poster-depth, 0) * 0.12)) 100%
+  );
   pointer-events: none;
-  transition:
-    opacity 220ms ease-out,
-    transform 300ms cubic-bezier(0.22, 1, 0.36, 1);
 }
-.featured-title {
-  display: -webkit-box;
-  max-width: 24ch;
-  -webkit-line-clamp: 3;
-  font-weight: 700;
-  font-size: clamp(28px, 3.2vw, 48px);
-  line-height: 1.12;
-  letter-spacing: -0.03em;
-  text-wrap: balance;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-.featured-meta {
+
+/* Placeholder when posterUrl and backdropUrl are absent */
+.featured-poster-placeholder {
   display: flex;
-  flex-wrap: wrap;
-  margin-top: 12px;
-  gap: 8px 12px;
-  color: #d6d6d6;
-  font-size: 12px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  height: 100%;
+  padding: 16px;
+  background: var(--bg-secondary, #1c1c1e);
+  color: var(--muted, #86868b);
+  text-align: center;
 }
-.featured-overview {
+
+.featured-placeholder-icon {
+  width: 36px;
+  height: 36px;
+  opacity: 0.5;
+}
+
+.featured-placeholder-title {
   display: -webkit-box;
-  -webkit-line-clamp: 3;
+  -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
-  max-width: 56ch;
-  margin-top: 14px;
   overflow: hidden;
-  color: #e1e1e1;
-  font-size: 15px;
-  line-height: 1.6;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.35;
 }
-.featured-poster:focus-visible .featured-overlay,
-.featured-poster.is-revealed .featured-overlay {
-  transform: none;
-  opacity: 1;
-}
-@media (hover: hover) {
-  .featured-poster:hover .featured-overlay {
-    transform: none;
-    opacity: 1;
-  }
-  .featured-poster:hover > img,
-  .featured-poster:focus-visible > img {
-    transform: scale(1.035);
-  }
-}
-@media (max-width: 700px), (hover: none) {
-  .featured-card.is-active .featured-overlay {
-    transform: none;
-    opacity: 1;
-  }
-}
-.featured-arrow {
-  display: grid;
-  z-index: 6;
+
+/* Top-right BrandTVMark (mini TV icon + TV text) */
+.featured-brand-tv-mark {
   position: absolute;
-  top: 50%;
-  place-items: center;
-  width: 44px;
-  height: 44px;
-  transform: translateY(-50%);
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  top: 12px;
+  right: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+  width: 28px;
+  height: 14px;
+  color: rgba(255, 255, 255, 0.75);
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.4));
+  pointer-events: none;
+  z-index: 2;
+  transition: opacity 220ms ease-out;
+}
+
+.featured-brand-tv-icon {
+  width: 12px;
+  height: 11px;
+  flex-shrink: 0;
+}
+
+.featured-brand-tv-text {
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: -0.2px;
+  line-height: 1;
+}
+
+/* Bottom-right CardDetailsGlyph (28x28 frosted dark circle with ••• ellipsis) */
+.featured-details-glyph {
+  position: absolute;
+  right: 12px;
+  bottom: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
   border-radius: 50%;
-  background: rgba(26, 27, 32, 0.78);
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
-  color: var(--text);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
+  background: transparent;
+  cursor: pointer;
+  z-index: 3;
   transition:
-    background-color 180ms ease-out,
-    border-color 180ms ease-out,
-    transform 120ms ease-out;
+    transform 160ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 220ms ease-out;
 }
-.featured-arrow:hover {
-  border-color: rgba(255, 255, 255, 0.26);
-  background: rgba(38, 40, 46, 0.92);
+
+.featured-details-glyph:hover .featured-details-circle {
+  background: rgba(20, 20, 24, 0.56);
+  border-color: rgba(255, 255, 255, 0.28);
 }
-.featured-arrow:active {
-  transform: translateY(-50%) scale(0.95);
+
+.featured-details-glyph:active {
+  transform: scale(0.94);
 }
-.featured-previous {
-  left: max(20px, calc(50% - var(--featured-width) / 2 - 66px));
+
+.featured-details-glyph:focus-visible {
+  outline: 2px solid #ffffff;
+  outline-offset: 2px;
 }
-.featured-next {
-  right: max(20px, calc(50% - var(--featured-width) / 2 - 66px));
+
+.featured-details-circle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.36);
+  backdrop-filter: blur(16px) saturate(1.4);
+  -webkit-backdrop-filter: blur(16px) saturate(1.4);
+  border: 0.5px solid rgba(255, 255, 255, 0.16);
+  color: #ffffff;
+  transition:
+    background-color 160ms ease-out,
+    border-color 160ms ease-out;
 }
+
+.featured-details-circle > svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* Continuous 0.75px subtle border rim */
+.featured-poster-rim {
+  position: absolute;
+  inset: 0;
+  border-radius: 22px;
+  box-shadow: inset 0 0 0 0.75px rgba(255, 255, 255, 0.12);
+  pointer-events: none;
+  z-index: 4;
+}
+
+/* 3D Arc Capsule Page Indicator with Live Studio Blue Progress Fill */
 .featured-pagination {
   display: flex;
   align-items: center;
   justify-content: center;
   width: 100%;
-  padding-top: 8px;
+  height: 32px;
+  margin-top: 2px;
 }
+
 .featured-dots {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 2px;
+  width: var(--indicator-span, 320px);
+  max-width: calc(100% - 24px);
+  height: 32px;
+  mask-image: linear-gradient(
+    90deg,
+    transparent 0%,
+    #000 4%,
+    #000 96%,
+    transparent 100%
+  );
+  -webkit-mask-image: linear-gradient(
+    90deg,
+    transparent 0%,
+    #000 4%,
+    #000 96%,
+    transparent 100%
+  );
 }
-.featured-dots button {
-  position: relative;
-  width: 30px;
-  height: 36px;
+
+.featured-arc-dot {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  height: 8px;
+  margin-top: -4px;
   padding: 0;
   border: 0;
-  background: transparent;
-}
-.featured-dots button::after {
-  position: absolute;
-  inset: 16px 7px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.24);
-  content: "";
+  background: rgba(245, 245, 247, 0.16);
+  overflow: hidden;
+  cursor: pointer;
+  transform-origin: center center;
   transition:
-    background-color 180ms ease-out,
-    box-shadow 180ms ease-out,
-    transform 180ms ease-out;
+    width 460ms cubic-bezier(0.22, 1, 0.36, 1),
+    margin-left 460ms cubic-bezier(0.22, 1, 0.36, 1),
+    transform 460ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 320ms ease-out,
+    background-color 180ms ease-out;
 }
-.featured-dots button:hover::after {
-  background: rgba(255, 255, 255, 0.48);
+
+.featured-arc-dot:hover:not(.active) {
+  background: rgba(245, 245, 247, 0.34);
 }
-.featured-dots button.active::after {
-  transform: scaleY(1.3);
-  background: var(--accent);
-  box-shadow: 0 0 10px var(--accent-glow);
+
+.featured-arc-dot:focus-visible {
+  outline: 2px solid #2997ff;
+  outline-offset: 3px;
 }
+
+.featured-arc-fill {
+  display: block;
+  width: var(--indicator-progress, 0%);
+  height: 100%;
+  border-radius: inherit;
+  background: #2997ff;
+  pointer-events: none;
+}
+
 @media (max-width: 700px) {
   .featured-carousel {
-    --featured-width: 86%;
-    margin: 0 -5.55% 24px;
+    margin: 0 -5.55% 22px;
   }
+
   .featured-stage {
-    height: clamp(400px, 62svh, 560px);
+    height: clamp(420px, 56svh, 500px);
+    padding-top: 24px;
   }
-  .featured-overlay {
-    padding: 70px 22px 26px;
-  }
-  .featured-title {
-    font-size: clamp(22px, 5.5vw, 30px);
-  }
-  .featured-meta {
-    font-size: 11px;
-  }
-  .featured-overview {
-    font-size: 13px;
-  }
-  .featured-previous {
-    left: 10px;
-  }
-  .featured-next {
-    right: 10px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .featured-card,
+  .featured-poster-img,
+  .featured-arc-dot {
+    transition-duration: 180ms;
   }
 }

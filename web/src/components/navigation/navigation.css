@@ -65,7 +65,7 @@
 }
 
 .side-navigation .navigation-profile.active .profile-avatar {
-  box-shadow: inset 0 0 0 2px #fff;
+  box-shadow: 0 0 0 2.5px var(--accent, #2997ff);
 }
 
 .side-navigation button {
@@ -119,6 +119,10 @@
 .side-navigation button.active {
   background: transparent;
   color: #fff;
+}
+
+.side-navigation button.active svg {
+  color: var(--accent, #2997ff);
 }
 
 .side-navigation button.active::after {

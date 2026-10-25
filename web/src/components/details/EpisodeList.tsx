@@ -7,9 +7,11 @@ export function EpisodeList({
   onPlay,
   onPreload,
   progress = [],
+  resumeEpisodeNumber,
 }: {
   episodes: Episode[];
   progress?: WatchProgress[];
+  resumeEpisodeNumber?: number;
   onPlay: (episode: Episode) => void;
   onPreload?: (episode: Episode) => void;
 }) {
@@ -20,6 +22,7 @@ export function EpisodeList({
           key={episode.number}
           episode={episode}
           progress={progress.find((item) => item.episode === episode.number)}
+          isNextUp={resumeEpisodeNumber !== undefined && resumeEpisodeNumber === episode.number}
           onPlay={onPlay}
           onPreload={onPreload}
         />

@@ -34,29 +34,31 @@ export const Navigation = memo(function Navigation({
       <button
         type="button"
         className="navigation-brand"
-        aria-label="Mello Watch Home"
-        title="Mello Watch"
+        aria-label="Mello TV Home"
+        title="Mello TV"
         onClick={() => onCategoryChange('all')}
       >
         <BrandLogo />
       </button>
       <div className="navigation-browse">
-        {categories.map((category) => (
-          <button
-            key={category.id}
-            type="button"
-            className={filter === category.id && !searchOpen && !profilesOpen ? 'active' : ''}
-            aria-current={
-              filter === category.id && !searchOpen && !profilesOpen ? 'page' : undefined
-            }
-            onClick={() => onCategoryChange(category.id)}
-          >
-            <NavigationIcon
-              name={category.id === 'all' ? 'home' : category.id === 'movie' ? 'movie' : 'tv'}
-            />
-            <span>{category.label}</span>
-          </button>
-        ))}
+        {categories.map((category) => {
+          const isActive = filter === category.id && !searchOpen && !profilesOpen;
+          return (
+            <button
+              key={category.id}
+              type="button"
+              className={isActive ? 'active' : ''}
+              aria-current={isActive ? 'page' : undefined}
+              onClick={() => onCategoryChange(category.id)}
+            >
+              <NavigationIcon
+                name={category.id === 'all' ? 'home' : category.id === 'movie' ? 'movie' : 'tv'}
+                active={isActive}
+              />
+              <span>{category.label}</span>
+            </button>
+          );
+        })}
         <button
           type="button"
           className={searchOpen ? 'active' : ''}
@@ -64,7 +66,7 @@ export const Navigation = memo(function Navigation({
           aria-controls="catalog-search"
           onClick={onSearch}
         >
-          <NavigationIcon name="search" />
+          <NavigationIcon name="search" active={searchOpen} />
           <span>Search</span>
         </button>
       </div>

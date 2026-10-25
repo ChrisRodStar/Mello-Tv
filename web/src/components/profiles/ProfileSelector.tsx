@@ -26,10 +26,12 @@ export function ProfileSelector({
     color: profileColors[0],
     preferences: emptyPreferences,
   }));
+
   function finishEdit() {
     setEditing(null);
     profiles.clearError();
   }
+
   if (!profiles.ready)
     return (
       <section className="profile-selector" aria-live="polite">
@@ -45,6 +47,7 @@ export function ProfileSelector({
         )}
       </section>
     );
+
   if (!profiles.profiles.length)
     return (
       <ProfileForm
@@ -60,6 +63,7 @@ export function ProfileSelector({
         canCancel={false}
       />
     );
+
   if (preferencesFor)
     return (
       <ProfilePreferences
@@ -81,6 +85,7 @@ export function ProfileSelector({
         }}
       />
     );
+
   if (editing)
     return (
       <ProfileForm
@@ -113,13 +118,27 @@ export function ProfileSelector({
         onCancel={finishEdit}
       />
     );
+
   return (
     <section className="profile-selector" aria-labelledby="profile-title">
-      <h1 id="profile-title">{managing ? 'Manage profiles' : 'Who’s watching?'}</h1>
+      <div className="profile-selector-header">
+        <h1 id="profile-title">{managing ? 'Manage Profiles' : 'Who’s Watching?'}</h1>
+        {managing && (
+          <p className="profile-selector-subtitle">
+            Select a profile to edit its name, color, or preferences.
+          </p>
+        )}
+      </div>
+
       <div className="profile-list">
         {profiles.profiles.map((profile) => (
           <button
-            className="profile-tile"
+            type="button"
+            className={
+              profile.id === profiles.activeId
+                ? 'profile-tile is-active-profile'
+                : 'profile-tile'
+            }
             key={profile.id}
             onClick={() => {
               profiles.clearError();
@@ -128,15 +147,28 @@ export function ProfileSelector({
             }}
             aria-label={managing ? `Edit ${profile.name}` : `Watch as ${profile.name}`}
           >
-            <ProfileAvatar profile={profile} />
-            <span className="profile-name">{profile.name}</span>
-            <span className="profile-current">
-              {profile.id === profiles.activeId ? 'Current' : '\u00a0'}
+            <span className="profile-avatar-wrapper">
+              <ProfileAvatar profile={profile} size={104} />
+              {managing && (
+                <span className="profile-manage-overlay" aria-hidden="true">
+                  <svg
+                    viewBox="0 0 256 256"
+                    width="24"
+                    height="24"
+                    fill="currentColor"
+                    aria-hidden="true"
+                  >
+                    <path d="M227.32,73.37,182.63,28.69a16,16,0,0,0-22.63,0L36.69,152A15.86,15.86,0,0,0,32,163.31V208a16,16,0,0,0,16,16H92.69A15.86,15.86,0,0,0,104,219.31L227.32,96a16,16,0,0,0,0-22.63ZM92.69,200H56V163.31l88-88L180.69,112ZM192,100.69,155.31,64l16-16L208,84.69Z" />
+                  </svg>
+                </span>
+              )}
             </span>
+            <span className="profile-name">{profile.name}</span>
           </button>
         ))}
         {profiles.profiles.length < 6 && (
           <button
+            type="button"
             className="profile-tile profile-add"
             onClick={() => {
               profiles.clearError();
@@ -148,29 +180,31 @@ export function ProfileSelector({
               });
             }}
           >
-            <span className="profile-avatar">
-              <Icon name="plus" />
+            <span className="profile-avatar-wrapper">
+              <span className="profile-avatar profile-add-avatar" aria-hidden="true">
+                <Icon name="plus" />
+              </span>
             </span>
-            <span className="profile-name">Add profile</span>
-            <span className="profile-current" aria-hidden="true">
-              &nbsp;
-            </span>
+            <span className="profile-name">Add Profile</span>
           </button>
         )}
       </div>
+
       {profiles.error && (
         <p className="profile-error" role="alert">
           {profiles.error}
         </p>
       )}
+
       <button
-        className="profile-secondary"
+        type="button"
+        className="profile-manage-button"
         onClick={() => {
           profiles.clearError();
           setManaging(!managing);
         }}
       >
-        {managing ? 'Done' : 'Manage profiles'}
+        {managing ? 'Done' : 'Manage Profiles'}
       </button>
     </section>
   );

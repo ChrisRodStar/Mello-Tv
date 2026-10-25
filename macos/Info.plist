@@ -13,9 +13,9 @@
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>
-    <string>Mello Watch</string>
+    <string>Mello TV</string>
     <key>CFBundleDisplayName</key>
-    <string>Mello Watch</string>
+    <string>Mello TV</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
@@ -29,6 +29,6 @@
     <key>NSHighResolutionCapable</key>
     <true/>
     <key>NSHumanReadableCopyright</key>
-    <string>Copyright © 2026 Mello Watch. All rights reserved.</string>
+    <string>Copyright © 2026 Mello TV. All rights reserved.</string>
 </dict>
 </plist>

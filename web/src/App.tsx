@@ -24,6 +24,7 @@ export function App({ resolvePlayback }: { resolvePlayback?: PlaybackResolver } 
   const profiles = useProfiles();
   const [profilesOpen, setProfilesOpen] = useState(initialNavigation.profilesOpen);
   const [switchingProfile, setSwitchingProfile] = useState(false);
+  const [editingPreferences, setEditingPreferences] = useState(false);
   const [selected, setSelected] = useState<Title | null>(initialNavigation.selected);
   const [initialPlayback, setInitialPlayback] = useState<PlaybackRequest | undefined>();
   const handleSelect = useCallback((title: Title) => {
@@ -63,6 +64,7 @@ export function App({ resolvePlayback }: { resolvePlayback?: PlaybackResolver } 
   const handleProfiles = useCallback(() => {
     setProfilesOpen(true);
     setSwitchingProfile(false);
+    setEditingPreferences(false);
     setSearchOpen(false);
     resumeGeneration.current++;
     setInitialPlayback(undefined);
@@ -72,6 +74,7 @@ export function App({ resolvePlayback }: { resolvePlayback?: PlaybackResolver } 
   const handleCategoryChange = useCallback((category: Category) => {
     setProfilesOpen(false);
     setSwitchingProfile(false);
+    setEditingPreferences(false);
     setFilter(category);
     resumeGeneration.current++;
     setInitialPlayback(undefined);
@@ -83,6 +86,7 @@ export function App({ resolvePlayback }: { resolvePlayback?: PlaybackResolver } 
   const handleSearch = useCallback(() => {
     setProfilesOpen(false);
     setSwitchingProfile(false);
+    setEditingPreferences(false);
     setSearchOpen(true);
     resumeGeneration.current++;
     setInitialPlayback(undefined);
@@ -96,6 +100,7 @@ export function App({ resolvePlayback }: { resolvePlayback?: PlaybackResolver } 
     setSelected(null);
     setProfilesOpen(false);
     setSwitchingProfile(false);
+    setEditingPreferences(false);
     setSearchOpen(false);
     setFilter('all');
     setQuery('');
@@ -138,7 +143,7 @@ export function App({ resolvePlayback }: { resolvePlayback?: PlaybackResolver } 
         className={
           error
             ? 'service-view'
-            : showProfiles
+            : showProfiles || (showProfilePage && editingPreferences)
               ? 'profiles-view'
               : searchOpen
                 ? 'search-view'
@@ -166,19 +171,45 @@ export function App({ resolvePlayback }: { resolvePlayback?: PlaybackResolver } 
             <ProfileSelector profiles={profiles} onSelected={handleProfileSelected} />
           )
         ) : showProfilePage && activeProfile && !error ? (
-          <ProfilePage
-            key={activeProfile.id}
-            profile={activeProfile}
-            onSelect={handleSelect}
-            onResume={handleResume}
-            onBrowse={() => handleCategoryChange('all')}
-            onSwitch={() => {
-              resumeGeneration.current++;
-              setInitialPlayback(undefined);
-              setSelected(null);
-              setSwitchingProfile(true);
-            }}
-          />
+          editingPreferences ? (
+            <ProfilePreferences
+              key={activeProfile.id}
+              profile={activeProfile}
+              saving={profiles.saving}
+              error={profiles.error}
+              onCancel={() => {
+                setEditingPreferences(false);
+                profiles.clearError();
+              }}
+              onSave={async (preferences) => {
+                const saved = await profiles.upsert({ ...activeProfile, preferences });
+                if (saved) {
+                  setEditingPreferences(false);
+                  profiles.clearError();
+                }
+                return saved;
+              }}
+            />
+          ) : (
+            <ProfilePage
+              key={activeProfile.id}
+              profile={activeProfile}
+              onSelect={handleSelect}
+              onResume={handleResume}
+              onBrowse={() => handleCategoryChange('all')}
+              onPreferences={() => {
+                profiles.clearError();
+                setEditingPreferences(true);
+              }}
+              onSwitch={() => {
+                resumeGeneration.current++;
+                setInitialPlayback(undefined);
+                setSelected(null);
+                setEditingPreferences(false);
+                setSwitchingProfile(true);
+              }}
+            />
+          )
         ) : searchOpen && !error ? (
           <SearchResults query={query.trim()} onSelect={handleSelect} />
         ) : (

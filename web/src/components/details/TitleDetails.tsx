@@ -11,6 +11,8 @@ import { EpisodeList } from './EpisodeList';
 const loadPlayback = () => import('../playback/PlaybackView');
 const PlaybackView = lazy(() => loadPlayback().then((m) => ({ default: m.PlaybackView })));
 
+type DetailTab = 'episodes' | 'about';
+
 export function TitleDetails({
   title,
   onClose,
@@ -27,9 +29,15 @@ export function TitleDetails({
   const { details, season, setSeason, episodes, metadataError, episodeError, retry } =
     useTitleDetails(title);
   const library = useProfileLibrary(profileId);
+  const [selectedTab, setSelectedTab] = useState<DetailTab>('episodes');
+
   const savedProgress = library.progress.find(
     (item) => item.title.id === title.id && item.title.type === title.type,
   );
+  const inMyList = library.list.some(
+    (item) => item.id === title.id && item.type === title.type,
+  );
+
   const restoredSeason = useRef(false);
   useEffect(() => {
     if (!restoredSeason.current && library.ready && details) {
@@ -56,12 +64,14 @@ export function TitleDetails({
       }
     }
   }, [library.ready, details, savedProgress, title.type, setSeason, initialPlayback]);
+
   const resumeEpisode =
     savedProgress && savedProgress.season === season
       ? episodes?.find(
           (item) => item.number === savedProgress.episode + (savedProgress.completed ? 1 : 0),
         )
       : undefined;
+
   const [playback, setPlayback] = useState<PlaybackRequest | null>(initialPlayback ?? null);
   const playButton = useRef<HTMLButtonElement>(null);
 
@@ -71,13 +81,11 @@ export function TitleDetails({
       : undefined;
 
   useEffect(() => {
-    // Warm the player code as well as the resolver before the Play gesture.
     void loadPlayback().catch(() => {});
     void import('hls.js').catch(() => {});
   }, []);
 
   function preloadEpisode(_episode: Episode) {
-    // Only preload player code; source/session creation belongs to the Play action.
     void loadPlayback().catch(() => {});
   }
 
@@ -115,6 +123,46 @@ export function TitleDetails({
     };
   }, []);
 
+  const playButtonTitle =
+    savedProgress &&
+    !savedProgress.completed &&
+    (title.type === 'movie' || resumeEpisode)
+      ? 'Resume'
+      : resumeEpisode && savedProgress?.completed
+        ? 'Next Episode'
+        : 'Play';
+
+  const playbackLabel =
+    title.type === 'tv' && season !== null
+      ? `${playButtonTitle} S${season} E${(resumeEpisode ?? episodes?.[0])?.number ?? 1}`
+      : playButtonTitle;
+
+  const headerSubtitle = [title.year, details?.genres[0]].filter(Boolean).join(' · ');
+
+  const seasonCount = details ? details.seasons.filter((s) => s.number > 0).length : 0;
+  const metadataLine = [
+    title.year,
+    title.rating > 0 ? `${title.rating.toFixed(1)} / 10` : '',
+    details?.runtime
+      ? `${details.runtime} min${title.type === 'tv' ? ' / ep' : ''}`
+      : '',
+    title.type === 'tv' && details
+      ? `${seasonCount} ${seasonCount === 1 ? 'season' : 'seasons'}`
+      : '',
+  ]
+    .filter(Boolean)
+    .join('  ·  ');
+
+  const genresLine = details?.genres.length ? details.genres.join('  ·  ') : '';
+
+  const aboutSection = (
+    <div className="detail-about-content">
+      {title.overview && <p className="detail-overview">{title.overview}</p>}
+      {metadataLine && <p className="detail-metadata-line">{metadataLine}</p>}
+      {genresLine && <p className="detail-genres">{genresLine}</p>}
+    </div>
+  );
+
   return (
     <dialog
       ref={dialog}
@@ -135,17 +183,7 @@ export function TitleDetails({
       }}
       aria-labelledby="detail-title"
     >
-      <div className="dialog-content netflix-detail">
-        {!playback && (
-          <button
-            className="close-button"
-            onClick={onClose}
-            aria-label="Close title details"
-            autoFocus
-          >
-            <Icon name="close" />
-          </button>
-        )}
+      <div className="dialog-content ios-detail-sheet">
         {playback ? (
           <Suspense
             fallback={
@@ -170,21 +208,61 @@ export function TitleDetails({
           </Suspense>
         ) : (
           <>
+            {(title.backdropUrl || title.posterUrl) && (
+              <div className="detail-page-surface" aria-hidden="true">
+                <img src={title.backdropUrl || title.posterUrl || ''} alt="" decoding="async" />
+              </div>
+            )}
+
             <div className="detail-artwork">
               {title.backdropUrl || title.posterUrl ? (
                 <img src={title.backdropUrl || title.posterUrl || ''} alt="" decoding="async" />
               ) : null}
+
+              <div className="detail-header-controls">
+                <button
+                  type="button"
+                  className={`detail-glass-circle-button bookmark-button${inMyList ? ' is-saved' : ''}`}
+                  disabled={!library.ready || library.saving}
+                  aria-label={inMyList ? 'Remove from My List' : 'Add to My List'}
+                  aria-pressed={inMyList}
+                  onClick={() => void library.toggle(title)}
+                >
+                  <svg
+                    viewBox="0 0 24 24"
+                    fill={inMyList ? 'currentColor' : 'none'}
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                  >
+                    <path d="M6 4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v17l-6-4-6 4V4z" />
+                  </svg>
+                </button>
+
+                <button
+                  type="button"
+                  className="detail-glass-circle-button close-button"
+                  onClick={onClose}
+                  aria-label="Close title details"
+                  autoFocus
+                >
+                  <Icon name="close" />
+                </button>
+              </div>
+
               <div className="detail-title-overlay">
-                <span className="detail-type">
-                  {title.type === 'movie' ? 'Movie' : 'TV Series'}
-                </span>
                 <h2 id="detail-title">{title.title}</h2>
+                {headerSubtitle && <p className="detail-subtitle">{headerSubtitle}</p>}
               </div>
             </div>
+
             <div className="detail-body">
               <div className="detail-play-actions">
                 <button
                   ref={playButton}
+                  type="button"
                   className="detail-play-button"
                   disabled={title.type === 'tv' && (!episodes?.length || !!episodeError)}
                   onClick={() => play(resumeEpisode ?? episodes?.[0])}
@@ -195,111 +273,125 @@ export function TitleDetails({
                   }
                 >
                   <Icon name="play" />
-                  {savedProgress &&
-                  !savedProgress.completed &&
-                  (title.type === 'movie' || resumeEpisode)
-                    ? 'Resume'
-                    : resumeEpisode && savedProgress?.completed
-                      ? 'Next episode'
-                      : 'Play'}
-                </button>
-                <button
-                  className="profile-secondary"
-                  disabled={!library.ready || library.saving}
-                  aria-pressed={library.list.some(
-                    (item) => item.id === title.id && item.type === title.type,
-                  )}
-                  onClick={() => void library.toggle(title)}
-                >
-                  {library.list.some((item) => item.id === title.id && item.type === title.type)
-                    ? 'In My List'
-                    : 'Add to My List'}
+                  <span>{playbackLabel}</span>
                 </button>
               </div>
+
               {library.error && (
                 <p className="profile-error" role="alert">
                   {library.error}
                 </p>
               )}
-              <div className="detail-summary">
-                <div className="detail-meta">
-                  {title.year && <span>{title.year}</span>}
-                  {title.rating > 0 && (
-                    <span className="detail-score">{title.rating.toFixed(1)} / 10</span>
-                  )}
-                  {details?.runtime ? (
-                    <span>
-                      {details.runtime} min
-                      {title.type === 'tv' ? ' / episode' : ''}
-                    </span>
-                  ) : null}
-                  {details && title.type === 'tv' && (
-                    <span>
-                      {details.seasons.filter((s) => s.number > 0).length}{' '}
-                      {details.seasons.filter((s) => s.number > 0).length === 1
-                        ? 'season'
-                        : 'seasons'}
-                    </span>
-                  )}
-                  <span className="detail-format">
-                    {title.type === 'movie' ? 'Movie' : 'Series'}
-                  </span>
-                </div>
-                {title.overview && <p>{title.overview}</p>}
-              </div>
+
               {metadataError ? (
                 <div role="alert" className="metadata-status">
-                  {metadataError} <button onClick={retry}>Try again</button>
+                  <span>{metadataError}</span>
+                  <button type="button" onClick={retry}>
+                    Try again
+                  </button>
                 </div>
               ) : !details ? (
                 <p className="metadata-status" role="status">
                   Loading details…
                 </p>
-              ) : (
-                <p className="detail-genres">{details.genres.join(' · ')}</p>
-              )}
-              {title.type === 'tv' && details && (
-                <section className="episode-section" aria-label="Episodes">
-                  <div className="episode-heading">
-                    <h3>Episodes</h3>
-                    {details.seasons.length > 0 && (
-                      <div className="season-picker">
-                        <select
-                          aria-label="Season"
-                          value={season ?? ''}
-                          onChange={(event) => setSeason(Number(event.target.value))}
-                        >
-                          {details.seasons.map((s) => (
-                            <option key={s.number} value={s.number}>
-                              {s.name}
-                            </option>
-                          ))}
-                        </select>
-                        <Icon name="down" />
-                      </div>
-                    )}
-                  </div>
-                  {episodeError ? (
-                    <div className="metadata-status" role="alert">
-                      {episodeError} <button onClick={retry}>Try again</button>
+              ) : null}
+
+              {title.type === 'tv' ? (
+                <>
+                  <div
+                    className="detail-tabs-container"
+                    role="tablist"
+                    aria-label="Title detail sections"
+                  >
+                    <div className="detail-tabs-capsule">
+                      <button
+                        type="button"
+                        role="tab"
+                        aria-selected={selectedTab === 'episodes'}
+                        className={`detail-tab-pill${selectedTab === 'episodes' ? ' is-active' : ''}`}
+                        onClick={() => setSelectedTab('episodes')}
+                      >
+                        Episodes
+                      </button>
+                      <button
+                        type="button"
+                        role="tab"
+                        aria-selected={selectedTab === 'about'}
+                        className={`detail-tab-pill${selectedTab === 'about' ? ' is-active' : ''}`}
+                        onClick={() => setSelectedTab('about')}
+                      >
+                        About
+                      </button>
                     </div>
-                  ) : season === null ? null : !episodes ? (
-                    <p role="status">Loading episodes…</p>
-                  ) : episodes.length === 0 ? null : (
-                    <EpisodeList
-                      key={season}
-                      episodes={episodes}
-                      progress={library.progress.filter(
-                        (item) =>
-                          item.title.id === title.id &&
-                          item.title.type === 'tv' &&
-                          item.season === season,
-                      )}
-                      onPlay={play}
-                      onPreload={preloadEpisode}
-                    />
+                  </div>
+
+                  {selectedTab === 'episodes' ? (
+                    details ? (
+                      <section className="episode-section" aria-label="Episodes">
+                        <div className="episode-heading">
+                          {details.seasons.length > 0 && (
+                            <div className="season-picker">
+                              <select
+                                aria-label="Season"
+                                value={season ?? ''}
+                                disabled={details.seasons.length < 2}
+                                onChange={(event) => setSeason(Number(event.target.value))}
+                              >
+                                {details.seasons.map((s) => (
+                                  <option key={s.number} value={s.number}>
+                                    {s.name || `Season ${s.number}`}
+                                  </option>
+                                ))}
+                              </select>
+                              {details.seasons.length > 1 && <Icon name="down" />}
+                            </div>
+                          )}
+                          {episodes && (
+                            <span className="episode-count">
+                              {episodes.length}{' '}
+                              {episodes.length === 1 ? 'episode' : 'episodes'}
+                            </span>
+                          )}
+                        </div>
+
+                        {episodeError ? (
+                          <div className="metadata-status" role="alert">
+                            <span>{episodeError}</span>
+                            <button type="button" onClick={retry}>
+                              Try again
+                            </button>
+                          </div>
+                        ) : season === null ? null : !episodes ? (
+                          <p className="metadata-status" role="status">
+                            Loading episodes…
+                          </p>
+                        ) : episodes.length === 0 ? (
+                          <p className="metadata-status">
+                            No episodes are available for this season.
+                          </p>
+                        ) : (
+                          <EpisodeList
+                            key={season}
+                            episodes={episodes}
+                            resumeEpisodeNumber={resumeEpisode?.number}
+                            progress={library.progress.filter(
+                              (item) =>
+                                item.title.id === title.id &&
+                                item.title.type === 'tv' &&
+                                item.season === season,
+                            )}
+                            onPlay={play}
+                            onPreload={preloadEpisode}
+                          />
+                        )}
+                      </section>
+                    ) : null
+                  ) : (
+                    aboutSection
                   )}
-                </section>
+                </>
+              ) : (
+                aboutSection
               )}
             </div>
           </>
