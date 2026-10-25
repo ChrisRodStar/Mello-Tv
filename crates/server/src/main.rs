@@ -199,7 +199,19 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let catalog = CatalogStore::open(catalog_db).await?;
     stream_server::seed::seed_if_empty(&catalog).await?;
 
-    let key = [0x5cu8; 32];
+    let key = if let Ok(bytes) = tokio::fs::read(config.db_path.join("api-encryption")).await {
+        if bytes.len() == 32 {
+            let mut k = [0u8; 32];
+            k.copy_from_slice(&bytes);
+            tracing::info!("loaded custom encryption key from api-encryption");
+            k
+        } else {
+            [0x5cu8; 32]
+        }
+    } else {
+        [0x5cu8; 32]
+    };
+
     let accounts_db = config.db_path.join("accounts.db");
     let accounts = AccountStore::open(accounts_db, key).await?;
 
