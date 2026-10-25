@@ -9,9 +9,40 @@ private final class PrivateAPIDelegate: NSObject, URLSessionTaskDelegate, Sendab
     }
 }
 
+private final class ActiveOriginState: @unchecked Sendable {
+    static let shared = ActiveOriginState()
+    private let lock = NSLock()
+    private var resolved: URL?
+
+    func current(default fallback: URL) -> URL {
+        lock.lock()
+        defer { lock.unlock() }
+        return resolved ?? fallback
+    }
+
+    func update(_ url: URL) {
+        lock.lock()
+        resolved = url
+        lock.unlock()
+    }
+}
+
 struct FamilyStreamAPI: Sendable {
     let baseURL: URL
     var session: URLSession = Self.privateSession
+
+    private var effectiveBaseURL: URL {
+        guard baseURL == ServerAddress.baseURL else { return baseURL }
+        return ActiveOriginState.shared.current(default: baseURL)
+    }
+
+    private var candidateBaseURLs: [URL] {
+        guard baseURL == ServerAddress.baseURL else { return [baseURL] }
+        let primary = ActiveOriginState.shared.current(default: baseURL)
+        var list = [primary, ServerAddress.baseURL] + ServerAddress.fallbackURLs
+        var seen = Set<URL>()
+        return list.filter { seen.insert($0).inserted }
+    }
 
     private static let privateSession: URLSession = {
         let configuration = URLSessionConfiguration.ephemeral
@@ -397,14 +428,15 @@ struct FamilyStreamAPI: Sendable {
     }
 
     private func authorized(_ reply: WirePlayback, for playback: PlaybackRequest) throws -> AuthorizedPlayback {
+        let origin = effectiveBaseURL
         let heights = reply.availableHeights ?? []
         guard heights.count <= 32, Set(heights).count == heights.count,
               heights.allSatisfy({ $0 > 0 && $0 <= 16384 }), reply.format == "hls" || heights.isEmpty else { throw APIError.invalidData }
         guard ["hls", "mp4"].contains(reply.format), reply.title.type == playback.type, reply.title.id == playback.titleID,
               playback.type != .tv || (reply.title.season == playback.season && reply.title.episode == playback.episode),
               reply.url.hasPrefix("/stream/"), !reply.url.hasPrefix("//"),
-              let url = URL(string: reply.url, relativeTo: baseURL)?.absoluteURL,
-              url.scheme == baseURL.scheme, url.host == baseURL.host, url.port == baseURL.port,
+              let url = URL(string: reply.url, relativeTo: origin)?.absoluteURL,
+              url.scheme == origin.scheme, url.host == origin.host, url.port == origin.port,
               url.user == nil, url.password == nil, url.fragment == nil,
               let expires = parsedDate(reply.expiresAt), expires > Date() else { throw APIError.invalidData }
         return AuthorizedPlayback(id: reply.id, url: url, format: reply.format, expiresAt: expires,
@@ -414,38 +446,58 @@ struct FamilyStreamAPI: Sendable {
 
     private func request<Response: Decodable>(_ path: String, method: String = "GET", body: [String: Any]? = nil,
                                                query: [URLQueryItem] = [], key: String? = nil, timingID: UUID? = nil) async throws -> Response {
-        guard baseURL.scheme == "https", !path.contains(".."), !path.hasPrefix("/") else { throw APIError.invalidAddress }
-        var components = URLComponents(url: baseURL.appending(path: "api/v1/" + path), resolvingAgainstBaseURL: false)
-        components?.queryItems = query.isEmpty ? nil : query
-        guard let url = components?.url, url.host == baseURL.host else { throw APIError.invalidAddress }
-        var request = URLRequest(url: url)
-        request.httpMethod = method
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
-        request.setValue(baseURL.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/")), forHTTPHeaderField: "Origin")
-        if let key { request.setValue(key, forHTTPHeaderField: "Idempotency-Key") }
-        if let timingID { request.setValue(timingID.uuidString.lowercased(), forHTTPHeaderField: "X-Playback-Trace-ID") }
-        if let body {
-            request.httpBody = try JSONSerialization.data(withJSONObject: body)
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        guard !path.contains(".."), !path.hasPrefix("/") else { throw APIError.invalidAddress }
+        let bodyData: Data? = if let body { try JSONSerialization.data(withJSONObject: body) } else { nil }
+        let candidates = candidateBaseURLs
+        var lastConnectionError: Error?
+
+        for candidate in candidates {
+            guard ["http", "https"].contains(candidate.scheme) else { continue }
+            var components = URLComponents(url: candidate.appending(path: "api/v1/" + path), resolvingAgainstBaseURL: false)
+            components?.queryItems = query.isEmpty ? nil : query
+            guard let url = components?.url, url.host == candidate.host else { continue }
+            var request = URLRequest(url: url)
+            request.httpMethod = method
+            request.setValue("application/json", forHTTPHeaderField: "Accept")
+            request.setValue(candidate.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/")), forHTTPHeaderField: "Origin")
+            if candidates.count > 1 {
+                request.timeoutInterval = method == "POST" && path.hasSuffix("/playback") ? 35 : 6
+            }
+            if let key { request.setValue(key, forHTTPHeaderField: "Idempotency-Key") }
+            if let timingID { request.setValue(timingID.uuidString.lowercased(), forHTTPHeaderField: "X-Playback-Trace-ID") }
+            if let bodyData {
+                request.httpBody = bodyData
+                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            }
+            let data: Data
+            let response: URLResponse
+            do {
+                (data, response) = try await session.data(for: request)
+                if baseURL == ServerAddress.baseURL {
+                    ActiveOriginState.shared.update(candidate)
+                }
+            } catch {
+                if Task.isCancelled { throw CancellationError() }
+                lastConnectionError = error
+                continue
+            }
+            guard let http = response as? HTTPURLResponse else { throw APIError.invalidResponse }
+            guard (200..<300).contains(http.statusCode) else {
+                if http.statusCode == 404 { throw APIError.serverStatus(404) }
+                let code = (try? JSONDecoder().decode(FailureReply.self, from: data))?.error ?? "unavailable"
+                throw APIError.service(status: http.statusCode, code: code, message: Self.message(for: code))
+            }
+            if http.statusCode == 204, let empty = EmptyReply() as? Response { return empty }
+            let decoder = JSONDecoder()
+            decoder.keyDecodingStrategy = .convertFromSnakeCase
+            guard let reply = try? decoder.decode(Response.self, from: data) else { throw APIError.invalidData }
+            return reply
         }
-        let data: Data
-        let response: URLResponse
-        do { (data, response) = try await session.data(for: request) }
-        catch {
-            if Task.isCancelled { throw CancellationError() }
-            throw APIError.connection("Can’t reach Stream tv. Check your connection and Tailscale, then retry.")
+
+        if lastConnectionError != nil {
+            throw APIError.connection("Can’t reach Mello TV. Check your connection and retry.")
         }
-        guard let http = response as? HTTPURLResponse else { throw APIError.invalidResponse }
-        guard (200..<300).contains(http.statusCode) else {
-            if http.statusCode == 404 { throw APIError.serverStatus(404) }
-            let code = (try? JSONDecoder().decode(FailureReply.self, from: data))?.error ?? "unavailable"
-            throw APIError.service(status: http.statusCode, code: code, message: Self.message(for: code))
-        }
-        if http.statusCode == 204, let empty = EmptyReply() as? Response { return empty }
-        let decoder = JSONDecoder()
-        decoder.keyDecodingStrategy = .convertFromSnakeCase
-        guard let reply = try? decoder.decode(Response.self, from: data) else { throw APIError.invalidData }
-        return reply
+        throw APIError.invalidAddress
     }
 
     private static func message(for code: String) -> String {
@@ -542,9 +594,13 @@ struct AuthorizedPlayback: Sendable {
 }
 
 private func artworkURL(_ raw: String?) -> URL? {
-    guard let raw, let url = URL(string: raw), url.scheme == "https", url.host == "image.tmdb.org",
+    guard let raw, !raw.isEmpty else { return nil }
+    let normalized = raw
+        .replacingOccurrences(of: #"^/(?:api|internal)/v1/artwork/"#, with: "https://image.tmdb.org/t/p/", options: .regularExpression)
+        .replacingOccurrences(of: #"^/api/artwork/"#, with: "https://image.tmdb.org/t/p/", options: .regularExpression)
+    guard let url = URL(string: normalized), url.scheme == "https", url.host == "image.tmdb.org",
           url.user == nil, url.password == nil, url.query == nil, url.fragment == nil,
-          raw.range(of: #"^https://image\.tmdb\.org/t/p/(w300|w500|w1280)/[A-Za-z0-9_-]+\.(jpg|jpeg|png|webp)$"#, options: .regularExpression) != nil else { return nil }
+          normalized.range(of: #"^https://image\.tmdb\.org/t/p/(w300|w500|w780|w1280)/[A-Za-z0-9_-]+\.(jpg|jpeg|png|webp)$"#, options: .regularExpression) != nil else { return nil }
     return url
 }
 

@@ -16,7 +16,7 @@ use stream_core::{
 };
 use stream_storage::accounts::ListKind;
 
-use crate::{error::AppError, state::AppState};
+use crate::{error::AppError, routes::browse::normalize_artwork_url, state::AppState};
 
 #[derive(Debug, Deserialize)]
 pub struct CreateProfilePayload {
@@ -334,7 +334,9 @@ async fn list_library(
         .accounts
         .list_titles(&state.household_account_id, &id, ListKind::Library)
         .await?;
-    Ok(Json(json!({ "titles": titles })))
+    let mut payload = json!({ "titles": titles });
+    normalize_artwork_url(&mut payload);
+    Ok(Json(payload))
 }
 
 async fn put_library_title(
@@ -383,7 +385,9 @@ async fn list_favorites(
         .accounts
         .list_titles(&state.household_account_id, &id, ListKind::Favorites)
         .await?;
-    Ok(Json(json!({ "titles": titles })))
+    let mut payload = json!({ "titles": titles });
+    normalize_artwork_url(&mut payload);
+    Ok(Json(payload))
 }
 
 async fn put_favorites_title(
@@ -433,7 +437,9 @@ async fn list_recommendation_hidden(
         .accounts
         .list_titles(&state.household_account_id, &id, ListKind::RecommendationHidden)
         .await?;
-    Ok(Json(json!({ "titles": titles })))
+    let mut payload = json!({ "titles": titles });
+    normalize_artwork_url(&mut payload);
+    Ok(Json(payload))
 }
 
 async fn put_recommendation_hidden_title(
@@ -483,7 +489,9 @@ async fn list_recommendation_watched(
         .accounts
         .list_titles(&state.household_account_id, &id, ListKind::RecommendationWatched)
         .await?;
-    Ok(Json(json!({ "titles": titles })))
+    let mut payload = json!({ "titles": titles });
+    normalize_artwork_url(&mut payload);
+    Ok(Json(payload))
 }
 
 async fn put_recommendation_watched_title(
@@ -533,7 +541,9 @@ async fn list_recommendation_ignored(
         .accounts
         .list_titles(&state.household_account_id, &id, ListKind::RecommendationIgnored)
         .await?;
-    Ok(Json(json!({ "titles": titles })))
+    let mut payload = json!({ "titles": titles });
+    normalize_artwork_url(&mut payload);
+    Ok(Json(payload))
 }
 
 async fn put_recommendation_ignored_title(
@@ -583,7 +593,9 @@ async fn get_recommendation_feedback(
         .accounts
         .recommendation_feedback(&state.household_account_id, &id)
         .await?;
-    Ok(Json(serde_json::to_value(feedback).map_err(|e| AppError::Internal(e.to_string()))?))
+    let mut payload = serde_json::to_value(feedback).map_err(|e| AppError::Internal(e.to_string()))?;
+    normalize_artwork_url(&mut payload);
+    Ok(Json(payload))
 }
 
 async fn get_recommendation_topics(
@@ -650,9 +662,15 @@ async fn get_home(
     let mut featured = Vec::new();
 
     for record in records {
-        let shelf_data = record.data;
+        let mut shelf_data = record.data;
+        normalize_artwork_url(&mut shelf_data);
         let shelf_id = shelf_data.get("id").and_then(|v| v.as_str()).unwrap_or_default();
         if hidden_topics.contains(shelf_id) {
+            continue;
+        }
+        if shelf_filter.is_none()
+            && (shelf_id.starts_with("onboarding-") || shelf_id.starts_with("favorites-"))
+        {
             continue;
         }
         if shelf_filter.is_some_and(|target_shelf| shelf_id != target_shelf) {
@@ -728,9 +746,13 @@ async fn get_recommendations(
 
     let mut sections = Vec::new();
     for record in records {
-        let shelf_data = record.data;
+        let mut shelf_data = record.data;
+        normalize_artwork_url(&mut shelf_data);
         let shelf_id = shelf_data.get("id").and_then(|v| v.as_str()).unwrap_or_default();
-        if hidden_topics.contains(shelf_id) {
+        if hidden_topics.contains(shelf_id)
+            || shelf_id.starts_with("onboarding-")
+            || shelf_id.starts_with("favorites-")
+        {
             continue;
         }
         let heading = shelf_data.get("heading").and_then(|v| v.as_str()).unwrap_or_default();

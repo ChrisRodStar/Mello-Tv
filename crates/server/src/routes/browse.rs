@@ -44,7 +44,7 @@ pub struct CrossIdsPayload {
     pub mal_id: Option<i64>,
 }
 
-fn normalize_artwork_url(val: &mut serde_json::Value) {
+pub(crate) fn normalize_artwork_url(val: &mut serde_json::Value) {
     match val {
         serde_json::Value::Object(map) => {
             for (k, v) in map.iter_mut() {
