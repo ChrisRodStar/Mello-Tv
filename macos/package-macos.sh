@@ -5,7 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 echo "=============================================="
-echo " Packaging Stream TV for macOS"
+echo " Packaging Mello Watch v0.5.0 for macOS"
 echo "=============================================="
 
 # 1. Build Web Assets
@@ -30,10 +30,10 @@ swiftc -O -framework Cocoa -target arm64-apple-macos13.0 \
     "$ROOT_DIR/macos/StreamMenuBar/main.swift" \
     -o "$ROOT_DIR/macos/StreamMenuBar/StreamMenuBar"
 
-# 5. Assemble Stream.app Bundle
-echo "[5/6] Assembling Stream.app bundle..."
+# 5. Assemble Mello Watch.app Bundle
+echo "[5/6] Assembling Mello Watch.app bundle..."
 DIST_DIR="$ROOT_DIR/dist/macos"
-APP_DIR="$DIST_DIR/Stream.app"
+APP_DIR="$DIST_DIR/Mello Watch.app"
 
 rm -rf "$DIST_DIR"
 mkdir -p "$APP_DIR/Contents/MacOS"
@@ -52,14 +52,14 @@ chmod +x "$APP_DIR/Contents/MacOS/stream-server"
 codesign --force --deep --sign - "$APP_DIR"
 
 # 6. Create Drag-and-Drop DMG Installer
-echo "[6/6] Generating Stream-2.0.0-macOS.dmg..."
+echo "[6/6] Generating Mello-Watch-0.5.0-macOS.dmg..."
 DMG_STAGING="$DIST_DIR/dmg_staging"
 mkdir -p "$DMG_STAGING"
-cp -R "$APP_DIR" "$DMG_STAGING/Stream.app"
+cp -R "$APP_DIR" "$DMG_STAGING/Mello Watch.app"
 ln -s /Applications "$DMG_STAGING/Applications"
 
-DMG_OUTPUT="$DIST_DIR/Stream-2.0.0-macOS.dmg"
-hdiutil create -volname "Stream TV" \
+DMG_OUTPUT="$DIST_DIR/Mello-Watch-0.5.0-macOS.dmg"
+hdiutil create -volname "Mello Watch" \
     -srcfolder "$DMG_STAGING" \
     -ov -format UDZO \
     "$DMG_OUTPUT"
