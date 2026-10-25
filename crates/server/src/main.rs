@@ -17,6 +17,7 @@ pub struct ServerConfig {
     pub port: u16,
     pub db_path: PathBuf,
     pub proxy: Option<String>,
+    pub static_dir: Option<PathBuf>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -50,6 +51,19 @@ impl ServerConfig {
             .ok()
             .filter(|p| !p.trim().is_empty());
 
+        let mut static_dir = std::env::var("STREAM_STATIC_DIR")
+            .or_else(|_| std::env::var("STATIC_DIR"))
+            .ok()
+            .map(PathBuf::from)
+            .or_else(|| {
+                let default_web = PathBuf::from("web/dist");
+                if default_web.is_dir() {
+                    Some(default_web)
+                } else {
+                    None
+                }
+            });
+
         let mut args = std::env::args().skip(1);
         while let Some(arg) = args.next() {
             match arg.as_str() {
@@ -57,11 +71,12 @@ impl ServerConfig {
                     println!("Usage: stream-server [OPTIONS]");
                     println!();
                     println!("Options:");
-                    println!("  -p, --port <PORT>        Port to listen on [default: 8080]");
-                    println!("  -d, --db-path <PATH>     Database directory path [default: data]");
-                    println!("      --host <HOST>        Host address to bind to [default: 0.0.0.0]");
-                    println!("      --proxy <URL>        HTTP/SOCKS5 proxy URL for media network calls");
-                    println!("  -h, --help               Print help");
+                    println!("  -p, --port <PORT>          Port to listen on [default: 8080]");
+                    println!("  -d, --db-path <PATH>       Database directory path [default: data]");
+                    println!("      --static-dir <PATH>    Static web assets directory");
+                    println!("      --host <HOST>          Host address to bind to [default: 0.0.0.0]");
+                    println!("      --proxy <URL>          HTTP/SOCKS5 proxy URL for media network calls");
+                    println!("  -h, --help                 Print help");
                     std::process::exit(0);
                 }
                 "--port" | "-p" => {
@@ -106,6 +121,16 @@ impl ServerConfig {
                 arg if arg.starts_with("--proxy=") => {
                     proxy = Some(arg.trim_start_matches("--proxy=").to_string());
                 }
+                "--static-dir" => {
+                    if let Some(val) = args.next() {
+                        static_dir = Some(PathBuf::from(val));
+                    } else {
+                        return Err(ConfigError::InvalidArgument("missing value for --static-dir".into()));
+                    }
+                }
+                arg if arg.starts_with("--static-dir=") => {
+                    static_dir = Some(PathBuf::from(arg.trim_start_matches("--static-dir=")));
+                }
                 other => {
                     return Err(ConfigError::InvalidArgument(format!("unknown option: {other}")));
                 }
@@ -117,6 +142,7 @@ impl ServerConfig {
             port,
             db_path,
             proxy,
+            static_dir,
         })
     }
 }
@@ -188,7 +214,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         household_id,
     );
 
-    let router = routes::build_router(state.clone());
+    let router = routes::build_router_with_static(state.clone(), config.static_dir.clone());
 
     let addr = format!("{}:{}", config.host, config.port);
     let listener = tokio::net::TcpListener::bind(&addr).await?;
@@ -238,10 +264,12 @@ mod tests {
             port: 8080,
             db_path: PathBuf::from("data"),
             proxy: None,
+            static_dir: None,
         };
         assert_eq!(config.host, "0.0.0.0");
         assert_eq!(config.port, 8080);
         assert_eq!(config.db_path, PathBuf::from("data"));
         assert!(config.proxy.is_none());
+        assert!(config.static_dir.is_none());
     }
 }

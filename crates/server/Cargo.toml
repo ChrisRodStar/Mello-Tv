@@ -11,6 +11,7 @@ stream-storage = { path = "../storage" }
 stream-media = { path = "../media" }
 tokio.workspace = true
 axum = { workspace = true, features = ["query"] }
+tower-http = { version = "0.6", features = ["fs"] }
 tracing.workspace = true
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 thiserror.workspace = true

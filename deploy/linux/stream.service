@@ -1,0 +1,20 @@
+[Unit]
+Description=Stream TV Media Daemon
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/stream-server --port 8080 --db-path %h/.local/share/stream/data --static-dir %h/.local/share/stream/web
+Restart=on-failure
+RestartSec=5s
+KillMode=mixed
+TimeoutStopSec=10s
+
+# Sandboxing and security
+ProtectSystem=strict
+ReadWritePaths=%h/.local/share/stream
+ProtectHome=read-only
+NoNewPrivileges=true
+
+[Install]
+WantedBy=default.target
