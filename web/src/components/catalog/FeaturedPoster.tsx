@@ -1,4 +1,4 @@
-import { memo, type CSSProperties } from 'react';
+import { memo, useEffect, useState, type CSSProperties } from 'react';
 
 import type { Title } from '../../model';
 
@@ -6,7 +6,6 @@ export const FeaturedPoster = memo(function FeaturedPoster({
   title,
   active,
   revealed = false,
-  eager,
   effectiveOffset = 0,
   depth = 0,
   contentOpacity = 1,
@@ -23,7 +22,16 @@ export const FeaturedPoster = memo(function FeaturedPoster({
   onActivate: () => void;
   onDetails?: () => void;
 }) {
-  const imageUrl = title.posterUrl || title.backdropUrl;
+  const candidates = [title.posterUrl, title.backdropUrl].filter(
+    (u): u is string => Boolean(u),
+  );
+  const [failedCount, setFailedCount] = useState(0);
+
+  useEffect(() => {
+    setFailedCount(0);
+  }, [title.posterUrl, title.backdropUrl]);
+
+  const imageUrl = candidates[failedCount] ?? null;
   const blurPx = depth > 0 ? Number((depth * 0.8).toFixed(2)) : 0;
   const brightness = depth > 0 ? Number((1 - depth * 0.08).toFixed(3)) : 1;
 
@@ -55,10 +63,11 @@ export const FeaturedPoster = memo(function FeaturedPoster({
             className="featured-poster-img"
             src={imageUrl}
             alt=""
-            loading={eager ? 'eager' : 'lazy'}
+            loading="eager"
             decoding="async"
             draggable={false}
             style={artworkFilter ? { filter: artworkFilter } : undefined}
+            onError={() => setFailedCount((c) => c + 1)}
           />
         ) : (
           <span className="featured-poster-placeholder">

@@ -2,11 +2,6 @@
   margin-bottom: 32px;
 }
 
-.shelf:not(:first-of-type) {
-  contain-intrinsic-size: auto 300px;
-  content-visibility: auto;
-}
-
 .shelf-heading {
   display: flex;
   align-items: center;
@@ -77,6 +72,7 @@
 .title-card {
   display: block;
   position: relative;
+  width: 100%;
   min-width: 0;
   padding: 0;
   border: 0;
@@ -122,19 +118,22 @@
 }
 
 .poster-wrap img {
+  position: absolute;
+  inset: 0;
   display: block;
   width: 100%;
   height: 100%;
   object-fit: cover;
-  transform: translateZ(0);
-  backface-visibility: hidden;
 }
 
 .poster-placeholder {
+  position: absolute;
+  inset: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
+  width: 100%;
   height: 100%;
   padding: 16px 10px;
   gap: 8px;
@@ -282,6 +281,7 @@
 .panoramic-card {
   display: block;
   position: relative;
+  width: 100%;
   min-width: 0;
   padding: 0;
   border: 0;
@@ -327,14 +327,17 @@
 }
 
 .panoramic-wrap img {
+  position: absolute;
+  inset: 0;
   display: block;
   width: 100%;
   height: 100%;
   object-fit: cover;
-  transform: translateZ(0);
 }
 
 .panoramic-placeholder {
+  position: absolute;
+  inset: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -436,11 +439,12 @@
 }
 
 .editorial-spotlight-art img {
+  position: absolute;
+  inset: 0;
   display: block;
   width: 100%;
   height: 100%;
   object-fit: cover;
-  transform: translateZ(0);
 }
 
 .editorial-spotlight-placeholder {

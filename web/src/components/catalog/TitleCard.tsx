@@ -1,4 +1,4 @@
-import { memo } from 'react';
+import { memo, useEffect, useState } from 'react';
 
 import type { Title } from '../../model';
 
@@ -48,6 +48,17 @@ export const TitleCard = memo(function TitleCard({
   onSelect: (title: Title) => void;
   repeated?: boolean;
 }) {
+  const candidates = [title.posterUrl, title.backdropUrl].filter(
+    (u): u is string => Boolean(u),
+  );
+  const [failedCount, setFailedCount] = useState(0);
+
+  useEffect(() => {
+    setFailedCount(0);
+  }, [title.posterUrl, title.backdropUrl]);
+
+  const activeSrc = candidates[failedCount] ?? null;
+
   return (
     <button
       type="button"
@@ -57,8 +68,13 @@ export const TitleCard = memo(function TitleCard({
       aria-label={`Details for ${title.title}`}
     >
       <div className="poster-wrap">
-        {title.posterUrl ? (
-          <img src={title.posterUrl} alt="" loading="lazy" decoding="async" />
+        {activeSrc ? (
+          <img
+            src={activeSrc}
+            alt=""
+            decoding="async"
+            onError={() => setFailedCount((c) => c + 1)}
+          />
         ) : (
           <div className="poster-placeholder">
             <MediaPlaceholderIcon type={title.type} />

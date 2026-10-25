@@ -1,4 +1,4 @@
-import { memo, useCallback, useRef } from 'react';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
 
 import type { Title } from '../../model';
 
@@ -147,7 +147,19 @@ export const PanoramicCard = memo(function PanoramicCard({
   title: Title;
   onSelect: (title: Title) => void;
 }) {
-  const artworkUrl = title.backdropUrl ?? title.posterUrl;
+  const candidates = [
+    title.backdropUrl ? title.backdropUrl.replace('/t/p/w1280/', '/t/p/w780/') : null,
+    title.backdropUrl,
+    title.posterUrl,
+  ].filter((u, idx, arr): u is string => Boolean(u) && arr.indexOf(u) === idx);
+  const [failedCount, setFailedCount] = useState(0);
+
+  useEffect(() => {
+    setFailedCount(0);
+  }, [title.backdropUrl, title.posterUrl]);
+
+  const artworkUrl = candidates[failedCount] ?? null;
+
   return (
     <button
       type="button"
@@ -157,7 +169,12 @@ export const PanoramicCard = memo(function PanoramicCard({
     >
       <div className="panoramic-wrap">
         {artworkUrl ? (
-          <img src={artworkUrl} alt="" loading="lazy" decoding="async" />
+          <img
+            src={artworkUrl}
+            alt=""
+            decoding="async"
+            onError={() => setFailedCount((c) => c + 1)}
+          />
         ) : (
           <div className="panoramic-placeholder">
             <MediaPlaceholderIcon type={title.type} />
@@ -228,7 +245,17 @@ export const EditorialSpotlightCard = memo(function EditorialSpotlightCard({
   onSelect: (title: Title) => void;
   onPlay?: (title: Title) => void;
 }) {
-  const artworkUrl = title.backdropUrl ?? title.posterUrl;
+  const candidates = [title.backdropUrl, title.posterUrl].filter(
+    (u): u is string => Boolean(u),
+  );
+  const [failedCount, setFailedCount] = useState(0);
+
+  useEffect(() => {
+    setFailedCount(0);
+  }, [title.backdropUrl, title.posterUrl]);
+
+  const artworkUrl = candidates[failedCount] ?? null;
+
   return (
     <div className="editorial-spotlight-wrap">
       <button
@@ -239,7 +266,12 @@ export const EditorialSpotlightCard = memo(function EditorialSpotlightCard({
       >
         <span className="editorial-spotlight-art">
           {artworkUrl ? (
-            <img src={artworkUrl} alt="" loading="lazy" decoding="async" />
+            <img
+              src={artworkUrl}
+              alt=""
+              decoding="async"
+              onError={() => setFailedCount((c) => c + 1)}
+            />
           ) : (
             <span className="editorial-spotlight-placeholder">
               <MediaPlaceholderIcon type={title.type} />

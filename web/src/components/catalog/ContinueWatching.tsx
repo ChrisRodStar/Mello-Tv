@@ -67,9 +67,19 @@ export function ContinueWatchingCard({
       ? `S${item.season}, E${item.episode} · ${remaining}`
       : remaining;
 
-  const artworkUrl = isPoster
-    ? (item.title.posterUrl ?? item.title.backdropUrl)
-    : (item.title.backdropUrl ?? item.title.posterUrl);
+  const candidates = (
+    isPoster
+      ? [item.title.posterUrl, item.title.backdropUrl]
+      : [
+          item.title.backdropUrl
+            ? item.title.backdropUrl.replace('/t/p/w1280/', '/t/p/w780/')
+            : null,
+          item.title.backdropUrl,
+          item.title.posterUrl,
+        ]
+  ).filter((u, idx, arr): u is string => Boolean(u) && arr.indexOf(u) === idx);
+  const [failedCount, setFailedCount] = useState(0);
+  const artworkUrl = candidates[failedCount] ?? null;
 
   async function handlePlay() {
     if (disabled) return;
@@ -110,7 +120,12 @@ export function ContinueWatchingCard({
       >
         <span className="continue-art">
           {artworkUrl ? (
-            <img src={artworkUrl} alt="" loading="lazy" decoding="async" />
+            <img
+              src={artworkUrl}
+              alt=""
+              decoding="async"
+              onError={() => setFailedCount((c) => c + 1)}
+            />
           ) : (
             <span className="continue-art-placeholder">
               <MediaPlaceholderIcon type={item.title.type} />

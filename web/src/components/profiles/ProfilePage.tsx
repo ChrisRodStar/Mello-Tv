@@ -365,7 +365,7 @@ export function ProfilePage({
                   >
                     <span className="profile-continue-poster-art">
                       {posterSrc ? (
-                        <img src={posterSrc} alt="" loading="lazy" decoding="async" />
+                        <img src={posterSrc} alt="" decoding="async" />
                       ) : (
                         <ArtworkFallback title={item.title.title} type={item.title.type} />
                       )}
@@ -431,7 +431,7 @@ export function ProfilePage({
                 >
                   <span className="profile-saved-poster-art">
                     {title.posterUrl ? (
-                      <img src={title.posterUrl} alt="" loading="lazy" decoding="async" />
+                      <img src={title.posterUrl} alt="" decoding="async" />
                     ) : (
                       <ArtworkFallback title={title.title} type={title.type} />
                     )}
