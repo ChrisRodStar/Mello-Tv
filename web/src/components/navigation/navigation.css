@@ -22,6 +22,35 @@
   gap: 8px;
 }
 
+.side-navigation .navigation-brand {
+  grid-row: 1;
+  align-self: start;
+  justify-self: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: auto;
+  padding: 6px;
+  border-radius: 12px;
+  cursor: pointer;
+}
+
+.side-navigation .navigation-brand .brand-logo {
+  width: 44px;
+  height: auto;
+  transition: transform 120ms ease-out, opacity 120ms ease-out;
+}
+
+.side-navigation .navigation-brand:hover .brand-logo {
+  transform: scale(1.06);
+}
+
+.side-navigation .navigation-brand:active .brand-logo {
+  transform: scale(0.94);
+  opacity: 0.85;
+}
+
+
 .side-navigation .navigation-profile {
   grid-row: 3;
   align-self: end;
@@ -138,6 +167,9 @@
     border-top: 1px solid #333;
     border-right: 0;
     background: #101010fa;
+  }
+  .side-navigation .navigation-brand {
+    display: none;
   }
   .navigation-browse {
     display: contents;

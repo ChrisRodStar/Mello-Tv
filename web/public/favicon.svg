@@ -1,1 +1,13 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="12" fill="#141414"/><path d="M20 14h28v8H29v9h16v8H29v13h-9z" fill="#e50914"/></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="100%" height="100%">
+  <defs>
+    <linearGradient id="bg" x1="0.5" y1="1" x2="0.5" y2="0">
+      <stop offset="0%" stop-color="#121316"/>
+      <stop offset="100%" stop-color="#212328"/>
+    </linearGradient>
+  </defs>
+  <rect width="1024" height="1024" rx="224" fill="url(#bg)"/>
+  <path fill="#202126" d="M372 734H652C652 741 665 745 678 752C687 758 692 768 692 779C692 790 686 797 675 797H349C338 797 332 790 334 779C336 763 345 754 357 749C368 744 372 740 372 734Z"/>
+  <rect x="181" y="208" width="662" height="534" rx="91" fill="#1c1d22" stroke="#2d2f36" stroke-width="8"/>
+  <path fill="#f2f0ea" d="M433 379C433 361 450 351 465 361L626 469C639 478 639 491 626 500L465 605C450 615 433 605 433 587Z"/>
+  <rect x="474" y="683" width="76" height="18" rx="9" fill="#2997ff"/>
+</svg>

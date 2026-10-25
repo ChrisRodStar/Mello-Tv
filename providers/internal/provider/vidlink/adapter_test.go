@@ -175,13 +175,14 @@ func TestRegistryAndTracedCapabilities(t *testing.T) {
 		model.VidLink,
 		model.VidSrc,
 		model.VidFast,
+		model.Videasy,
 	}
 	var registeredProviders []model.ProviderID
 	for _, registered := range registry.Adapters() {
 		registeredProviders = append(registeredProviders, registered.ID())
 	}
 	if !slices.Equal(registeredProviders, expectedProviders) {
-		t.Fatal("registry does not contain exactly the four planned providers")
+		t.Fatal("registry does not contain exactly the planned providers")
 	}
 }
 

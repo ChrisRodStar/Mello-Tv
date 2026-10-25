@@ -9,11 +9,11 @@
   },
   "stv-providers": {
     "branch": "main",
-    "commit": "74c098808770447044e2a47a2a886bc2487c32fc"
+    "commit": "22d5c1df2370ef71114fb6310121e7cfe374d247"
   },
   "stv-relay": {
     "branch": "main",
-    "commit": "3671cff910cc613b64d5efecdc27ebcc3881ee5d"
+    "commit": "c967c1cc161fc8911a5fa2873617ad2dc158aa29"
   },
   "stv-web": {
     "branch": "main",

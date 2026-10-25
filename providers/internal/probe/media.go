@@ -211,12 +211,12 @@ func (p *Pool) sample(
 		}
 
 		combined.Observation.SamplesCompleted++
-		if probed.Observation.DeliveryBPS == nil {
+		if probed.Observation.DeliveryBPS == nil && probed.Observation.SampleBytes >= 16*1024 {
 			allSpeedsMeasured = false
 		}
 	}
 
-	if !allSpeedsMeasured {
+	if !allSpeedsMeasured || combined.Observation.DeliveryBPS == nil {
 		combined.Observation.DeliveryBPS = nil
 	}
 

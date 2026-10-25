@@ -1,4 +1,4 @@
-# Family Stream
+# Stream TV
 
 <!-- impeccable:product-schema 1 -->
 
@@ -29,7 +29,7 @@ The app is intended to run on a Raspberry Pi 5 or another always-on computer beh
 
 ## Brand Commitments
 
-- Keep the product a focused Netflix-style browsing app, not a promotional landing page. Do not show logos in navigation, filler slogans, coming-soon notices, roadmap text, or placeholder actions.
+- Keep the product a focused browsing app, not a promotional landing page. Display the Stream TV brand mark in the side navigation rail without filler slogans, coming-soon notices, roadmap text, or placeholder actions.
 - Use a side rail on larger screens and bottom navigation on phones. Make controls large and keyboard focus clear, including for television-sized displays.
 - Search has its own view, without a redundant heading or decorative search icon. Show real results and useful loading, error, and empty states; omit unavailable metadata.
 - Keep title details centered and compact, with artwork fading into the content background. Season selectors show season names only.

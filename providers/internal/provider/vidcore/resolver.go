@@ -26,7 +26,7 @@ var (
 	chunkPattern     = regexp.MustCompile(`/_next/static/chunks/[\w./%-]+\.js`)
 	modulePattern    = regexp.MustCompile(`var ([\w$]+)=([\w$]+)\((\d+)\),[\w$]+=([\w$]+)\((\d+)\)\.Buffer;`)
 	boundaryPattern  = regexp.MustCompile(`let [\w$]+=[\w$]+=>\{let [\w$]+=Math\.floor\(`)
-	listPattern      = regexp.MustCompile(`var [\w$]+=0[;,](?:[\w$]+=function\(\)\{for\(var e=Array\(6\)|[\w$]+\[\[[\d,]+\]\.map\(function\([\w$]+\))`)
+	listPattern      = regexp.MustCompile(`var [\w$]+=0[;,](?:[\w$]+=function\(\)\{for\(var e=(?:Array\(\d+\)|\[,+\])|[\w$]+\[\[[\d,]+\]\.map\(function\([\w$]+\)|[\w$]+=function\([^)]*\)\{for\(var [\w$]+=new Uint8Array)`)
 	routePattern     = regexp.MustCompile(`fetch\(""\.concat\("([^"]+)","/"\)\.concat\("([^"]+)","/"\)`)
 	unlockPattern    = regexp.MustCompile(`let ([\w$]+)=\[\];var [\w$,]+=0[;,]`)
 	unlockEndPattern = regexp.MustCompile(`;await ([\w$]+),[\w$]+\.current=`)

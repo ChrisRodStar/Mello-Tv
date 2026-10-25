@@ -3,6 +3,7 @@ import { memo } from 'react';
 import type { Profile } from '../../lib/profiles';
 import type { Category } from '../../types';
 import { ProfileAvatar } from '../profiles/ProfileAvatar';
+import { BrandLogo } from './BrandLogo';
 import { NavigationIcon } from './NavigationIcon';
 
 const categories: { id: Category; label: string }[] = [
@@ -30,6 +31,15 @@ export const Navigation = memo(function Navigation({
 }) {
   return (
     <nav className="side-navigation" aria-label="Main navigation">
+      <button
+        type="button"
+        className="navigation-brand"
+        aria-label="Stream TV Home"
+        title="Stream TV"
+        onClick={() => onCategoryChange('all')}
+      >
+        <BrandLogo />
+      </button>
       <div className="navigation-browse">
         {categories.map((category) => (
           <button

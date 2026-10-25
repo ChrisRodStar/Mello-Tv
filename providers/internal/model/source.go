@@ -15,14 +15,16 @@ const (
 	VidLink ProviderID = "vidlink"
 	VidSrc  ProviderID = "vidsrc"
 	VidFast ProviderID = "vidfast"
+	Videasy ProviderID = "videasy"
 )
 
-// PlannedProviders lists the four intended providers supported by the service architecture.
+// PlannedProviders lists the intended providers supported by the service architecture.
 var PlannedProviders = [...]ProviderID{
 	VidCore,
 	VidLink,
 	VidSrc,
 	VidFast,
+	Videasy,
 }
 
 // Format identifies the streaming container or manifest format.

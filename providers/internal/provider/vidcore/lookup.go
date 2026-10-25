@@ -48,18 +48,23 @@ func (a *Adapter) resolveNative(
 ) (model.AdapterResult, error) {
 	result := model.AdapterResult{}
 
+	protocolHeaders := map[string]string{
+		"User-Agent":      userAgent,
+		"Accept":          "*/*",
+		"Accept-Language": "en-US,en;q=0.9",
+		"Origin":          origin,
+		"Referer":         referer,
+	}
+	if proto.CsrfToken != "" {
+		protocolHeaders["X-Csrf-Token"] = proto.CsrfToken
+	}
+
 	fetchContext := model.FetchContext{
 		Scopes: []model.FetchScope{
 			{
 				Origin:     origin,
 				PathPrefix: proto.Base,
-				Headers: map[string]string{
-					"User-Agent":      userAgent,
-					"Accept":          "*/*",
-					"Accept-Language": "en-US,en;q=0.9",
-					"Origin":          origin,
-					"Referer":         referer,
-				},
+				Headers:    protocolHeaders,
 			},
 		},
 	}

@@ -1,4 +1,4 @@
-# Family Stream Web
+# Stream TV Web
 
 Private family app with no account sign-in, password or sign-out screen. Opens directly into household profiles; Tailscale is the access boundary. Internal service tokens and signed stream capabilities remain server-managed.
 

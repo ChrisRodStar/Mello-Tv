@@ -35,8 +35,9 @@ func TestNewRegistryWithPlannedProviders(t *testing.T) {
 	vidlink := mockAdapter{id: model.VidLink}
 	vidsrc := mockAdapter{id: model.VidSrc}
 	vidfast := mockAdapter{id: model.VidFast}
+	videasy := mockAdapter{id: model.Videasy}
 
-	reg, err := NewRegistry(vidcore, vidlink, vidsrc, vidfast)
+	reg, err := NewRegistry(vidcore, vidlink, vidsrc, vidfast, videasy)
 	if err != nil {
 		t.Fatalf("unexpected error creating registry: %v", err)
 	}
@@ -271,7 +272,7 @@ func BenchmarkRegistryAdapters(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
 		adapters := reg.Adapters()
-		if len(adapters) != 4 {
+		if len(adapters) != len(model.PlannedProviders) {
 			b.Fatal("unexpected len")
 		}
 	}

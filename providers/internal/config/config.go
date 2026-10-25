@@ -9,13 +9,14 @@ import (
 	"stv-providers/internal/probe"
 	"stv-providers/internal/provider"
 	"stv-providers/internal/provider/vidcore"
+	"stv-providers/internal/provider/videasy"
 	"stv-providers/internal/provider/vidfast"
 	"stv-providers/internal/provider/vidlink"
 	"stv-providers/internal/provider/vidsrc"
 	"stv-providers/internal/search"
 )
 
-// NewEngine wires all four native providers into the registry
+// NewEngine wires all native providers into the registry
 // and initializes network clients, HLS stream probers, and the search coordinator.
 //
 // Note: Deployment must establish and attest a fail-closed Mullvad VPN network before supplying options.
@@ -30,6 +31,7 @@ func NewEngine(options network.Options, diagnostic func(model.ProviderStatus)) (
 		vidlink.New(client),
 		vidsrc.New(client),
 		vidfast.New(client),
+		videasy.New(client),
 	)
 	if err != nil {
 		client.Close()

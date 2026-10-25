@@ -17,6 +17,10 @@ import (
 // player bytecode versions. If upstream deploys modified obfuscation or instructions,
 // compilation fails fast with model.ProtocolChange rather than executing unverified code.
 const (
+	v3MaterialDigest = "503e3df6cc9ffc6d239ce5dc92d99bc7720b85d8dfb83658733a74e98fbd6def"
+	v3ListDigest     = "178831c68e6a878d155f092ed2eab62d1309291be032e6f046196bf96857f801"
+	v3UnlockDigest   = "8f85b5136be7712309d6fb8dd8e157066c82a8bea454c224d9b07f297478b419"
+
 	materialDigest = "af13d5c75ee77178a31554392c906bd94ee3e979d62691690108f3ded337a885"
 	listDigest     = "a39fcc5958024e588c963ebd34ece56b49f59e37539edab7df082288b28a23e3"
 	unlockDigest   = "ac9a1f7e7b5b4d2b28a32c2e73f6dc494f2596ed8dfedac3e6ed86b5f6545086"
@@ -39,6 +43,7 @@ type protocol struct {
 	ChallengeAction string
 	ListAction      string
 	UnlockAction    string
+	CsrfToken       string
 	Key             []byte
 	IV              []byte
 	Seed            []byte
@@ -61,7 +66,8 @@ var (
 	blobDeclaration       = regexp.MustCompile(`([\w$]+)=[\w$]+\.from\("([^"]+)",([\w$]+)\)`)
 	xorBlobDeclaration    = regexp.MustCompile(`([\w$]+)=function\([^)]*\)\{[^}]*\.from\(e,([\w$]+)\)[^}]*\^=(\d+);return [\w$]+\}\("([^"]+)",0\)`)
 	orderDeclaration      = regexp.MustCompile(`case \d+:[\w$]+\[(\d+)\]=([\w$]+)`)
-	maskDeclaration       = regexp.MustCompile(`a=(0x[\da-f]+),r=0;r<256;r\+\+\)\{var s=a=a\+(0x[\da-f]+)>>>0;`)
+	maskDeclaration       = regexp.MustCompile(`a=(0x[\da-f]+),r=0;r<256;r\+\+\)\{var [\w$]+=a=a\+(0x[\da-f]+)>>>0;`)
+	csrfTokenPattern      = regexp.MustCompile(`X-Csrf-Token["']\s*:\s*["']([^"']+)["']`)
 )
 
 // decodeLiteral decodes a base64 or hex encoded string literal from static player source.
@@ -222,7 +228,7 @@ func stringConstant(code []byte, offset int) (string, error) {
 	if offset < 0 || offset+4 > len(code) {
 		return "", protocolError("mapped constant absent")
 	}
-	if (code[offset] != 103 || code[offset+1] != 188) && (code[offset] != 89 || code[offset+1] != 4) {
+	if (code[offset] != 103 || code[offset+1] != 188) && (code[offset] != 89 || code[offset+1] != 4) && (code[offset] != 72 || code[offset+1] != 105) {
 		return "", protocolError("mapped constant absent")
 	}
 
@@ -257,12 +263,16 @@ func compileProtocol(source string) (*protocol, error) {
 
 	// Validate raw material fingerprint.
 	materialFingerprint := fmt.Sprintf("%x", sha256.Sum256([]byte(prefix+"\n"+source[listStart:listEnd]+"\n"+unlockCode)))
-	if materialFingerprint != materialDigest && materialFingerprint != legacyMaterialDigest {
+	if materialFingerprint != v3MaterialDigest && materialFingerprint != materialDigest && materialFingerprint != legacyMaterialDigest {
 		return nil, protocolError("unmapped player material version")
 	}
 
 	// Extract and unmask list and unlock bytecode.
-	listBytecode, err := decodeProgram(prefix, source[listStart:listEnd], 6)
+	listParts := 6
+	if materialFingerprint == v3MaterialDigest {
+		listParts = 5
+	}
+	listBytecode, err := decodeProgram(prefix, source[listStart:listEnd], listParts)
 	if err != nil {
 		return nil, protocolError("list bytecode extraction failed")
 	}
@@ -275,7 +285,8 @@ func compileProtocol(source string) (*protocol, error) {
 	// Validate compiled bytecode digests.
 	listFingerprint := fmt.Sprintf("%x", sha256.Sum256(listBytecode))
 	unlockFingerprint := fmt.Sprintf("%x", sha256.Sum256(unlockBytecode))
-	if (listFingerprint != listDigest || unlockFingerprint != unlockDigest) &&
+	if (listFingerprint != v3ListDigest || unlockFingerprint != v3UnlockDigest) &&
+		(listFingerprint != listDigest || unlockFingerprint != unlockDigest) &&
 		(listFingerprint != legacyListDigest || unlockFingerprint != legacyUnlockDigest) {
 		return nil, protocolError("unmapped player instruction version")
 	}
@@ -286,6 +297,10 @@ func compileProtocol(source string) (*protocol, error) {
 		Alphabet:     make(map[byte]byte),
 	}
 
+	if csrfMatches := csrfTokenPattern.FindStringSubmatch(source); len(csrfMatches) == 2 {
+		proto.CsrfToken = csrfMatches[1]
+	}
+
 	readConstant := func(offset int) string {
 		val, _ := stringConstant(listBytecode, offset)
 		return val
@@ -293,7 +308,31 @@ func compileProtocol(source string) (*protocol, error) {
 
 	var stageKeyOffsets, prefixOffsets, rc4Offsets []int
 
-	if materialFingerprint == materialDigest {
+	switch materialFingerprint {
+	case v3MaterialDigest:
+		if readConstant(45603) != material.Base || readConstant(51421) != material.Base {
+			return nil, protocolError("catalog/unlock base mismatch")
+		}
+
+		proto.ChallengeAction = readConstant(45862)
+		proto.ListAction = readConstant(51680)
+		proto.Key, _ = decodeLiteral(readConstant(36901), "hex")
+		proto.IV, _ = decodeLiteral(readConstant(37027), "hex")
+		proto.Seed, _ = decodeLiteral(readConstant(37120), "hex")
+		proto.ResponseSeed, _ = decodeLiteral(readConstant(48097), "hex")
+
+		for _, offset := range []int{48506, 48608} {
+			num, err := strconv.ParseUint(readConstant(offset), 10, 64)
+			if err != nil {
+				return nil, protocolError("invalid response-key component")
+			}
+			proto.ResponseNumbers = append(proto.ResponseNumbers, num)
+		}
+
+		stageKeyOffsets = []int{29951, 31250, 32615, 34051, 35487}
+		prefixOffsets = []int{30034, 31333, 32698, 34134, 35570}
+		rc4Offsets = []int{46801, 47316, 47574, 47832, 47058}
+	case materialDigest:
 		if readConstant(45623) != material.Base || readConstant(51230) != material.Base {
 			return nil, protocolError("catalog/unlock base mismatch")
 		}
@@ -316,7 +355,7 @@ func compileProtocol(source string) (*protocol, error) {
 		stageKeyOffsets = []int{29963, 31265, 32632, 34070, 35495}
 		prefixOffsets = []int{30046, 31348, 32715, 34153, 35578}
 		rc4Offsets = []int{46598, 47114, 47372, 47629, 46856}
-	} else {
+	default:
 		if readConstant(45636) != material.Base || readConstant(51272) != material.Base {
 			return nil, protocolError("catalog/unlock base mismatch")
 		}

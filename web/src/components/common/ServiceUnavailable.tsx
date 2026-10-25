@@ -20,7 +20,7 @@ export function ServiceUnavailable({ health, checking, onRetry }: Props) {
           aria-busy={checking}
         >
           <div>
-            <dt>Family Stream API</dt>
+            <dt>Stream TV API</dt>
             <dd data-state={checking ? 'checking' : health ? 'ok' : 'down'}>
               {checking ? 'Checking…' : health ? 'Available' : 'Unreachable'}
             </dd>

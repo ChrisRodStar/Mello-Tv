@@ -210,7 +210,7 @@ func TestExplicitRefreshBypassesAdapterCacheWithoutChangingRanking(t *testing.T)
 	} {
 		lookup.Refresh = refresh
 		outcome, err := coordinator.Resolve(context.Background(), lookup)
-		if err != nil || outcome.Selected == nil || len(outcome.Providers) != 4 {
+		if err != nil || outcome.Selected == nil || len(outcome.Providers) != len(model.PlannedProviders) {
 			t.Fatal("shared selection unavailable")
 		}
 	}
