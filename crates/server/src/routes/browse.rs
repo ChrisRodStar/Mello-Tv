@@ -178,8 +178,28 @@ async fn readyz(State(state): State<AppState>) -> Result<Json<serde_json::Value>
     Ok(Json(json!({ "version": "api.v1", "status": "ready" })))
 }
 
-async fn status() -> Json<serde_json::Value> {
-    Json(json!({ "version": "api.v1", "status": "ok" }))
+async fn status(State(state): State<AppState>) -> Json<serde_json::Value> {
+    let now: DateTime<Utc> = SystemTime::now().into();
+    let has_snapshot = state
+        .catalog
+        .list("shelf", 1, now)
+        .await
+        .map(|shelves| !shelves.is_empty())
+        .unwrap_or(false);
+    let announcement =
+        crate::discovery::build_announcement(&state.household_account_id, state.http_port);
+
+    Json(json!({
+        "version": "api.v1",
+        "status": "ok",
+        "catalog_snapshot": if has_snapshot { "retained" } else { "missing" },
+        "service": announcement.service,
+        "app_version": announcement.app_version,
+        "server_id": announcement.server_id,
+        "server_name": announcement.server_name,
+        "port": announcement.port,
+        "endpoints": announcement.endpoints,
+    }))
 }
 
 async fn search(

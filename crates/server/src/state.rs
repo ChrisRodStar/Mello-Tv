@@ -10,6 +10,7 @@ pub struct AppState {
     pub media: Arc<dyn MediaEngine>,
     pub relay: Arc<MediaRelay>,
     pub household_account_id: String,
+    pub http_port: u16,
 }
 
 impl AppState {
@@ -25,7 +26,13 @@ impl AppState {
             media,
             relay: Arc::new(MediaRelay::new()),
             household_account_id,
+            http_port: 8080,
         }
+    }
+
+    pub fn with_port(mut self, port: u16) -> Self {
+        self.http_port = port;
+        self
     }
 
     pub fn catalog_repo(&self) -> Arc<dyn CatalogRepository> {

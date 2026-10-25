@@ -29,8 +29,12 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_mellotv._tcp</string>
+	</array>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>Mello TV connects to your household streaming server.</string>
+	<string>Mello TV discovers and connects to your household streaming server on your local network.</string>
 	<key>UILaunchScreen</key>
 	<dict/>
 	<key>UISupportedInterfaceOrientations</key>

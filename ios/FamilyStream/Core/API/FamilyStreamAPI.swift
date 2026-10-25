@@ -31,15 +31,19 @@ struct FamilyStreamAPI: Sendable {
     let baseURL: URL
     var session: URLSession = Self.privateSession
 
+    private var isDynamicOrigin: Bool {
+        baseURL.host != "fixture.invalid"
+    }
+
     private var effectiveBaseURL: URL {
-        guard baseURL == ServerAddress.baseURL else { return baseURL }
-        return ActiveOriginState.shared.current(default: baseURL)
+        guard isDynamicOrigin else { return baseURL }
+        return ActiveOriginState.shared.current(default: ServerAddress.baseURL)
     }
 
     private var candidateBaseURLs: [URL] {
-        guard baseURL == ServerAddress.baseURL else { return [baseURL] }
-        let primary = ActiveOriginState.shared.current(default: baseURL)
-        var list = [primary, ServerAddress.baseURL] + ServerAddress.fallbackURLs
+        guard isDynamicOrigin else { return [baseURL] }
+        let primary = ActiveOriginState.shared.current(default: ServerAddress.baseURL)
+        let list = [primary, ServerAddress.baseURL] + ServerAddress.fallbackURLs + [baseURL]
         var seen = Set<URL>()
         return list.filter { seen.insert($0).inserted }
     }
@@ -445,7 +449,8 @@ struct FamilyStreamAPI: Sendable {
     }
 
     private func request<Response: Decodable>(_ path: String, method: String = "GET", body: [String: Any]? = nil,
-                                               query: [URLQueryItem] = [], key: String? = nil, timingID: UUID? = nil) async throws -> Response {
+                                               query: [URLQueryItem] = [], key: String? = nil, timingID: UUID? = nil,
+                                               allowDiscoveryRetry: Bool = true) async throws -> Response {
         guard !path.contains(".."), !path.hasPrefix("/") else { throw APIError.invalidAddress }
         let bodyData: Data? = if let body { try JSONSerialization.data(withJSONObject: body) } else { nil }
         let candidates = candidateBaseURLs
@@ -461,7 +466,7 @@ struct FamilyStreamAPI: Sendable {
             request.setValue("application/json", forHTTPHeaderField: "Accept")
             request.setValue(candidate.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/")), forHTTPHeaderField: "Origin")
             if candidates.count > 1 {
-                request.timeoutInterval = method == "POST" && path.hasSuffix("/playback") ? 35 : 6
+                request.timeoutInterval = method == "POST" && path.hasSuffix("/playback") ? 35 : 4
             }
             if let key { request.setValue(key, forHTTPHeaderField: "Idempotency-Key") }
             if let timingID { request.setValue(timingID.uuidString.lowercased(), forHTTPHeaderField: "X-Playback-Trace-ID") }
@@ -473,8 +478,9 @@ struct FamilyStreamAPI: Sendable {
             let response: URLResponse
             do {
                 (data, response) = try await session.data(for: request)
-                if baseURL == ServerAddress.baseURL {
+                if isDynamicOrigin {
                     ActiveOriginState.shared.update(candidate)
+                    ServerAddress.markEndpointActive(candidate)
                 }
             } catch {
                 if Task.isCancelled { throw CancellationError() }
@@ -495,7 +501,13 @@ struct FamilyStreamAPI: Sendable {
         }
 
         if lastConnectionError != nil {
-            throw APIError.connection("Can’t reach Mello TV. Check your connection and retry.")
+            if isDynamicOrigin && allowDiscoveryRetry {
+                if let discovered = await ServerAddress.ensureResolved() {
+                    ActiveOriginState.shared.update(discovered.primaryURL)
+                    return try await request(path, method: method, body: body, query: query, key: key, timingID: timingID, allowDiscoveryRetry: false)
+                }
+            }
+            throw APIError.connection("Can’t reach Mello TV. Make sure the Mello TV server is running on your network or Tailscale.")
         }
         throw APIError.invalidAddress
     }

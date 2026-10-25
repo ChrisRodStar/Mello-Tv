@@ -5,36 +5,61 @@ import SwiftUI
 @Observable
 final class ProfileStore {
     private let api: FamilyStreamAPI
-    private let serverURL: URL
 
     var profiles: [Profile] = []
     var activeProfile: Profile?
     var isLoading = false
+    var isDiscoveringServer = false
     var errorMessage: String?
     var isManagingProfiles = false
 
     var showProfileEditor = false
     var editingProfile: Profile?
     var showOnboarding = false
+    var showServerConnectionSheet = false
+    var discoveredServers: [DiscoveredServer] = []
+    var connectedServerName: String = ServerAddress.serverName
+    var connectedServerAddress: String = ServerAddress.baseURL.absoluteString
 
     init(api: FamilyStreamAPI? = nil) {
         let baseURL = ServerAddress.baseURL
-        self.serverURL = baseURL
         self.api = api ?? FamilyStreamAPI(baseURL: baseURL)
+    }
+
+    private var persistenceIdentityURL: URL {
+        ServerAddress.serverIdentityURL
+    }
+
+    private func refreshServerMetadata() {
+        connectedServerName = ServerAddress.serverName
+        connectedServerAddress = ServerAddress.baseURL.absoluteString
     }
 
     func loadProfiles() async {
         isLoading = true
         errorMessage = nil
         do {
+            if ServerAddress.fallbackURLs.isEmpty {
+                isDiscoveringServer = true
+                if let discovered = await ServerAddress.ensureResolved() {
+                    discoveredServers = [discovered]
+                }
+                isDiscoveringServer = false
+            }
+            refreshServerMetadata()
+
             let loaded = try await api.profiles()
+            refreshServerMetadata()
             self.profiles = loaded
             isLoading = false
 
-            // Restore active profile from persistence
-            if let savedID = ProfilePersistence.activeProfileID(for: serverURL),
+            // Restore active profile from persistence (checking both server identity and current URL)
+            let savedID = ProfilePersistence.activeProfileID(for: persistenceIdentityURL)
+                ?? ProfilePersistence.activeProfileID(for: ServerAddress.baseURL)
+            if let savedID,
                let match = loaded.first(where: { $0.id == savedID }) {
                 self.activeProfile = match
+                ProfilePersistence.setActiveProfileID(match.id, for: persistenceIdentityURL)
                 checkOnboarding(for: match)
             } else if let first = loaded.first, loaded.count == 1 {
                 // If only 1 profile exists and nothing saved, select it
@@ -44,9 +69,42 @@ final class ProfileStore {
                 self.activeProfile = nil
             }
         } catch {
+            isDiscoveringServer = false
             isLoading = false
             errorMessage = error.localizedDescription
+            Task {
+                await scanForServers()
+            }
         }
+    }
+
+    func scanForServers() async {
+        isDiscoveringServer = true
+        let found = await ServerAddress.discoverServers()
+        discoveredServers = found
+        isDiscoveringServer = false
+        if let first = found.first, profiles.isEmpty {
+            ServerAddress.saveDiscoveredServer(first)
+            refreshServerMetadata()
+            await loadProfiles()
+        }
+    }
+
+    func selectDiscoveredServer(_ server: DiscoveredServer) async {
+        ServerAddress.saveDiscoveredServer(server)
+        refreshServerMetadata()
+        showServerConnectionSheet = false
+        await loadProfiles()
+    }
+
+    func connectToCustomServer(_ rawInput: String) async throws {
+        let server = try await ServerAddress.connectManually(to: rawInput)
+        if !discoveredServers.contains(where: { $0.id == server.id }) {
+            discoveredServers.insert(server, at: 0)
+        }
+        refreshServerMetadata()
+        showServerConnectionSheet = false
+        await loadProfiles()
     }
 
     // Keep the preferences editor in sync with Like actions made in details.
@@ -63,7 +121,8 @@ final class ProfileStore {
 
     func selectProfile(_ profile: Profile) {
         self.activeProfile = profile
-        ProfilePersistence.setActiveProfileID(profile.id, for: serverURL)
+        ProfilePersistence.setActiveProfileID(profile.id, for: persistenceIdentityURL)
+        ProfilePersistence.setActiveProfileID(profile.id, for: ServerAddress.baseURL)
         Task {
             await api.touchActivity(profileID: profile.id)
         }
@@ -80,7 +139,8 @@ final class ProfileStore {
 
     func switchProfile() {
         self.activeProfile = nil
-        ProfilePersistence.setActiveProfileID(nil, for: serverURL)
+        ProfilePersistence.setActiveProfileID(nil, for: persistenceIdentityURL)
+        ProfilePersistence.setActiveProfileID(nil, for: ServerAddress.baseURL)
     }
 
     func openCreateProfile() {

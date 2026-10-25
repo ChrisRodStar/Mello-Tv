@@ -236,6 +236,12 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         Arc::new(accounts),
         media,
         household_id,
+    )
+    .with_port(config.port);
+
+    stream_server::discovery::spawn_discovery_services(
+        state.household_account_id.clone(),
+        config.port,
     );
 
     let router = routes::build_router_with_static(state.clone(), config.static_dir.clone());
