@@ -34,8 +34,8 @@ export const Navigation = memo(function Navigation({
       <button
         type="button"
         className="navigation-brand"
-        aria-label="Stream TV Home"
-        title="Stream TV"
+        aria-label="Mello Watch Home"
+        title="Mello Watch"
         onClick={() => onCategoryChange('all')}
       >
         <BrandLogo />

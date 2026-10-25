@@ -32,9 +32,9 @@
   inset: 0;
   background: linear-gradient(
     180deg,
-    rgb(20 20 20 / 40%),
-    rgb(20 20 20 / 65%) 60%,
-    var(--surface)
+    rgb(18 19 22 / 40%),
+    rgb(18 19 22 / 72%) 60%,
+    var(--surface, #121316)
   );
   content: "";
 }
@@ -51,6 +51,7 @@
 }
 .personal-profile h1 {
   margin: 0;
+  color: #f5f5f7;
   font-weight: 500;
   font-size: 48px;
   line-height: 1.1;
@@ -67,33 +68,42 @@
   margin-bottom: 40px;
   padding: 5px;
   gap: 4px;
-  border-radius: 10px;
-  background: #202020;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  background: #0d0e10;
+  box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.55);
 }
 .personal-profile-tabs button {
   min-height: 48px;
   padding: 12px 26px;
-  border: 0;
-  border-radius: 6px;
+  border: 1px solid transparent;
+  border-radius: 10px;
   background: transparent;
-  color: #b8b8b8;
+  color: #8e9096;
   font-size: 14px;
   white-space: nowrap;
   transition:
     background-color 180ms ease-out,
-    color 180ms ease-out;
+    border-color 180ms ease-out,
+    color 180ms ease-out,
+    transform 100ms ease-out;
+}
+.personal-profile-tabs button:active {
+  transform: scale(0.97);
 }
 .personal-profile-tabs button[aria-selected="true"] {
-  background: #eee;
-  color: #171717;
+  border-color: rgba(255, 255, 255, 0.12);
+  background: linear-gradient(135deg, #212328, #17181c);
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.55);
+  color: #f5f5f7;
 }
 .personal-profile-tabs button:hover:not([aria-selected="true"]) {
-  background: #303030;
-  color: #fff;
+  background: rgba(38, 40, 46, 0.65);
+  color: #f5f5f7;
 }
 .personal-profile button:focus-visible {
-  outline: 2px solid #fff;
-  outline-offset: 5px;
+  outline: 2px solid var(--accent, #2997ff);
+  outline-offset: 4px;
 }
 .personal-profile #library-panel {
   flex: 1;
@@ -114,10 +124,14 @@
   padding: 0;
   gap: 8px;
   border: 0;
-  border-radius: 12px;
+  border-radius: 16px;
   background: transparent;
-  color: #eee;
+  color: #f5f5f7;
   text-align: left;
+  transition: transform 120ms ease-out;
+}
+.personal-library-card:active {
+  transform: scale(0.97);
 }
 .personal-watch-grid .personal-library-card {
   width: min(100%, 350px);
@@ -128,8 +142,10 @@
   aspect-ratio: 2 / 3;
   width: 100%;
   overflow: hidden;
-  border-radius: 12px;
-  background: #242424;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+  background: #1a1b20;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.6);
 }
 .personal-watch-grid .personal-library-art {
   aspect-ratio: 16 / 9;
@@ -152,9 +168,11 @@
   width: 48px;
   height: 48px;
   transform: translateY(5px);
+  border: 1px solid rgba(255, 255, 255, 0.22);
   border-radius: 50%;
-  background: #eee;
-  color: #171717;
+  background: rgba(41, 151, 255, 0.92);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.65);
+  color: #fff;
   opacity: 0;
   transition:
     opacity 180ms ease-out,
@@ -188,7 +206,7 @@
   line-height: 1.4;
 }
 .personal-library-card > span:not(.personal-library-art) {
-  color: #b8b8b8;
+  color: #8e9096;
   font-size: 12px;
 }
 .personal-library-card progress {
@@ -199,16 +217,16 @@
   overflow: hidden;
   border: 0;
   border-radius: 2px;
-  background: #444;
+  background: #2a2c33;
 }
 .personal-library-card progress::-webkit-progress-bar {
-  background: #444;
+  background: #2a2c33;
 }
 .personal-library-card progress::-webkit-progress-value {
-  background: var(--accent);
+  background: var(--accent, #2997ff);
 }
 .personal-library-card progress::-moz-progress-bar {
-  background: var(--accent);
+  background: var(--accent, #2997ff);
 }
 .personal-library-empty {
   display: flex;
@@ -222,7 +240,7 @@
 }
 .personal-library-empty h2 {
   margin: 0;
-  color: #c8c8c8;
+  color: #8e9096;
   font-weight: 400;
   font-size: 24px;
   letter-spacing: -0.015em;
@@ -248,8 +266,9 @@
 .personal-library-loading span {
   aspect-ratio: 16/9;
   width: min(28%, 250px);
-  border-radius: 12px;
-  background: #242424;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+  background: #1a1b20;
 }
 .personal-profile-footer {
   display: flex;
@@ -258,11 +277,11 @@
   padding: 40px 0 24px;
 }
 .personal-profile-footer .profile-secondary {
-  border-color: #444;
-  color: #b8b8b8;
+  border-color: rgba(255, 255, 255, 0.08);
+  color: #f5f5f7;
 }
 .personal-profile-footer .profile-secondary:hover {
-  border-color: #eee;
+  border-color: rgba(255, 255, 255, 0.22);
   color: #fff;
 }
 @media (max-width: 700px) {
@@ -346,18 +365,24 @@
   width: 44px;
   height: 44px;
   padding: 10px;
-  border: 3px solid var(--surface);
+  border: 2px solid var(--surface, #121316);
   border-radius: 50%;
-  background: #eee;
-  color: #171717;
-  transition: background-color 180ms ease-out;
+  background: linear-gradient(135deg, #212328, #17181c);
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.65);
+  color: #f5f5f7;
+  transition:
+    background-color 180ms ease-out,
+    transform 100ms ease-out;
 }
 .personal-profile-switch svg {
   width: 20px;
   height: 20px;
 }
 .personal-profile-switch:hover {
-  background: #ccc;
+  background: #26282e;
+}
+.personal-profile-switch:active {
+  transform: scale(0.97);
 }
 @media (prefers-reduced-motion: reduce) {
   .personal-profile-switch {

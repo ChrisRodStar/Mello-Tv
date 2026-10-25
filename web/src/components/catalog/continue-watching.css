@@ -1,6 +1,6 @@
 .continue-track {
   display: flex;
-  padding: 6px 5px 14px;
+  padding: 8px 5px 18px;
   overflow-x: auto;
   gap: 20px;
   scroll-snap-type: x proximity;
@@ -16,11 +16,15 @@
   min-width: 0;
   padding: 0;
   border: 0;
-  border-radius: 12px;
+  border-radius: 18px;
   background: transparent;
-  color: #eee;
+  color: var(--text);
   text-align: left;
   scroll-snap-align: start;
+  transition: transform 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.continue-card:active:not(:disabled) {
+  transform: scale(0.98);
 }
 .continue-art {
   display: grid;
@@ -29,92 +33,141 @@
   aspect-ratio: 16/9;
   width: 100%;
   overflow: hidden;
-  border-radius: 12px 12px 0 0;
-  background: #242424;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 18px;
+  background: linear-gradient(135deg, #212328, #17181c);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.5);
+  transition:
+    box-shadow 0.25s ease-out,
+    border-color 0.25s ease-out;
+}
+.continue-art::after {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    to bottom,
+    rgba(18, 19, 22, 0) 45%,
+    rgba(18, 19, 22, 0.38) 74%,
+    rgba(18, 19, 22, 0.78) 100%
+  );
+  content: "";
+  pointer-events: none;
+}
+.continue-card:hover .continue-art,
+.continue-card:focus-visible .continue-art {
+  border-color: rgba(255, 255, 255, 0.20);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.65);
 }
 .continue-art img {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  transform: translateZ(0);
   transition:
-    transform 200ms ease-out,
-    filter 200ms ease-out;
+    transform 260ms cubic-bezier(0.22, 1, 0.36, 1),
+    filter 260ms ease-out;
 }
 .continue-play {
   display: grid;
+  z-index: 2;
   position: absolute;
-  bottom: 16px;
-  left: 16px;
+  bottom: 14px;
+  left: 14px;
   place-items: center;
   width: 40px;
   height: 40px;
+  border: 1px solid rgba(255, 255, 255, 0.35);
   border-radius: 50%;
-  background: #eee;
-  color: #171717;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45);
+  color: #121316;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  transition: transform 0.2s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.continue-card:hover .continue-play {
+  transform: scale(1.06);
 }
 .continue-play svg {
-  width: 20px;
-  height: 20px;
+  width: 18px;
+  height: 18px;
 }
 .continue-percentage {
+  z-index: 2;
   position: absolute;
   right: 12px;
-  bottom: 16px;
-  padding: 4px 8px;
-  border-radius: 4px;
-  background: rgb(0 0 0 / 75%);
-  color: #fff;
-  font-size: 12px;
+  bottom: 14px;
+  padding: 4px 9px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+  background: rgba(18, 19, 22, 0.72);
+  color: var(--text);
+  font-weight: 600;
+  font-size: 11px;
   font-variant-numeric: tabular-nums;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
 }
 .continue-card:hover img,
 .continue-card:focus-visible img {
-  transform: scale(1.03);
-  filter: brightness(0.8);
+  transform: scale(1.035) translateZ(0);
+  filter: brightness(0.86);
 }
 .continue-card:focus-visible {
-  outline: 2px solid #eee;
+  outline: 2px solid var(--text);
   outline-offset: 4px;
 }
 .continue-card progress {
   appearance: none;
-  width: 100%;
-  height: 3px;
+  width: calc(100% - 12px);
+  height: 4px;
+  margin: 10px auto 0;
+  overflow: hidden;
   border: 0;
-  background: #444;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.16);
 }
 .continue-card progress::-webkit-progress-bar {
-  background: #444;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.16);
 }
 .continue-card progress::-webkit-progress-value {
+  border-radius: 999px;
   background: var(--accent);
+  box-shadow: 0 0 8px var(--accent-glow);
 }
 .continue-card progress::-moz-progress-bar {
+  border-radius: 999px;
   background: var(--accent);
 }
 .continue-card strong {
-  margin: 12px 0 6px;
-  font-weight: 500;
-  font-size: 16px;
-  line-height: 1.4;
+  margin: 10px 2px 4px;
+  color: var(--text);
+  font-weight: 600;
+  font-size: 15px;
+  line-height: 1.35;
+  letter-spacing: -0.01em;
 }
 .continue-episode {
   width: 100%;
+  padding: 0 2px;
   overflow: hidden;
-  color: #c8c8c8;
+  color: var(--text-secondary);
+  font-weight: 500;
   font-size: 13px;
-  line-height: 1.5;
+  line-height: 1.45;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .continue-time {
-  margin-top: 4px;
-  color: #aaa;
+  margin-top: 3px;
+  padding: 0 2px;
+  color: var(--muted-subtle);
   font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
 .continue-error {
-  color: #bbb;
+  color: var(--text-secondary);
   font-size: 14px;
 }
 @media (max-width: 600px) {
@@ -141,25 +194,37 @@
 }
 .continue-info {
   display: grid;
+  z-index: 3;
   position: absolute;
   top: 10px;
   right: 10px;
   place-items: center;
-  width: 44px;
-  height: 44px;
-  padding: 10px;
-  border: 0;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.16);
   border-radius: 50%;
-  background: rgb(0 0 0 / 75%);
-  color: #fff;
+  background: rgba(18, 19, 22, 0.65);
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.4);
+  color: var(--text);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  transition:
+    background-color 0.18s ease-out,
+    border-color 0.18s ease-out,
+    transform 0.18s cubic-bezier(0.22, 1, 0.36, 1);
 }
 .continue-info svg {
-  width: 22px;
-  height: 22px;
+  width: 18px;
+  height: 18px;
 }
 .continue-info:hover {
-  background: #eee;
-  color: #171717;
+  border-color: rgba(255, 255, 255, 0.35);
+  background: rgba(245, 245, 247, 0.92);
+  color: #121316;
+}
+.continue-info:active {
+  transform: scale(0.92);
 }
 .continue-info:focus-visible {
   outline: 2px solid #fff;
@@ -168,7 +233,7 @@
 .continue-loading {
   display: block;
   margin-top: 8px;
-  color: #bbb;
+  color: var(--text-secondary);
   font-size: 12px;
 }
 @media (max-width: 600px) {

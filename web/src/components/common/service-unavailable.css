@@ -1,5 +1,6 @@
 .app-shell.service-shell {
   padding: 0;
+  background: var(--surface, #121316);
 }
 .app-shell.service-shell main.service-view {
   display: grid;
@@ -17,6 +18,7 @@
 }
 .service-unavailable h1 {
   margin: 0;
+  color: #f5f5f7;
   font-weight: 650;
   font-size: clamp(34px, 4.4vw, 64px);
   line-height: 1.1;
@@ -26,17 +28,24 @@
 .service-checks {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  align-items: start;
-  width: min(100%, 360px);
+  align-items: stretch;
+  width: min(100%, 420px);
   margin: 36px auto 40px;
-  gap: 32px;
+  gap: 16px;
 }
 .service-checks > div {
   min-width: 0;
+  padding: 18px 16px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+  background: #1a1b20;
+  box-shadow:
+    -2px -2px 5px rgba(255, 255, 255, 0.04),
+    0 5px 14px rgba(0, 0, 0, 0.65);
 }
 .service-checks dt {
   margin-bottom: 10px;
-  color: #aaa;
+  color: #8e9096;
   font-size: 13px;
   line-height: 1.4;
 }
@@ -46,23 +55,23 @@
   justify-content: center;
   margin: 0;
   gap: 8px;
-  color: #e5e5e5;
+  color: #f5f5f7;
   font-size: 14px;
   line-height: 1.5;
   text-wrap: balance;
 }
 .service-checks dd::before {
-  flex: 0 0 5px;
-  height: 5px;
+  flex: 0 0 6px;
+  height: 6px;
   border-radius: 50%;
-  background: #888;
+  background: #8e9096;
   content: "";
 }
 .service-checks dd[data-state="ok"]::before {
-  background: #92c99c;
+  background: #30d158;
 }
 .service-checks dd[data-state="down"]::before {
-  background: #e6a281;
+  background: #ff9f0a;
 }
 .service-retry {
   display: inline-flex;
@@ -72,10 +81,13 @@
   min-height: 48px;
   padding: 12px 22px;
   gap: 10px;
-  border: 1px solid #444;
-  border-radius: 8px;
-  background: #242424;
-  color: #f5f5f5;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  background: linear-gradient(135deg, #212328, #17181c);
+  box-shadow:
+    -2px -2px 6px rgba(255, 255, 255, 0.05),
+    0 5px 12px rgba(0, 0, 0, 0.65);
+  color: #f5f5f7;
   font-weight: 600;
   font-size: 14px;
   transition:
@@ -88,14 +100,14 @@
   height: 17px;
 }
 .service-retry:hover:not(:disabled) {
-  border-color: #777;
-  background: #333;
+  border-color: rgba(255, 255, 255, 0.22);
+  background: #26282e;
 }
 .service-retry:active:not(:disabled) {
   transform: scale(0.97);
 }
 .service-retry:disabled {
-  color: #aaa;
+  color: #8e9096;
 }
 .service-retry:disabled svg {
   animation: service-check-spin 1.4s linear infinite;
@@ -109,7 +121,7 @@
 @media (max-width: 700px) {
   .service-checks {
     margin-block: 28px 32px;
-    gap: 16px;
+    gap: 12px;
   }
 }
 @media (min-width: 1800px) {
@@ -117,7 +129,7 @@
     width: min(100%, 1000px);
   }
   .service-checks {
-    width: 460px;
+    width: 480px;
     margin-block: 44px 48px;
   }
   .service-checks dt {

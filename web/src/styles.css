@@ -13,17 +13,23 @@
 @import "./components/search/search.css";
 
 :root {
-  --surface: #141414;
-  --surface-sunken: #0b0b0b;
-  --raised: #242424;
-  --raised-hover: #333333;
-  --muted: #aaaaaa;
-  --text: #f5f5f5;
-  --accent: #e50914;
+  --surface: #121316;
+  --surface-sunken: #0d0e10;
+  --surface-secondary: #1c1d22;
+  --raised: #1a1b20;
+  --raised-hover: #26282e;
+  --border: #2a2c33;
+  --border-subtle: rgba(255, 255, 255, 0.08);
+  --text: #f5f5f7;
+  --text-secondary: #8e9096;
+  --muted: #8e9096;
+  --muted-subtle: #63656b;
+  --accent: #2997ff;
+  --accent-glow: rgba(41, 151, 255, 0.35);
   background: var(--surface);
   color: var(--text);
   color-scheme: dark;
-  font-family: Geist, Arial, ui-sans-serif, system-ui, sans-serif;
+  font-family: Geist, -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", ui-sans-serif, system-ui, sans-serif;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -85,7 +91,7 @@ select:focus-visible {
 }
 
 ::selection {
-  background: #e5091455;
+  background: rgba(41, 151, 255, 0.32);
   color: #fff;
 }
 
@@ -186,8 +192,8 @@ h2 {
   width: 180px;
   height: 22px;
   margin: 0 0 22px;
-  border-radius: 3px;
-  background: #242424;
+  border-radius: 6px;
+  background: var(--raised);
 }
 
 .loading-grid {
@@ -198,8 +204,9 @@ h2 {
 
 .skeleton-poster {
   aspect-ratio: 2/3;
-  border-radius: 4px;
-  background: #252525;
+  border: 1px solid var(--border-subtle);
+  border-radius: 16px;
+  background: linear-gradient(135deg, #212328, #17181c);
   animation: 1.6s ease-in-out infinite alternate pulse;
   will-change: opacity;
 }

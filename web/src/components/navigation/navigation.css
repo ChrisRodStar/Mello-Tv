@@ -10,9 +10,9 @@
   width: 104px;
   padding: 24px 10px;
   gap: 0;
-  border-right: 1px solid #ffffff0b;
+  border-right: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: 0;
-  background: #0b0b0b;
+  background: var(--surface-sunken, #0d0e10);
 }
 
 .navigation-browse {
@@ -164,9 +164,11 @@
     height: auto;
     padding: 6px 10px calc(6px + env(safe-area-inset-bottom));
     gap: 0;
-    border-top: 1px solid #333;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
     border-right: 0;
-    background: #101010fa;
+    background: rgba(13, 14, 16, 0.92);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
   }
   .side-navigation .navigation-brand {
     display: none;

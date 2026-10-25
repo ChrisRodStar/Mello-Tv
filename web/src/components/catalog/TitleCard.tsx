@@ -24,6 +24,13 @@ export const TitleCard = memo(function TitleCard({
         ) : (
           <div className="poster-placeholder">{title.title}</div>
         )}
+        <span className="brand-tv-mark" aria-hidden="true">
+          <svg viewBox="0 0 16 14" fill="currentColor" aria-hidden="true">
+            <rect x="1" y="2" width="14" height="9" rx="2" fill="none" stroke="currentColor" strokeWidth="1.5" />
+            <path d="M5 13h6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+          </svg>
+          <span>TV</span>
+        </span>
         <div className="card-overlay">
           <h3>{title.title}</h3>
           <div className="card-meta">

@@ -8,19 +8,19 @@
   padding: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
-  border: 0;
-  border-radius: 12px;
-  background: #181818;
-  box-shadow: 0 24px 100px #0009;
-  color: #f5f5f5;
-  scrollbar-color: #555 #181818;
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  border-radius: 22px;
+  background: #141519;
+  box-shadow: 0 28px 90px rgba(0, 0, 0, 0.82);
+  color: #f5f5f7;
+  scrollbar-color: #2a2c33 #141519;
   scrollbar-width: thin;
 }
 
 .detail-dialog::backdrop {
-  -webkit-backdrop-filter: blur(5px);
-  backdrop-filter: blur(5px);
-  background: #080808c9;
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  background: rgba(10, 11, 14, 0.76);
 }
 
 body:has(.detail-dialog[open]) {
@@ -41,17 +41,21 @@ body:has(.detail-dialog[open]) {
   place-items: center;
   width: 44px;
   height: 44px;
-  border: 0;
+  border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: 50%;
-  background: #181818e6;
-  color: #fff;
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  background: rgba(26, 27, 32, 0.78);
+  color: #f5f5f7;
   transition:
     background-color 0.16s ease-out,
+    border-color 0.16s ease-out,
     transform 0.1s ease-out;
 }
 
 .close-button:hover {
-  background: #383838;
+  border-color: rgba(255, 255, 255, 0.24);
+  background: rgba(38, 40, 46, 0.92);
 }
 
 .close-button:active {
@@ -62,7 +66,7 @@ body:has(.detail-dialog[open]) {
   position: relative;
   height: clamp(270px, 34vw, 390px);
   overflow: hidden;
-  background: #181818;
+  background: #141519;
 }
 
 .detail-artwork > img {
@@ -78,10 +82,10 @@ body:has(.detail-dialog[open]) {
   position: absolute;
   inset: 0;
   background: linear-gradient(
-    #18181805 20%,
-    #18181870 58%,
-    #181818e6 88%,
-    #181818
+    rgba(20, 21, 25, 0.02) 20%,
+    rgba(20, 21, 25, 0.48) 58%,
+    rgba(20, 21, 25, 0.92) 88%,
+    #141519
   );
   content: "";
   pointer-events: none;
@@ -96,7 +100,7 @@ body:has(.detail-dialog[open]) {
 }
 
 .detail-title-overlay .detail-type {
-  color: #ddd;
+  color: #8e9096;
   font-weight: 600;
   font-size: 12px;
 }
@@ -113,7 +117,7 @@ body:has(.detail-dialog[open]) {
 
 .detail-body {
   padding: 0 40px 38px;
-  background: #181818;
+  background: #141519;
 }
 
 .detail-meta {
@@ -121,7 +125,7 @@ body:has(.detail-dialog[open]) {
   flex-wrap: wrap;
   align-items: center;
   gap: 14px;
-  color: #aaa;
+  color: #8e9096;
   font-size: 13px;
 }
 
@@ -130,21 +134,22 @@ body:has(.detail-dialog[open]) {
 }
 
 .detail-score {
-  color: #d8d8d8;
+  color: #f5f5f7;
   font-weight: 600;
 }
 
 .detail-format {
-  padding: 3px 7px;
-  border: 1px solid #666;
-  border-radius: 3px;
-  color: #ccc;
+  padding: 3px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  color: #f5f5f7;
   font-size: 11px;
 }
 
 .detail-summary > p {
   margin: 22px 0 27px;
-  color: #e1e1e1;
+  color: #f5f5f7;
   font-size: 15px;
   line-height: 1.7;
 }
@@ -152,21 +157,29 @@ body:has(.detail-dialog[open]) {
 .detail-genres,
 .metadata-status {
   margin-bottom: 24px;
-  color: #999;
+  color: #8e9096;
   font-size: 12px;
 }
 
 .metadata-status button {
-  padding: 7px 12px;
-  border: 0;
-  border-radius: 4px;
-  background: #333;
-  color: #fff;
-  transition: background-color 0.16s ease-out;
+  padding: 8px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  background: linear-gradient(135deg, #212328, #17181c);
+  color: #f5f5f7;
+  transition:
+    background-color 0.16s ease-out,
+    border-color 0.16s ease-out,
+    transform 0.1s ease-out;
 }
 
 .metadata-status button:hover {
-  background: #444;
+  border-color: rgba(255, 255, 255, 0.22);
+  background: #26282e;
+}
+
+.metadata-status button:active {
+  transform: scale(0.97);
 }
 
 .netflix-detail .detail-title-overlay {
@@ -192,7 +205,7 @@ body:has(.detail-dialog[open]) {
 
 .episode-section {
   padding: 25px 0;
-  border-top: 1px solid #333;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .episode-heading {
@@ -212,11 +225,14 @@ body:has(.detail-dialog[open]) {
 .episode-heading select {
   max-width: 65%;
   min-height: 44px;
-  padding: 10px 12px;
-  border: 1px solid #555;
-  border-radius: 4px;
-  background: #252525;
-  color: #fff;
+  padding: 10px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  background: linear-gradient(135deg, #212328, #17181c);
+  box-shadow:
+    -2px -2px 5px rgba(255, 255, 255, 0.05),
+    0 4px 10px rgba(0, 0, 0, 0.65);
+  color: #f5f5f7;
   font-size: 13px;
 }
 
@@ -231,14 +247,15 @@ body:has(.detail-dialog[open]) {
   aspect-ratio: 16/9;
   width: 100%;
   object-fit: cover;
-  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
 }
 
 @media (max-width: 700px) {
   .detail-dialog {
     width: calc(100% - 24px);
     max-height: calc(100svh - 40px);
-    border-radius: 9px;
+    border-radius: 18px;
   }
   .detail-artwork {
     height: 300px;
@@ -274,7 +291,7 @@ body:has(.detail-dialog[open]) {
   align-items: flex-end;
   width: 100%;
   background: linear-gradient(transparent, rgb(0 0 0 / 75%));
-  color: #fff;
+  color: #f5f5f7;
   pointer-events: none;
 }
 .watch-indicator > span {
@@ -289,14 +306,14 @@ body:has(.detail-dialog[open]) {
   width: 100%;
   height: 3px;
   border: 0;
-  background: #555;
+  background: rgba(0, 0, 0, 0.55);
 }
 .watch-indicator progress::-webkit-progress-bar {
-  background: #555;
+  background: rgba(0, 0, 0, 0.55);
 }
 .watch-indicator progress::-webkit-progress-value {
-  background: var(--accent);
+  background: var(--accent, #2997ff);
 }
 .watch-indicator progress::-moz-progress-bar {
-  background: var(--accent);
+  background: var(--accent, #2997ff);
 }
