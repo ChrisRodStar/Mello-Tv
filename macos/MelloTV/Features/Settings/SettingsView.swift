@@ -33,25 +33,13 @@ struct SettingsView: View {
 
     var body: some View {
         ScrollView(.vertical, showsIndicators: false) {
-            VStack(spacing: 20) {
-                // Page Header
-                VStack(spacing: 4) {
-                    Text("Settings")
-                        .font(.system(size: 28, weight: .bold))
-                        .tracking(-0.6)
-                        .foregroundStyle(MelloTVTheme.text)
-
-                    Text("Preferences & Server Configuration")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(MelloTVTheme.textSecondary)
-                }
-                .padding(.top, 14)
-
-                // iOS-Style Segmented Pill Picker
+            VStack(spacing: 22) {
+                // Fixed-position Segmented Capsule Control (never jumps between tabs)
                 segmentedPicker
-                    .frame(maxWidth: 480)
+                    .frame(maxWidth: 500)
+                    .padding(.top, 28)
 
-                // Section Content
+                // Section Content anchored directly beneath the fixed tabs
                 VStack(spacing: 16) {
                     switch section {
                     case .general:
@@ -64,12 +52,13 @@ struct SettingsView: View {
                         aboutSection
                     }
                 }
-                .frame(maxWidth: 760)
+                .frame(maxWidth: 740)
+                .frame(minHeight: 280, alignment: .top)
                 .animation(.spring(response: 0.35, dampingFraction: 0.86), value: section)
-                .padding(.bottom, 28)
+                .padding(.bottom, 36)
             }
             .frame(maxWidth: .infinity)
-            .padding(.horizontal, 28)
+            .padding(.horizontal, 32)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -85,12 +74,12 @@ struct SettingsView: View {
                 } label: {
                     HStack(spacing: 6) {
                         Image(systemName: item.icon)
-                            .font(.system(size: 11, weight: .semibold))
+                            .font(.system(size: 12, weight: .semibold))
                         Text(item.rawValue)
-                            .font(.system(size: 13, weight: .medium))
+                            .font(.system(size: 13, weight: .semibold))
                     }
                     .frame(maxWidth: .infinity)
-                    .frame(height: 32)
+                    .frame(height: 36)
                     .foregroundStyle(section == item ? MelloTVTheme.text : MelloTVTheme.muted)
                     .background {
                         if section == item {
@@ -100,7 +89,7 @@ struct SettingsView: View {
                                 .overlay {
                                     Capsule().strokeBorder(MelloTVTheme.border, lineWidth: 1)
                                 }
-                                .shadow(color: .black.opacity(colorScheme == .dark ? 0.3 : 0.06), radius: 3, y: 1.5)
+                                .shadow(color: .black.opacity(colorScheme == .dark ? 0.3 : 0.08), radius: 4, y: 2)
                         }
                     }
                     .contentShape(Capsule())
@@ -108,7 +97,7 @@ struct SettingsView: View {
                 .buttonStyle(.plain)
             }
         }
-        .padding(4)
+        .padding(5)
         .background(MelloTVTheme.sunken, in: Capsule())
         .overlay {
             Capsule().strokeBorder(MelloTVTheme.border, lineWidth: 1)
@@ -117,7 +106,7 @@ struct SettingsView: View {
 
     // MARK: - General Section
     private var generalSection: some View {
-        VStack(spacing: 14) {
+        VStack(spacing: 16) {
             SettingsCard {
                 SettingsItemRow(
                     icon: preferences.appearance.iconName,
@@ -135,7 +124,7 @@ struct SettingsView: View {
                     }
                     .labelsHidden()
                     .pickerStyle(.menu)
-                    .frame(width: 140)
+                    .frame(width: 160, alignment: .trailing)
                 }
 
                 SettingsDivider()
@@ -156,14 +145,14 @@ struct SettingsView: View {
                     }
                     .labelsHidden()
                     .pickerStyle(.menu)
-                    .frame(width: 170)
+                    .frame(width: 160, alignment: .trailing)
                 }
 
                 SettingsDivider()
 
                 SettingsItemRow(
                     icon: "power",
-                    iconColor: Color(red: 0.35, green: 0.85, blue: 0.55),
+                    iconColor: Color(red: 0.25, green: 0.78, blue: 0.45),
                     title: "Launch at Login",
                     subtitle: "Start Mello TV automatically when you sign in"
                 ) {
@@ -187,7 +176,7 @@ struct SettingsView: View {
                         .font(.system(size: 13, weight: .medium, design: .monospaced))
                         .foregroundStyle(MelloTVTheme.textSecondary)
                         .padding(.horizontal, 10)
-                        .padding(.vertical, 4)
+                        .padding(.vertical, 5)
                         .background(MelloTVTheme.sunken, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
                         .overlay {
                             RoundedRectangle(cornerRadius: 6, style: .continuous)
@@ -214,19 +203,19 @@ struct SettingsView: View {
 
     // MARK: - Server Section
     private var serverSection: some View {
-        VStack(spacing: 14) {
+        VStack(spacing: 16) {
             SettingsCard {
-                HStack(spacing: 14) {
+                HStack(spacing: 16) {
                     ZStack {
                         RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .fill(process.isRunning ? Color(red: 0.35, green: 0.85, blue: 0.55).opacity(0.18) : MelloTVTheme.sunken)
+                            .fill(process.isRunning ? Color(red: 0.25, green: 0.78, blue: 0.45).opacity(0.18) : MelloTVTheme.sunken)
                             .frame(width: 36, height: 36)
                         Circle()
-                            .fill(process.isRunning ? Color(red: 0.35, green: 0.85, blue: 0.55) : MelloTVTheme.mutedSubtle)
+                            .fill(process.isRunning ? Color(red: 0.25, green: 0.78, blue: 0.45) : MelloTVTheme.mutedSubtle)
                             .frame(width: 10, height: 10)
                     }
 
-                    VStack(alignment: .leading, spacing: 2) {
+                    VStack(alignment: .leading, spacing: 3) {
                         Text("Mello TV Server")
                             .font(.system(size: 14, weight: .semibold))
                             .foregroundStyle(MelloTVTheme.text)
@@ -235,30 +224,33 @@ struct SettingsView: View {
                             .foregroundStyle(MelloTVTheme.textSecondary)
                     }
 
-                    Spacer()
+                    Spacer(minLength: 20)
 
-                    HStack(spacing: 8) {
+                    HStack(spacing: 10) {
                         if process.isRunning {
                             Button(action: actions.restartServer) {
-                                Image(systemName: "arrow.clockwise")
-                                    .font(.system(size: 12, weight: .semibold))
-                                    .frame(width: 30, height: 30)
+                                Label("Restart", systemImage: "arrow.clockwise")
+                                    .font(.system(size: 12, weight: .medium))
                             }
-                            .buttonStyle(SecondaryGlassButtonStyle())
-                            .help("Restart Server")
+                            .buttonStyle(ServerSecondaryButtonStyle())
                         }
 
-                        Button(process.isRunning ? "Stop" : "Start", action: actions.toggleServer)
-                            .buttonStyle(PrimaryPillButtonStyle(destructive: process.isRunning))
+                        Button(action: actions.toggleServer) {
+                            Label(process.isRunning ? "Stop" : "Start", systemImage: "power")
+                                .font(.system(size: 12, weight: .semibold))
+                        }
+                        .buttonStyle(ServerPrimaryButtonStyle(isStop: process.isRunning))
                     }
+                    .frame(alignment: .trailing)
                 }
-                .padding(.vertical, 4)
+                .padding(.vertical, 6)
+                .frame(minHeight: 48)
 
                 SettingsDivider()
 
                 SettingsItemRow(
                     icon: "doc.text.magnifyingglass",
-                    iconColor: Color(red: 0.95, green: 0.6, blue: 0.2),
+                    iconColor: Color(red: 0.95, green: 0.58, blue: 0.15),
                     title: "Diagnostics & Logs",
                     subtitle: "View live backend request traces and errors"
                 ) {
@@ -270,7 +262,7 @@ struct SettingsView: View {
 
                 SettingsItemRow(
                     icon: "folder",
-                    iconColor: Color(red: 0.3, green: 0.7, blue: 0.9),
+                    iconColor: Color(red: 0.2, green: 0.65, blue: 0.88),
                     title: "Application Data",
                     subtitle: "Local database, caches, profiles, and state"
                 ) {
@@ -285,11 +277,11 @@ struct SettingsView: View {
 
     // MARK: - Updates Section
     private var updatesSection: some View {
-        VStack(spacing: 14) {
+        VStack(spacing: 16) {
             SettingsCard {
                 SettingsItemRow(
                     icon: "sparkles",
-                    iconColor: Color(red: 0.9, green: 0.4, blue: 0.85),
+                    iconColor: Color(red: 0.85, green: 0.35, blue: 0.8),
                     title: "Mello TV Core",
                     subtitle: "Native macOS Desktop & Server bundle"
                 ) {
@@ -297,7 +289,7 @@ struct SettingsView: View {
                         .font(.system(size: 13, weight: .medium, design: .monospaced))
                         .foregroundStyle(MelloTVTheme.textSecondary)
                         .padding(.horizontal, 10)
-                        .padding(.vertical, 4)
+                        .padding(.vertical, 5)
                         .background(MelloTVTheme.sunken, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
                         .overlay {
                             RoundedRectangle(cornerRadius: 6, style: .continuous)
@@ -310,7 +302,7 @@ struct SettingsView: View {
                         SettingsDivider()
                         SettingsItemRow(
                             icon: "puzzlepiece.extension",
-                            iconColor: Color(red: 0.25, green: 0.75, blue: 0.8),
+                            iconColor: Color(red: 0.25, green: 0.72, blue: 0.75),
                             title: provider.name,
                             subtitle: provider.needsAttention ? "Needs configuration" : "Integrated provider module"
                         ) {
@@ -318,7 +310,7 @@ struct SettingsView: View {
                                 .font(.system(size: 13, weight: .medium, design: .monospaced))
                                 .foregroundStyle(provider.needsAttention ? .orange : MelloTVTheme.textSecondary)
                                 .padding(.horizontal, 10)
-                                .padding(.vertical, 4)
+                                .padding(.vertical, 5)
                                 .background(MelloTVTheme.sunken, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
                                 .overlay {
                                     RoundedRectangle(cornerRadius: 6, style: .continuous)
@@ -335,32 +327,32 @@ struct SettingsView: View {
 
     // MARK: - About Section
     private var aboutSection: some View {
-        VStack(spacing: 18) {
-            VStack(spacing: 10) {
+        VStack(spacing: 20) {
+            VStack(spacing: 12) {
                 if let icon = NSApp.applicationIconImage {
                     Image(nsImage: icon)
                         .resizable()
                         .scaledToFit()
-                        .frame(width: 68, height: 68)
+                        .frame(width: 72, height: 72)
                         .shadow(color: .black.opacity(colorScheme == .dark ? 0.35 : 0.08), radius: 8, y: 4)
                 }
 
-                VStack(spacing: 3) {
+                VStack(spacing: 4) {
                     Text("Mello TV")
                         .font(.system(size: 22, weight: .bold))
                         .tracking(-0.5)
                         .foregroundStyle(MelloTVTheme.text)
 
                     Text("Version \(appVersion)")
-                        .font(.system(size: 12, weight: .medium))
+                        .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(MelloTVTheme.textSecondary)
                 }
 
                 Text("A quiet, ad-free cinema experience for all your movies and TV shows.")
-                    .font(.system(size: 12))
+                    .font(.system(size: 13))
                     .foregroundStyle(MelloTVTheme.textSecondary)
                     .multilineTextAlignment(.center)
-                    .frame(maxWidth: 360)
+                    .frame(maxWidth: 380)
             }
             .padding(.vertical, 4)
 
@@ -403,7 +395,7 @@ struct SettingsView: View {
 
                 SettingsItemRow(
                     icon: "cup.and.saucer.fill",
-                    iconColor: Color(red: 1.0, green: 0.84, blue: 0.1),
+                    iconColor: Color(red: 0.95, green: 0.75, blue: 0.05),
                     title: "Buy Me a Coffee",
                     subtitle: "Support independent development of Mello TV"
                 ) {
@@ -411,19 +403,19 @@ struct SettingsView: View {
                         HStack(spacing: 6) {
                             Image(systemName: "cup.and.saucer.fill")
                                 .font(.system(size: 12, weight: .semibold))
-                                .foregroundStyle(Color(red: 1.0, green: 0.84, blue: 0.1))
+                                .foregroundStyle(Color(red: 0.85, green: 0.65, blue: 0.0))
                             Text("Support")
                                 .font(.system(size: 13, weight: .semibold))
-                                .foregroundStyle(Color(red: 1.0, green: 0.84, blue: 0.1))
+                                .foregroundStyle(Color(red: 0.85, green: 0.65, blue: 0.0))
                             Image(systemName: "arrow.up.forward")
                                 .font(.system(size: 10, weight: .bold))
-                                .foregroundStyle(Color(red: 1.0, green: 0.84, blue: 0.1).opacity(0.8))
+                                .foregroundStyle(Color(red: 0.85, green: 0.65, blue: 0.0).opacity(0.8))
                         }
                         .padding(.horizontal, 14)
                         .padding(.vertical, 7)
-                        .background(Color(red: 1.0, green: 0.84, blue: 0.1).opacity(0.12), in: Capsule())
+                        .background(Color(red: 0.95, green: 0.75, blue: 0.05).opacity(colorScheme == .dark ? 0.15 : 0.10), in: Capsule())
                         .overlay {
-                            Capsule().strokeBorder(Color(red: 1.0, green: 0.84, blue: 0.1).opacity(0.25), lineWidth: 1)
+                            Capsule().strokeBorder(Color(red: 0.95, green: 0.75, blue: 0.05).opacity(0.3), lineWidth: 1)
                         }
                     }
                     .buttonStyle(.plain)
@@ -445,17 +437,17 @@ private struct SettingsCard<Content: View>: View {
         VStack(spacing: 0) {
             content
         }
-        .padding(.horizontal, 22)
-        .padding(.vertical, 14)
+        .padding(.horizontal, 24)
+        .padding(.vertical, 12)
         .background(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
                 .fill(MelloTVTheme.card)
         )
         .overlay {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
                 .strokeBorder(MelloTVTheme.border, lineWidth: 1)
         }
-        .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.25 : 0.04), radius: 10, y: 3)
+        .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.3 : 0.06), radius: 10, y: 3)
     }
 }
 
@@ -467,35 +459,36 @@ private struct SettingsItemRow<Control: View>: View {
     @ViewBuilder var control: Control
 
     var body: some View {
-        HStack(spacing: 14) {
+        HStack(spacing: 16) {
             ZStack {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
                     .fill(iconColor.opacity(0.16))
-                    .frame(width: 32, height: 32)
+                    .frame(width: 36, height: 36)
                 Image(systemName: icon)
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(iconColor)
             }
 
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 3) {
                 Text(title)
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(MelloTVTheme.text)
 
                 if let subtitle {
                     Text(subtitle)
-                        .font(.system(size: 11, weight: .regular))
+                        .font(.system(size: 12, weight: .regular))
                         .foregroundStyle(MelloTVTheme.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
 
-            Spacer(minLength: 16)
+            Spacer(minLength: 20)
 
             control
+                .frame(alignment: .trailing)
         }
         .padding(.vertical, 8)
-        .frame(minHeight: 42)
+        .frame(minHeight: 48)
     }
 }
 
@@ -503,7 +496,7 @@ private struct SettingsDivider: View {
     var body: some View {
         Divider()
             .overlay(MelloTVTheme.border)
-            .padding(.leading, 46)
+            .padding(.leading, 52)
     }
 }
 
@@ -520,29 +513,47 @@ private struct FootnoteText: View {
     }
 }
 
-// MARK: - Button Styles
+// MARK: - Server Action Buttons
 
-private struct PrimaryPillButtonStyle: ButtonStyle {
-    var destructive: Bool = false
+private struct ServerPrimaryButtonStyle: ButtonStyle {
+    var isStop: Bool
     @Environment(\.colorScheme) private var colorScheme
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.system(size: 12, weight: .semibold))
             .padding(.horizontal, 16)
-            .padding(.vertical, 7)
-            .foregroundStyle(destructive ? MelloTVTheme.text : Color.white)
+            .frame(height: 32)
+            .foregroundStyle(isStop ? Color(red: 0.95, green: 0.25, blue: 0.25) : Color.white)
             .background(
-                destructive ? MelloTVTheme.sunken : MelloTVTheme.accent,
+                isStop
+                    ? Color(red: 0.95, green: 0.25, blue: 0.25).opacity(colorScheme == .dark ? 0.18 : 0.12)
+                    : MelloTVTheme.accent,
                 in: Capsule()
             )
             .overlay {
                 Capsule().strokeBorder(
-                    destructive ? MelloTVTheme.border : Color.clear,
+                    isStop ? Color(red: 0.95, green: 0.25, blue: 0.25).opacity(0.3) : Color.clear,
                     lineWidth: 1
                 )
             }
-            .opacity(configuration.isPressed ? 0.7 : 1.0)
+            .opacity(configuration.isPressed ? 0.75 : 1.0)
+            .scaleEffect(configuration.isPressed ? 0.97 : 1.0)
+    }
+}
+
+private struct ServerSecondaryButtonStyle: ButtonStyle {
+    @Environment(\.colorScheme) private var colorScheme
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .padding(.horizontal, 16)
+            .frame(height: 32)
+            .foregroundStyle(MelloTVTheme.text)
+            .background(MelloTVTheme.sunken, in: Capsule())
+            .overlay {
+                Capsule().strokeBorder(MelloTVTheme.border, lineWidth: 1)
+            }
+            .opacity(configuration.isPressed ? 0.75 : 1.0)
             .scaleEffect(configuration.isPressed ? 0.97 : 1.0)
     }
 }
@@ -551,10 +562,10 @@ private struct SecondaryGlassButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.system(size: 12, weight: .medium))
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 7)
             .foregroundStyle(MelloTVTheme.text)
-            .background(MelloTVTheme.cardHover, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .background(MelloTVTheme.sunken, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
                     .strokeBorder(MelloTVTheme.border, lineWidth: 1)

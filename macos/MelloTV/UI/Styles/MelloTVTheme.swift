@@ -51,46 +51,46 @@ extension NSColor {
     }
 }
 
-// MARK: - Mello TV Theme (Titanium White <-> Deep Obsidian Titanium)
+// MARK: - Mello TV Theme (Accessible Titanium White <-> Deep Obsidian Titanium)
 
 enum MelloTVTheme {
-    // Canvas / Content Surfaces: #FFFFFF (Crisp Titanium White) <-> #121316 (Deep Obsidian Titanium)
-    static let background = Color.dynamic(lightHex: "FFFFFF", darkHex: "121316")
-    static let contentBackground = Color.dynamic(lightHex: "FFFFFF", darkHex: "121316")
-    static let content = Color.dynamic(lightHex: "FFFFFF", darkHex: "121316")
+    // Content Canvas: Soft Titanium (#ECEEF1 in Light so white cards pop) <-> #121316 (Obsidian in Dark)
+    static let background = Color.dynamic(lightHex: "ECEEF1", darkHex: "121316")
+    static let contentBackground = Color.dynamic(lightHex: "ECEEF1", darkHex: "121316")
+    static let content = Color.dynamic(lightHex: "ECEEF1", darkHex: "121316")
 
-    // Sunken Tracks / Pickers: #EFEFF2 <-> #0D0E10
-    static let sunken = Color.dynamic(lightHex: "EFEFF2", darkHex: "0D0E10")
+    // Sunken Tracks / Pickers: #DFE1E6 <-> #0D0E10
+    static let sunken = Color.dynamic(lightHex: "DFE1E6", darkHex: "0D0E10")
 
-    // Secondary Background: #F5F5F7 <-> #1C1D22
-    static let secondaryBackground = Color.dynamic(lightHex: "F5F5F7", darkHex: "1C1D22")
+    // Secondary Background: #E4E6EB <-> #1C1D22
+    static let secondaryBackground = Color.dynamic(lightHex: "E4E6EB", darkHex: "1C1D22")
 
-    // Card Surfaces: #FFFFFF (with crisp border & shadow) <-> #1A1B20
+    // Card Surfaces: Pure Crisp #FFFFFF on #ECEEF1 canvas <-> #1A1B20
     static let card = Color.dynamic(lightHex: "FFFFFF", darkHex: "1A1B20")
-    static let cardHover = Color.dynamic(lightHex: "F2F2F5", darkHex: "26282E")
+    static let cardHover = Color.dynamic(lightHex: "F4F5F8", darkHex: "26282E")
 
-    // Borders & Hairlines: #E2E2E7 (Crisp Apple Titanium Border) <-> #2A2C33
-    static let border = Color.dynamic(lightHex: "E2E2E7", darkHex: "2A2C33")
-    static let subtleBorder = Color.dynamic(lightHex: "EAEAEE", darkHex: "2A2C33")
-    static let hairline = Color.dynamic(lightHex: "E2E2E7", darkHex: "2A2C33")
+    // Borders & Hairlines: High contrast #D5D7DD in Light <-> #2A2C33 in Dark
+    static let border = Color.dynamic(lightHex: "D5D7DD", darkHex: "2A2C33")
+    static let subtleBorder = Color.dynamic(lightHex: "DFE1E6", darkHex: "2A2C33")
+    static let hairline = Color.dynamic(lightHex: "D5D7DD", darkHex: "2A2C33")
 
-    // Typography: #111113 (Deep Black) <-> #F5F5F7
+    // Typography: Accessible high contrast (#111113 black, #55575E secondary) <-> (#F5F5F7, #8E9096)
     static let text = Color.dynamic(lightHex: "111113", darkHex: "F5F5F7")
-    static let textSecondary = Color.dynamic(lightHex: "6E6E73", darkHex: "8E9096")
-    static let muted = Color.dynamic(lightHex: "86868B", darkHex: "8E9096")
-    static let mutedSubtle = Color.dynamic(lightHex: "AEAEB2", darkHex: "63656B")
+    static let textSecondary = Color.dynamic(lightHex: "55575E", darkHex: "8E9096")
+    static let muted = Color.dynamic(lightHex: "6B6E76", darkHex: "8E9096")
+    static let mutedSubtle = Color.dynamic(lightHex: "9497A0", darkHex: "63656B")
 
-    // Accent: Precision Sapphire / Studio Blue (#0066CC <-> #2997FF)
+    // Accent: Precision Sapphire Blue (#0066CC in Light, #2997FF in Dark)
     static let accent = Color.dynamic(lightHex: "0066CC", darkHex: "2997FF")
     static let accentGlow = Color.dynamic(lightHex: "0066CC", darkHex: "2997FF").opacity(0.35)
 
-    static let quietFill = Color.dynamic(lightHex: "000000", darkHex: "FFFFFF").opacity(0.05)
-    static let selection = Color.dynamic(lightHex: "000000", darkHex: "FFFFFF").opacity(0.08)
+    static let quietFill = Color.dynamic(lightHex: "000000", darkHex: "FFFFFF").opacity(0.06)
+    static let selection = Color.dynamic(lightHex: "000000", darkHex: "FFFFFF").opacity(0.09)
 
-    // Shell Workspace: Cool Titanium Silver (#F2F2F7) <-> #121316
+    // Shell Workspace: Calibrated cool titanium metallic silver (#E5E7EB) <-> #121316
     static let workspaceColor = NSColor(name: nil) { appearance in
         let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-        return NSColor(hex: isDark ? "121316" : "F2F2F7")
+        return NSColor(hex: isDark ? "121316" : "E5E7EB")
     }
     static let workspace = Color(nsColor: workspaceColor)
     static let onboardingBackground = NSColor(srgbRed: 0.07, green: 0.075, blue: 0.085, alpha: 1)
