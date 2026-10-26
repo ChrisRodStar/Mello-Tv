@@ -9,9 +9,9 @@ struct DesktopSidebarView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             brand
-                .padding(.bottom, 28)
+                .padding(.bottom, 20)
 
-            VStack(alignment: .leading, spacing: 24) {
+            VStack(alignment: .leading, spacing: 20) {
                 sidebarSection("Server") {
                     destinationButton(.overview)
                     destinationButton(.providers)
@@ -19,11 +19,11 @@ struct DesktopSidebarView: View {
                 }
             }
 
-            Spacer(minLength: 32)
+            Spacer(minLength: 24)
 
             VStack(spacing: 4) {
                 destinationButton(.settings)
-                    .padding(.bottom, 12)
+                    .padding(.bottom, 8)
                 SidebarRowButton(
                     title: "Welcome guide",
                     symbol: "book.closed",
@@ -41,9 +41,9 @@ struct DesktopSidebarView: View {
                 .help("Support Mello TV on Buy Me a Coffee")
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.top, 24)
-        .padding(.bottom, 20)
+        .padding(.horizontal, 10)
+        .padding(.top, 4)
+        .padding(.bottom, 8)
         .background(Color.clear)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Main navigation")
@@ -56,7 +56,7 @@ struct DesktopSidebarView: View {
                     Image(nsImage: icon)
                         .resizable()
                         .scaledToFit()
-                        .frame(width: 32, height: 32)
+                        .frame(width: 30, height: 30)
                         .accessibilityHidden(true)
                 }
                 if expanded {
@@ -69,7 +69,7 @@ struct DesktopSidebarView: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: expanded ? .leading : .center)
-            .frame(height: 40)
+            .frame(height: 36)
             .padding(.horizontal, expanded ? 8 : 0)
             .contentShape(Rectangle())
         }
@@ -80,7 +80,7 @@ struct DesktopSidebarView: View {
 
     private func sidebarSection<Content: View>(_ title: String,
                                                @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 6) {
             Text(title)
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(MelloTVTheme.textSecondary)
@@ -89,7 +89,7 @@ struct DesktopSidebarView: View {
                 .opacity(expanded ? 1 : 0)
                 .accessibilityHidden(!expanded)
                 .accessibilityAddTraits(.isHeader)
-            VStack(spacing: 4, content: content)
+            VStack(spacing: 3, content: content)
         }
     }
 
@@ -132,7 +132,7 @@ private struct SidebarRowButton: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: expanded ? .leading : .center)
-            .frame(height: 38)
+            .frame(height: 36)
             .padding(.horizontal, expanded ? 12 : 0)
             .contentShape(Rectangle())
         }

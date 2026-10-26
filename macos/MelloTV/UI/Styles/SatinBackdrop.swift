@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 import simd
 
-/// A cached rendering of the satin field with support for both Light and Dark modes.
+/// A cached rendering of the satin field with Titanium White / Obsidian textures.
 struct SatinBackdrop: View {
     @Environment(\.colorScheme) private var colorScheme
 
@@ -43,19 +43,19 @@ struct SatinBackdrop: View {
                 let atmosphere = exp(-(d.x * d.x * 3 + d.y * d.y * 3.6))
                 let pigment = smoothstep(0.2, 0.8, value)
 
-                // Dark: #121316 base with cool highlights
-                // Light: #eceae5 base with soft daylight sheen
+                // Dark: #121316 base with obsidian tone
+                // Light: #F2F2F7 base with pure crisp titanium white sheen
                 let base = isDark
                     ? SIMD3<Float>(18 / 255, 19 / 255, 22 / 255)
-                    : SIMD3<Float>(236 / 255, 234 / 255, 229 / 255)
+                    : SIMD3<Float>(242 / 255, 242 / 255, 247 / 255)
                 let cool = isDark
                     ? SIMD3<Float>(0.10, 0.19, 0.27)
-                    : SIMD3<Float>(0.88, 0.89, 0.92)
+                    : SIMD3<Float>(0.96, 0.97, 1.0)
 
                 var result = base + (cool - base) * ((0.18 + pigment * 0.45) * 0.52)
-                let grain = (hash(position * 2) - 0.5) * (isDark ? 0.034 : 0.018)
-                result += SIMD3<Float>(repeating: (value - 0.5) * (isDark ? 0.095 : 0.035) + grain + (diffuse - 0.82) * (isDark ? 0.14 : 0.06))
-                result += sheen * atmosphere * (isDark ? 0.08 : 0.03) * SIMD3<Float>(0.8, 0.9, 1)
+                let grain = (hash(position * 2) - 0.5) * (isDark ? 0.034 : 0.012)
+                result += SIMD3<Float>(repeating: (value - 0.5) * (isDark ? 0.095 : 0.025) + grain + (diffuse - 0.82) * (isDark ? 0.14 : 0.04))
+                result += sheen * atmosphere * (isDark ? 0.08 : 0.025) * SIMD3<Float>(0.9, 0.95, 1)
 
                 let index = (y * width + x) * 4
                 for channel in 0..<3 {

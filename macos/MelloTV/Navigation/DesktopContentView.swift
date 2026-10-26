@@ -6,6 +6,7 @@ struct DesktopContentView: View {
     @ObservedObject var process: ServerProcessState
     let port: Int
     let actions: AppActions
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         Group {
@@ -22,11 +23,11 @@ struct DesktopContentView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(MelloTVTheme.contentBackground)
-        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
         .overlay {
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
                 .strokeBorder(MelloTVTheme.border, lineWidth: 1)
         }
-        .shadow(color: Color.black.opacity(0.35), radius: 24, y: 8)
+        .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.35 : 0.05), radius: 16, y: 4)
     }
 }

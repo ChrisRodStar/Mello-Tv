@@ -25,6 +25,7 @@ struct SettingsView: View {
     let actions: AppActions
     @State private var section = SettingsSection.general
     @Namespace private var segmentAnimation
+    @Environment(\.colorScheme) private var colorScheme
 
     private var appVersion: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.5.0"
@@ -32,26 +33,26 @@ struct SettingsView: View {
 
     var body: some View {
         ScrollView(.vertical, showsIndicators: false) {
-            VStack(spacing: 28) {
-                // Centered Page Title & Subtitle
-                VStack(spacing: 6) {
+            VStack(spacing: 20) {
+                // Page Header
+                VStack(spacing: 4) {
                     Text("Settings")
-                        .font(.system(size: 32, weight: .bold))
-                        .tracking(-0.8)
+                        .font(.system(size: 28, weight: .bold))
+                        .tracking(-0.6)
                         .foregroundStyle(MelloTVTheme.text)
 
                     Text("Preferences & Server Configuration")
                         .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(MelloTVTheme.textSecondary)
                 }
-                .padding(.top, 20)
+                .padding(.top, 14)
 
                 // iOS-Style Segmented Pill Picker
                 segmentedPicker
                     .frame(maxWidth: 480)
 
                 // Section Content
-                VStack(spacing: 20) {
+                VStack(spacing: 16) {
                     switch section {
                     case .general:
                         generalSection
@@ -63,12 +64,12 @@ struct SettingsView: View {
                         aboutSection
                     }
                 }
-                .frame(maxWidth: 620)
+                .frame(maxWidth: 760)
                 .animation(.spring(response: 0.35, dampingFraction: 0.86), value: section)
-                .padding(.bottom, 40)
+                .padding(.bottom, 28)
             }
             .frame(maxWidth: .infinity)
-            .padding(.horizontal, 32)
+            .padding(.horizontal, 28)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -89,7 +90,7 @@ struct SettingsView: View {
                             .font(.system(size: 13, weight: .medium))
                     }
                     .frame(maxWidth: .infinity)
-                    .frame(height: 34)
+                    .frame(height: 32)
                     .foregroundStyle(section == item ? MelloTVTheme.text : MelloTVTheme.muted)
                     .background {
                         if section == item {
@@ -99,7 +100,7 @@ struct SettingsView: View {
                                 .overlay {
                                     Capsule().strokeBorder(MelloTVTheme.border, lineWidth: 1)
                                 }
-                                .shadow(color: .black.opacity(0.12), radius: 4, y: 2)
+                                .shadow(color: .black.opacity(colorScheme == .dark ? 0.3 : 0.06), radius: 3, y: 1.5)
                         }
                     }
                     .contentShape(Capsule())
@@ -116,9 +117,8 @@ struct SettingsView: View {
 
     // MARK: - General Section
     private var generalSection: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: 14) {
             SettingsCard {
-                // Appearance Selector (System / Light / Dark) matching iOS 1:1
                 SettingsItemRow(
                     icon: preferences.appearance.iconName,
                     iconColor: MelloTVTheme.accent,
@@ -214,9 +214,8 @@ struct SettingsView: View {
 
     // MARK: - Server Section
     private var serverSection: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: 14) {
             SettingsCard {
-                // Server State Row
                 HStack(spacing: 14) {
                     ZStack {
                         RoundedRectangle(cornerRadius: 10, style: .continuous)
@@ -227,7 +226,7 @@ struct SettingsView: View {
                             .frame(width: 10, height: 10)
                     }
 
-                    VStack(alignment: .leading, spacing: 3) {
+                    VStack(alignment: .leading, spacing: 2) {
                         Text("Mello TV Server")
                             .font(.system(size: 14, weight: .semibold))
                             .foregroundStyle(MelloTVTheme.text)
@@ -286,7 +285,7 @@ struct SettingsView: View {
 
     // MARK: - Updates Section
     private var updatesSection: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: 14) {
             SettingsCard {
                 SettingsItemRow(
                     icon: "sparkles",
@@ -336,37 +335,35 @@ struct SettingsView: View {
 
     // MARK: - About Section
     private var aboutSection: some View {
-        VStack(spacing: 20) {
-            // App Brand Banner
-            VStack(spacing: 12) {
+        VStack(spacing: 18) {
+            VStack(spacing: 10) {
                 if let icon = NSApp.applicationIconImage {
                     Image(nsImage: icon)
                         .resizable()
                         .scaledToFit()
-                        .frame(width: 72, height: 72)
-                        .shadow(color: .black.opacity(0.2), radius: 10, y: 5)
+                        .frame(width: 68, height: 68)
+                        .shadow(color: .black.opacity(colorScheme == .dark ? 0.35 : 0.08), radius: 8, y: 4)
                 }
 
-                VStack(spacing: 4) {
+                VStack(spacing: 3) {
                     Text("Mello TV")
-                        .font(.system(size: 24, weight: .bold))
+                        .font(.system(size: 22, weight: .bold))
                         .tracking(-0.5)
                         .foregroundStyle(MelloTVTheme.text)
 
                     Text("Version \(appVersion)")
-                        .font(.system(size: 13, weight: .medium))
+                        .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(MelloTVTheme.textSecondary)
                 }
 
                 Text("A quiet, ad-free cinema experience for all your movies and TV shows.")
-                    .font(.system(size: 13))
+                    .font(.system(size: 12))
                     .foregroundStyle(MelloTVTheme.textSecondary)
                     .multilineTextAlignment(.center)
-                    .frame(maxWidth: 380)
+                    .frame(maxWidth: 360)
             }
-            .padding(.vertical, 8)
+            .padding(.vertical, 4)
 
-            // Links Card
             SettingsCard {
                 SettingsItemRow(
                     icon: "safari",
@@ -404,7 +401,6 @@ struct SettingsView: View {
 
                 SettingsDivider()
 
-                // Buy Me a Coffee Row - Matching iOS aesthetic
                 SettingsItemRow(
                     icon: "cup.and.saucer.fill",
                     iconColor: Color(red: 1.0, green: 0.84, blue: 0.1),
@@ -443,12 +439,13 @@ struct SettingsView: View {
 
 private struct SettingsCard<Content: View>: View {
     @ViewBuilder var content: Content
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         VStack(spacing: 0) {
             content
         }
-        .padding(.horizontal, 18)
+        .padding(.horizontal, 22)
         .padding(.vertical, 14)
         .background(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
@@ -458,7 +455,7 @@ private struct SettingsCard<Content: View>: View {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .strokeBorder(MelloTVTheme.border, lineWidth: 1)
         }
-        .shadow(color: Color.black.opacity(0.08), radius: 8, y: 3)
+        .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.25 : 0.04), radius: 10, y: 3)
     }
 }
 
@@ -498,7 +495,7 @@ private struct SettingsItemRow<Control: View>: View {
             control
         }
         .padding(.vertical, 8)
-        .frame(minHeight: 44)
+        .frame(minHeight: 42)
     }
 }
 
@@ -527,15 +524,16 @@ private struct FootnoteText: View {
 
 private struct PrimaryPillButtonStyle: ButtonStyle {
     var destructive: Bool = false
+    @Environment(\.colorScheme) private var colorScheme
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.system(size: 12, weight: .semibold))
             .padding(.horizontal, 16)
             .padding(.vertical, 7)
-            .foregroundStyle(destructive ? MelloTVTheme.text : Color.black)
+            .foregroundStyle(destructive ? MelloTVTheme.text : Color.white)
             .background(
-                destructive ? MelloTVTheme.sunken : Color(white: 0.94),
+                destructive ? MelloTVTheme.sunken : MelloTVTheme.accent,
                 in: Capsule()
             )
             .overlay {
