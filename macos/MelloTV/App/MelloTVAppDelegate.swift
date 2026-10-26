@@ -76,11 +76,19 @@ final class MelloTVAppDelegate: NSObject, NSApplicationDelegate {
     @objc private func toggleSidebar() { mainWindow.toggleSidebar() }
     @objc private func refreshStatus() { mainWindow.present() }
 
+    @objc private func showAbout() {
+        let release = Bundle.main.object(forInfoDictionaryKey: "MelloTVReleaseVersion") as? String
+            ?? Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+            ?? "0.1.0-alpha.1"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "1"
+        NSApp.orderFrontStandardAboutPanel(options: [.applicationVersion: release, .version: build])
+    }
+
     private func configureApplicationMenu() {
         let main = NSMenu()
         let appItem = NSMenuItem()
         let appMenu = NSMenu(title: "Mello TV")
-        appMenu.addItem(withTitle: "About Mello TV", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        add("About Mello TV", action: #selector(showAbout), key: "", to: appMenu)
         appMenu.addItem(.separator())
         add("Settings…", action: #selector(showSettings), key: ",", to: appMenu)
         appMenu.addItem(.separator())

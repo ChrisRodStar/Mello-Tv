@@ -508,7 +508,8 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.5.0;
+				MARKETING_VERSION = 0.1.0;
+				MELLO_RELEASE_VERSION = "0.1.0-alpha.1";
 				PRODUCT_BUNDLE_IDENTIFIER = com.tinymellow.mellotv;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) DEBUG";
@@ -530,7 +531,8 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.5.0;
+				MARKETING_VERSION = 0.1.0;
+				MELLO_RELEASE_VERSION = "0.1.0-alpha.1";
 				PRODUCT_BUNDLE_IDENTIFIER = com.tinymellow.mellotv;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;

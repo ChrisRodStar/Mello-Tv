@@ -2,13 +2,15 @@
 
 <div align="center">
 
-[![Version](https://img.shields.io/badge/version-v0.5.0-e50914?style=for-the-badge)](https://github.com/ChrisRodStar/stream/releases)
+[![Version](https://img.shields.io/badge/version-v0.1.0-alpha.1-e50914?style=for-the-badge)](https://github.com/ChrisRodStar/stream/releases)
 [![Contributors](https://img.shields.io/github/contributors/ChrisRodStar/stream?style=for-the-badge&color=green)](#top-contributors)
 [![Stars](https://img.shields.io/github/stars/ChrisRodStar/stream?style=for-the-badge&color=gold)](https://github.com/ChrisRodStar/stream/stargazers)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20iOS%20%7C%20Web-blue?style=for-the-badge)](#platforms)
 [![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-Donate-yellow?style=for-the-badge&logo=buy-me-a-coffee)](https://buymeacoffee.com/chrissinclair)
 
 # Mello TV 🎬
+
+Current release: **0.1.0-alpha.1** (pre-release).
 
 ### _Support Mello TV’s development by starring this repository!_ ⭐
 
@@ -86,6 +88,8 @@ Mello TV is built as an all-in-one ecosystem inside a single repository:
 ## Documentation
 
 Full setup guides, configuration options, and architecture notes are available on **[Mello Watch](https://mellowatch.com/docs)**.
+
+See the [release versioning policy](docs/VERSIONING.md) for the current alpha version and Apple bundle-number mapping.
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 

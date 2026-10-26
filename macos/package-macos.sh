@@ -5,7 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 echo "=============================================="
-echo " Packaging Mello TV v0.5.0 for macOS"
+echo " Packaging Mello TV v0.1.0-alpha.1 for macOS"
 echo "=============================================="
 
 # 1. Build Web Assets
@@ -62,13 +62,13 @@ chmod +x "$APP_DIR/Contents/MacOS/MelloTVServer"
 codesign --force --deep --sign - "$APP_DIR"
 
 # 6. Create Drag-and-Drop DMG Installer
-echo "[6/6] Generating Mello-TV-0.5.0-macOS.dmg..."
+echo "[6/6] Generating Mello-TV-0.1.0-alpha.1-macOS.dmg..."
 DMG_STAGING="$DIST_DIR/dmg_staging"
 mkdir -p "$DMG_STAGING"
 cp -R "$APP_DIR" "$DMG_STAGING/Mello TV.app"
 ln -s /Applications "$DMG_STAGING/Applications"
 
-DMG_OUTPUT="$DIST_DIR/Mello-TV-0.5.0-macOS.dmg"
+DMG_OUTPUT="$DIST_DIR/Mello-TV-0.1.0-alpha.1-macOS.dmg"
 hdiutil create -volname "Mello TV" \
     -srcfolder "$DMG_STAGING" \
     -ov -format UDZO \
