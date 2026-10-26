@@ -162,7 +162,12 @@ pub struct FetchMetrics {
     pub response_headers: Duration,
     /// First response body byte, including admission and prior redirects.
     pub first_byte: Option<Duration>,
+    /// Time spent receiving body bytes after the first nonempty body chunk.
     pub transfer: Duration,
+    /// Sampled bytes contained in the first nonempty body chunk. These bytes
+    /// are excluded from transfer throughput to avoid treating a buffered
+    /// first chunk as sustained delivery speed.
+    pub first_chunk_bytes: usize,
     pub total: Duration,
     pub redirects: u8,
 }
@@ -438,6 +443,7 @@ impl HttpClient {
             let mut stream = response.bytes_stream();
             let mut body = BytesMut::with_capacity(limit.min(16 * 1024));
             let mut first_byte = None;
+            let mut first_chunk_bytes = 0usize;
             let mut transfer_start = None;
             while let Some(chunk) = stream.next().await {
                 let chunk = chunk.map_err(request_error)?;
@@ -446,7 +452,6 @@ impl HttpClient {
                 }
                 if first_byte.is_none() {
                     first_byte = Some(start.elapsed());
-                    transfer_start = Some(Instant::now());
                 }
                 let available = limit.saturating_sub(body.len());
                 if chunk.len() > available && !request.sample {
@@ -454,6 +459,10 @@ impl HttpClient {
                 }
                 let take = available.min(chunk.len());
                 body.extend_from_slice(&chunk[..take]);
+                if first_chunk_bytes == 0 {
+                    first_chunk_bytes = take;
+                    transfer_start = Some(Instant::now());
+                }
                 if request.sample && body.len() == limit {
                     break;
                 }
@@ -470,6 +479,7 @@ impl HttpClient {
                     transfer: transfer_start
                         .map(|instant| instant.elapsed())
                         .unwrap_or_default(),
+                    first_chunk_bytes,
                     total: start.elapsed(),
                     redirects,
                 },

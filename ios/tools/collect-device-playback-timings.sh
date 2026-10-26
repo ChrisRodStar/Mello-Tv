@@ -7,7 +7,7 @@ mkdir -p "$output/raw"
 chmod 700 "$output" "$output/raw"
 if ! xcrun devicectl device copy from \
   --device ${DEVICE_ID:-booted} \
-  --domain-type appDataContainer --domain-identifier com.streamtv.familystream \
+  --domain-type appDataContainer --domain-identifier "${BUNDLE_ID:-com.tinymellow.mellotv}" \
   --source Library/Caches/PlaybackTiming/ --destination "$output/raw" \
   --timeout 30 > "$output/device-copy.log" 2>&1; then
   cat "$output/device-copy.log" >&2

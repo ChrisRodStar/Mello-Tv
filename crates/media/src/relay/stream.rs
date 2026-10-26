@@ -109,7 +109,12 @@ impl MediaRelay {
         out
     }
 
-    pub fn register_session(&self, session_id: String, token: String, selection: Selection) -> bool {
+    pub fn register_session(
+        &self,
+        session_id: String,
+        token: String,
+        selection: Selection,
+    ) -> bool {
         let Some(selected) = selection.selected else {
             return false;
         };
@@ -197,10 +202,60 @@ impl MediaRelay {
         heights.dedup();
         if format != StreamFormat::Hls {
             heights.clear();
-        } else if heights.is_empty() {
-            heights.push(1080);
         }
         Some((format, heights))
+    }
+
+    /// Height of the measured active rendition, when the source exposes one.
+    pub fn active_height(&self, session_id: &str) -> Option<i64> {
+        let map = self.sessions.lock().ok()?;
+        map.get(session_id)?
+            .active
+            .observation
+            .variant
+            .as_ref()
+            .and_then(|variant| variant.height)
+            .filter(|height| *height > 0 && *height <= 16384)
+    }
+
+    /// Resolve public playback details from a measured selection before it is
+    /// installed into a session.
+    pub fn selection_info(selection: &Selection) -> Option<(StreamFormat, Vec<i64>, i64)> {
+        let active = &selection.selected.as_ref()?.candidate;
+        let format = match active.observation.format {
+            StreamFormat::Mp4 => StreamFormat::Mp4,
+            _ => StreamFormat::Hls,
+        };
+        let mut heights: Vec<i64> = active
+            .observation
+            .playlist_metadata
+            .variants
+            .iter()
+            .chain(active.source.resolver_metadata.variants.iter())
+            .filter_map(|variant| variant.height)
+            .filter(|height| *height > 0 && *height <= 16384)
+            .collect();
+        if let Some(height) = active
+            .observation
+            .variant
+            .as_ref()
+            .and_then(|variant| variant.height)
+            .filter(|height| *height > 0 && *height <= 16384)
+        {
+            heights.push(height);
+        }
+        heights.sort_unstable_by(|a, b| b.cmp(a));
+        heights.dedup();
+        if format != StreamFormat::Hls {
+            heights.clear();
+        }
+        let active_height = active
+            .observation
+            .variant
+            .as_ref()
+            .and_then(|variant| variant.height)
+            .filter(|height| *height > 0 && *height <= 16384)?;
+        Some((format, heights, active_height))
     }
 
     pub fn activate_backup(&self, session_id: &str) -> Result<String, RelayError> {
@@ -367,7 +422,9 @@ impl MediaRelay {
             while let Some(next) = byte_stream.next().await {
                 let chunk = next.map_err(|e| RelayError::Upstream(e.to_string()))?;
                 if full.len() + chunk.len() > MAX_MANIFEST_BYTES {
-                    return Err(RelayError::InvalidManifest("manifest exceeds byte limit".into()));
+                    return Err(RelayError::InvalidManifest(
+                        "manifest exceeds byte limit".into(),
+                    ));
                 }
                 full.extend_from_slice(&chunk);
             }
@@ -401,10 +458,10 @@ impl MediaRelay {
             return Ok(RelayResponse::Manifest(rewritten));
         }
 
-        let sniffed_content_type = sniff_media_content_type(&first_chunk, &final_url, &content_type_header);
-        let combined = futures_util::stream::once(async move { Ok(first_chunk) }).chain(
-            byte_stream.map(|item| item.map_err(std::io::Error::other)),
-        );
+        let sniffed_content_type =
+            sniff_media_content_type(&first_chunk, &final_url, &content_type_header);
+        let combined = futures_util::stream::once(async move { Ok(first_chunk) })
+            .chain(byte_stream.map(|item| item.map_err(std::io::Error::other)));
 
         Ok(RelayResponse::Binary {
             status,

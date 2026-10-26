@@ -101,3 +101,68 @@ impl Drop for Reservation {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+    use tokio_util::sync::CancellationToken;
+
+    #[tokio::test]
+    async fn late_rendition_can_reserve_samples_after_earlier_sources_use_four_mib()
+    -> ProbeResult<()> {
+        let budget = ByteBudget::new(16 * 1024 * 1024);
+        let cancellation = CancellationToken::new();
+
+        budget
+            .reserve(4 * 1024 * 1024, true, &cancellation)
+            .await?
+            .finish(4 * 1024 * 1024)?;
+
+        for _ in 0..3 {
+            budget
+                .reserve(128 * 1024, true, &cancellation)
+                .await?
+                .finish(128 * 1024)?;
+        }
+        Ok(())
+    }
+
+    struct NoTransport;
+
+    #[async_trait::async_trait]
+    impl super::super::ProbeTransport for NoTransport {
+        async fn fetch(
+            &self,
+            _request: crate::network::FetchRequest,
+            _cancellation: &CancellationToken,
+        ) -> Result<crate::network::FetchResponse, crate::network::TransportError> {
+            Err(crate::network::TransportError::Cancelled)
+        }
+    }
+
+    #[test]
+    fn probe_limits_accept_sixteen_mib_but_keep_an_explicit_upper_bound() {
+        let transport = Arc::new(NoTransport);
+        assert!(
+            super::super::StreamProber::new(
+                transport.clone(),
+                super::super::ProbeLimits {
+                    total_sample_bytes: 16 * 1024 * 1024,
+                    ..super::super::ProbeLimits::default()
+                }
+            )
+            .is_ok()
+        );
+        assert!(
+            super::super::StreamProber::new(
+                transport,
+                super::super::ProbeLimits {
+                    total_sample_bytes: 16 * 1024 * 1024 + 1,
+                    ..super::super::ProbeLimits::default()
+                }
+            )
+            .is_err()
+        );
+    }
+}

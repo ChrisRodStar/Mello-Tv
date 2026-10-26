@@ -26,7 +26,9 @@ use stream_provider_sdk::http::{Header, HostError, ProviderHost, Request, Respon
 use tokio_util::sync::CancellationToken;
 
 use crate::{
-    discovery::{DiscoveryCoordinator, DiscoveryError, DiscoveryLimits, DiscoveryProvider, ProviderCatalog},
+    discovery::{
+        DiscoveryCoordinator, DiscoveryError, DiscoveryLimits, DiscoveryProvider, ProviderCatalog,
+    },
     network::HttpClient,
     prober::{ProbeLimits, StreamProber},
 };
@@ -296,7 +298,8 @@ impl DiscoveryCoordinator {
         catalog.spawn_prewarm();
         let transport = HttpClient::new().map_err(|_| DiscoveryError::Closed)?;
         let probe_limits = ProbeLimits {
-            source_timeout: Duration::from_secs(4),
+            total_sample_bytes: 16 * 1024 * 1024,
+            source_timeout: Duration::from_secs(6),
             max_variants: 3,
             ..ProbeLimits::default()
         };

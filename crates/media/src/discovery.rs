@@ -272,7 +272,7 @@ impl DiscoveryCoordinator {
         lookup: Lookup,
         cancel: &CancellationToken,
     ) -> Result<Arc<Selection>, DiscoveryError> {
-        let deadline=Instant::now()+self.inner.limits.round_timeout;
+        let deadline = Instant::now() + self.inner.limits.round_timeout;
         lookup
             .validate()
             .and_then(|()| lookup.validate_context())
@@ -313,7 +313,7 @@ impl DiscoveryCoordinator {
         };
         let flight = {
             // Serialize spawn admission with shutdown and reap completed owners.
-            let mut tasks=tokio::select!{biased;
+            let mut tasks = tokio::select! {biased;
                 _=cancel.cancelled()=>return Err(DiscoveryError::Cancelled),
                 guard=tokio::time::timeout_at(deadline,self.inner.tasks.lock())=>guard.map_err(|_|DiscoveryError::Timeout)?,
             };
@@ -375,7 +375,9 @@ impl DiscoveryCoordinator {
         let mut finished = flight.finished.subscribe();
         let wait = async {
             loop {
-                if cancel.is_cancelled(){return Err(DiscoveryError::Cancelled);}
+                if cancel.is_cancelled() {
+                    return Err(DiscoveryError::Cancelled);
+                }
                 if let Some(result) = finished.borrow().clone() {
                     return result;
                 }
@@ -529,22 +531,33 @@ impl Inner {
         let result = tokio::select! {biased;_=cancel.cancelled()=>Err(ErrorCategory::Cancelled),result=tokio::time::timeout(self.limits.provider_timeout,operation)=>result.unwrap_or(Err(ErrorCategory::Timeout))};
         let duration = i64::try_from(start.elapsed().as_nanos()).unwrap_or(i64::MAX);
         // Cancellation and title-specific lack of support do not indicate an outage.
-        if !matches!(&result, Err(ErrorCategory::Cancelled | ErrorCategory::Unsupported))
-            && let Ok(mut observations) = self.observations.lock()
+        if !matches!(
+            &result,
+            Err(ErrorCategory::Cancelled | ErrorCategory::Unsupported)
+        ) && let Ok(mut observations) = self.observations.lock()
             && (observations.len() < 32 || observations.contains_key(provider.id()))
         {
             let (failure, candidate_count) = match &result {
-                Ok(value) => (None, value.candidates.as_ref().map_or(0, |items| items.len() as i64)),
+                Ok(value) => (
+                    None,
+                    value
+                        .candidates
+                        .as_ref()
+                        .map_or(0, |items| items.len() as i64),
+                ),
                 Err(category) => (Some(*category), 0),
             };
             let observed_at: DateTime<Utc> = SystemTime::now().into();
-            observations.insert(provider.id().clone(), ProviderObservation {
-                version: provider.version().clone(),
-                generation: provider.generation(),
-                observed_at: observed_at.timestamp(),
-                failure,
-                candidate_count,
-            });
+            observations.insert(
+                provider.id().clone(),
+                ProviderObservation {
+                    version: provider.version().clone(),
+                    generation: provider.generation(),
+                    observed_at: observed_at.timestamp(),
+                    failure,
+                    candidate_count,
+                },
+            );
         }
         match result {
             Ok(value) => {
@@ -608,7 +621,10 @@ impl Inner {
             .min();
         let probing = self.prober.probe_stream(
             receiver,
-            ProbeOptions { max_height: height },
+            ProbeOptions {
+                max_height: height,
+                startup_height: (lookup.startup_height > 0).then_some(lookup.startup_height),
+            },
             &cancel,
             Some(callback),
         );
@@ -641,9 +657,9 @@ impl Inner {
             statuses
         };
         let (mut statuses, probed) = tokio::join!(collecting, probing);
-        let probed=probed.map_err(|error|match error {
-            crate::prober::ProbeRoundError::Cancelled=>DiscoveryError::Cancelled,
-            _=>DiscoveryError::Capacity,
+        let probed = probed.map_err(|error| match error {
+            crate::prober::ProbeRoundError::Cancelled => DiscoveryError::Cancelled,
+            _ => DiscoveryError::Capacity,
         })?;
         if cancel.is_cancelled() {
             return Err(DiscoveryError::Cancelled);
@@ -691,18 +707,25 @@ impl stream_core::ports::MediaEngine for DiscoveryCoordinator {
         let observations = self.inner.observations.lock().ok();
         MediaDiagnostics {
             configured: !self.inner.closed.load(Ordering::Acquire) && !providers.is_empty(),
-            providers: providers.into_iter().map(|provider| {
-                let observation = observations.as_ref()
-                    .and_then(|items| items.get(provider.id()))
-                    .filter(|item| item.version == *provider.version() && item.generation == provider.generation());
-                ProviderDiagnostic {
-                    id: provider.id().to_string(),
-                    version: provider.version().to_string(),
-                    last_observed_at: observation.map(|item| item.observed_at),
-                    last_failure: observation.and_then(|item| item.failure),
-                    candidate_count: observation.map(|item| item.candidate_count),
-                }
-            }).collect(),
+            providers: providers
+                .into_iter()
+                .map(|provider| {
+                    let observation = observations
+                        .as_ref()
+                        .and_then(|items| items.get(provider.id()))
+                        .filter(|item| {
+                            item.version == *provider.version()
+                                && item.generation == provider.generation()
+                        });
+                    ProviderDiagnostic {
+                        id: provider.id().to_string(),
+                        version: provider.version().to_string(),
+                        last_observed_at: observation.map(|item| item.observed_at),
+                        last_failure: observation.and_then(|item| item.failure),
+                        candidate_count: observation.map(|item| item.candidate_count),
+                    }
+                })
+                .collect(),
         }
     }
     async fn resolve_stream(
@@ -724,4 +747,3 @@ impl stream_core::ports::MediaEngine for DiscoveryCoordinator {
             })
     }
 }
-

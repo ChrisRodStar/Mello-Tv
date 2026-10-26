@@ -60,6 +60,10 @@ impl ProbeTransport for MockTransport {
         let url = Url::parse(&request.url).map_err(|_| TransportError::InvalidConfig)?;
         let path = url.path();
 
+        if path.ends_with("1080p.m3u8") {
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+
         let (body, content_type) = if path.ends_with("master.m3u8") {
             (
                 Bytes::from(
@@ -113,7 +117,9 @@ impl ProbeTransport for MockTransport {
         let mut headers = HeaderMap::new();
         headers.insert(
             "content-type",
-            content_type.parse().map_err(|_| TransportError::InvalidConfig)?,
+            content_type
+                .parse()
+                .map_err(|_| TransportError::InvalidConfig)?,
         );
 
         Ok(FetchResponse {
@@ -125,7 +131,8 @@ impl ProbeTransport for MockTransport {
                 admission_wait: Duration::from_millis(1),
                 response_headers: Duration::from_millis(5),
                 first_byte: Some(Duration::from_millis(10)),
-                transfer: Duration::from_millis(2), // 18.8KB in 2ms => ~75 Mbps
+                transfer: Duration::from_millis(2),
+                first_chunk_bytes: 1024,
                 total: Duration::from_millis(8),
                 redirects: 0,
             },
@@ -262,7 +269,11 @@ async fn coalesces_concurrent_title_lookups_to_prevent_redundant_requests() {
     let sel1 = res1.expect("lookup 1 should succeed");
     let sel2 = res2.expect("lookup 2 should succeed");
 
-    assert_eq!(call_count.load(Ordering::SeqCst), 1, "provider resolve must be called only once");
+    assert_eq!(
+        call_count.load(Ordering::SeqCst),
+        1,
+        "provider resolve must be called only once"
+    );
     assert_eq!(
         sel1.selected.as_ref().unwrap().candidate.source.url,
         sel2.selected.as_ref().unwrap().candidate.source.url
@@ -295,12 +306,18 @@ async fn races_provider_adapters_concurrently_with_bounded_timeouts() {
     let coordinator = create_coordinator(vec![fast_provider, slow_provider]).unwrap();
     let cancel = CancellationToken::new();
 
-    let result = coordinator.resolve(test_lookup(), &cancel).await.expect("resolution succeeds via fast provider");
+    let result = coordinator
+        .resolve(test_lookup(), &cancel)
+        .await
+        .expect("resolution succeeds via fast provider");
 
     assert_eq!(fast_count.load(Ordering::SeqCst), 1);
     assert!(result.selected.is_some());
     let statuses = result.providers.as_ref().expect("statuses present");
-    let slow_status = statuses.iter().find(|s| s.provider.as_str() == "vidslow").expect("slow provider status present");
+    let slow_status = statuses
+        .iter()
+        .find(|s| s.provider.as_str() == "vidslow")
+        .expect("slow provider status present");
     assert_eq!(slow_status.failure, Some(ErrorCategory::Timeout));
 }
 
@@ -319,19 +336,40 @@ async fn evaluates_via_deterministic_ranking_engine() {
     let coordinator = create_coordinator(vec![provider]).unwrap();
     let cancel = CancellationToken::new();
 
-    let result = coordinator.resolve(test_lookup(), &cancel).await.expect("resolution succeeds");
+    let result = coordinator
+        .resolve(test_lookup(), &cancel)
+        .await
+        .expect("resolution succeeds");
 
     let primary = result.selected.as_ref().expect("primary stream selected");
     // 1080p variant should rank above 720p variant
-    assert_eq!(primary.candidate.observation.variant.as_ref().unwrap().height, Some(1080));
+    assert_eq!(
+        primary
+            .candidate
+            .observation
+            .variant
+            .as_ref()
+            .unwrap()
+            .height,
+        Some(1080)
+    );
 
     let backups = result.backups.as_ref().expect("backups present");
     assert!(!backups.is_empty(), "backups should contain the 720p rung");
-    assert_eq!(backups[0].candidate.observation.variant.as_ref().unwrap().height, Some(720));
+    assert_eq!(
+        backups[0]
+            .candidate
+            .observation
+            .variant
+            .as_ref()
+            .unwrap()
+            .height,
+        Some(720)
+    );
 }
 
 #[tokio::test]
-async fn progressive_startup_yields_earliest_stream_and_finishes_in_background() {
+async fn progressive_startup_prefers_startup_rung_and_probes_higher_rungs_afterward() {
     let call_count = Arc::new(AtomicUsize::new(0));
     let provider = Arc::new(TestProvider {
         id: ProviderId::new("vidcore").unwrap(),
@@ -347,16 +385,48 @@ async fn progressive_startup_yields_earliest_stream_and_finishes_in_background()
 
     let mut progressive_lookup = test_lookup();
     progressive_lookup.wait_for_complete = false;
+    progressive_lookup.startup_height = 720;
 
     let early_result = coordinator
-        .resolve(progressive_lookup, &cancel)
+        .resolve(progressive_lookup.clone(), &cancel)
         .await
         .expect("progressive lookup returns early");
 
     assert!(early_result.selected.is_some());
-    // Early startup stream should satisfy requested startup height
-    assert!(
-        early_result.selected.as_ref().unwrap().candidate.observation.variant.as_ref().unwrap().height.unwrap() >= 1080
+    assert_eq!(
+        early_result
+            .selected
+            .as_ref()
+            .unwrap()
+            .candidate
+            .observation
+            .variant
+            .as_ref()
+            .unwrap()
+            .height,
+        Some(720),
+        "startup should use the measured 720p rung without waiting for 1080p"
+    );
+
+    let mut complete_lookup = progressive_lookup;
+    complete_lookup.wait_for_complete = true;
+    let complete_result = coordinator
+        .resolve(complete_lookup, &cancel)
+        .await
+        .expect("the same discovery flight completes higher-rung probes");
+    assert_eq!(
+        complete_result
+            .selected
+            .as_ref()
+            .unwrap()
+            .candidate
+            .observation
+            .variant
+            .as_ref()
+            .unwrap()
+            .height,
+        Some(1080),
+        "the completed selection should expose the measured 1080p rung"
     );
 }
 
@@ -375,7 +445,9 @@ async fn context_cancellation_and_coordinator_shutdown() {
     let coordinator = create_coordinator(vec![provider]).unwrap();
     let lookup = test_lookup();
 
-    coordinator.cancel_context(&lookup.context_key).expect("context cancellation succeeds");
+    coordinator
+        .cancel_context(&lookup.context_key)
+        .expect("context cancellation succeeds");
     coordinator.shutdown().await.expect("shutdown succeeds");
 
     let cancel = CancellationToken::new();
@@ -402,6 +474,9 @@ async fn media_engine_trait_implementation() {
     let engine: Arc<dyn MediaEngine> = coordinator;
 
     let lookup = test_lookup();
-    let selection = engine.resolve_stream(&lookup).await.expect("media engine resolves successfully");
+    let selection = engine
+        .resolve_stream(&lookup)
+        .await
+        .expect("media engine resolves successfully");
     assert!(selection.selected.is_some());
 }

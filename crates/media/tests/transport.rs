@@ -163,6 +163,7 @@ async fn explicit_http_proxy_carries_request_without_direct_egress() -> TestResu
             .starts_with("GET http://8.8.8.8/media HTTP/1.1")
     );
     assert!(response.metrics.first_byte.is_some());
+    assert_eq!(response.metrics.first_chunk_bytes, response.body.len());
     Ok(())
 }
 

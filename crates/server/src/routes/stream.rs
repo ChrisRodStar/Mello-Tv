@@ -2,20 +2,20 @@ use std::fmt::Write;
 use std::time::SystemTime;
 
 use axum::{
+    Json, Router,
     body::Body,
     extract::{Path, Query, State},
-    http::{header, HeaderMap, HeaderValue, StatusCode},
+    http::{HeaderMap, HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
     routing::{get, post},
-    Json, Router,
 };
 use chrono::{DateTime, Duration, Utc};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use stream_core::{
     accounts::{
-        is_safe_identifier, AuthorizedPlayback, Device, PlaybackFormat, PlaybackPreferences,
-        PlaybackRequest, RelayReady, RelayState, Target,
+        AuthorizedPlayback, Device, PlaybackFormat, PlaybackPreferences, PlaybackRequest,
+        RelayReady, RelayState, Target, is_safe_identifier,
     },
     catalog::{MediaType, TitleIdentity},
     error::DomainError,
@@ -75,6 +75,8 @@ pub fn routes() -> Router<AppState> {
         .route("/api/v1/playback/{id}/backup", post(backup_playback_top))
         .route("/api/playback/{id}/refresh", post(refresh_playback_top))
         .route("/api/v1/playback/{id}/refresh", post(refresh_playback_top))
+        .route("/api/playback/{id}/upgrade", post(upgrade_playback_top))
+        .route("/api/v1/playback/{id}/upgrade", post(upgrade_playback_top))
         // Profile-scoped Playback routes
         .route(
             "/api/profiles/{profile_id}/playback",
@@ -115,6 +117,14 @@ pub fn routes() -> Router<AppState> {
         .route(
             "/api/v1/profiles/{profile_id}/playback/{id}/refresh",
             post(refresh_playback_profile),
+        )
+        .route(
+            "/api/profiles/{profile_id}/playback/{id}/upgrade",
+            post(upgrade_playback_profile),
+        )
+        .route(
+            "/api/v1/profiles/{profile_id}/playback/{id}/upgrade",
+            post(upgrade_playback_profile),
         )
 }
 
@@ -345,7 +355,7 @@ async fn handle_create_playback(
             };
             (pf, heights)
         })
-        .unwrap_or_else(|| (PlaybackFormat::Hls, vec![1080, 720, 480]));
+        .unwrap_or_else(|| (PlaybackFormat::Hls, Vec::new()));
 
     let ready = RelayReady {
         available_heights,
@@ -470,6 +480,8 @@ async fn handle_revoke_playback(
     if !is_safe_identifier(&profile_id) || !is_safe_identifier(&playback_id) {
         return Err(AppError::BadRequest("invalid identifier".into()));
     }
+    let mutation_lock = state.playback_mutation_lock(&playback_id);
+    let _mutation_guard = mutation_lock.lock().await;
     state.relay.revoke_session(&playback_id);
     state
         .accounts
@@ -497,6 +509,8 @@ async fn mutate_session(
             "expected_revision must be positive".into(),
         ));
     }
+    let mutation_lock = state.playback_mutation_lock(&id);
+    let _mutation_guard = mutation_lock.lock().await;
     let stored = state
         .accounts
         .get_playback(&state.household_account_id, &profile_id, &id)
@@ -507,10 +521,55 @@ async fn mutate_session(
     let current_ready = stored
         .ready
         .ok_or_else(|| AppError::Conflict("setup_pending".into()))?;
+    let idempotency_key = extract_idempotency_key(&headers);
+    if kind == "upgrade" && current_ready.revision != expected_revision {
+        if expected_revision.checked_add(1) == Some(current_ready.revision) {
+            let replayed = state
+                .accounts
+                .mutate_playback(
+                    &state.household_account_id,
+                    &profile_id,
+                    &id,
+                    &idempotency_key,
+                    kind,
+                    expected_revision,
+                    current_ready.clone(),
+                )
+                .await?;
+            let ready = replayed
+                .ready
+                .ok_or_else(|| AppError::Internal("missing replayed ready state".into()))?;
+            let resume_seconds = state
+                .accounts
+                .get_progress(
+                    &state.household_account_id,
+                    &profile_id,
+                    replayed.request.target.clone(),
+                )
+                .await?
+                .map(|p| p.position_seconds)
+                .unwrap_or(0.0);
+            let session_token = state.relay.token_for(&replayed.id);
+            return Ok(Json(AuthorizedPlayback {
+                id: replayed.id.clone(),
+                title: replayed.request.target,
+                url: format!("/stream/{}/entry?st={}", replayed.id, session_token),
+                format: ready.format,
+                available_heights: ready.available_heights,
+                expires_at: ready.expires_at,
+                revision: ready.revision,
+                source_generation: ready.source_generation,
+                reload_required: ready.resume_required,
+                resume_seconds,
+            }));
+        }
+        return Err(AppError::Conflict("revision_mismatch".into()));
+    }
     let now: DateTime<Utc> = SystemTime::now().into();
     if now > current_ready.expires_at {
         return Err(AppError::Conflict("session_expired".into()));
     }
+    let mut staged_upgrade = None;
     if current_ready.revision == expected_revision {
         match kind {
             "backup" if state.relay.has_session(&id) => {
@@ -530,22 +589,95 @@ async fn mutate_session(
                     Err(_) => {}
                 }
             }
+            "upgrade" => {
+                let mut lookup = build_lookup_from_request(&profile_id, &stored.request, false)?;
+                lookup.wait_for_complete = true;
+                let selection = match state.media.resolve_stream(&lookup).await {
+                    Ok(selection) => selection,
+                    Err(DomainError::NotFound(_)) => {
+                        return Err(AppError::Unprocessable("no_source".into()));
+                    }
+                    Err(_) => {
+                        return Err(AppError::Unprocessable("quality_unavailable".into()));
+                    }
+                };
+                let (_, _, selected_height) = MediaRelay::selection_info(&selection)
+                    .ok_or_else(|| AppError::Unprocessable("quality_unavailable".into()))?;
+                let active_height = state
+                    .relay
+                    .active_height(&id)
+                    .ok_or_else(|| AppError::Conflict("active_quality_unknown".into()))?;
+                if selected_height <= active_height {
+                    let current = state
+                        .accounts
+                        .get_playback(&state.household_account_id, &profile_id, &id)
+                        .await?;
+                    let current_ready = current
+                        .ready
+                        .ok_or_else(|| AppError::Conflict("setup_pending".into()))?;
+                    if current.revoked || current_ready.revision != expected_revision {
+                        return Err(AppError::Conflict("revision_mismatch".into()));
+                    }
+                    let checked_at: DateTime<Utc> = SystemTime::now().into();
+                    if checked_at > current_ready.expires_at {
+                        return Err(AppError::Conflict("session_expired".into()));
+                    }
+                    let resume_seconds = state
+                        .accounts
+                        .get_progress(
+                            &state.household_account_id,
+                            &profile_id,
+                            stored.request.target.clone(),
+                        )
+                        .await?
+                        .map(|p| p.position_seconds)
+                        .unwrap_or(0.0);
+                    let session_token = state.relay.token_for(&stored.id);
+                    return Ok(Json(AuthorizedPlayback {
+                        id: stored.id.clone(),
+                        title: stored.request.target,
+                        url: format!("/stream/{}/entry?st={}", stored.id, session_token),
+                        format: current_ready.format,
+                        available_heights: current_ready.available_heights,
+                        expires_at: current_ready.expires_at,
+                        revision: current_ready.revision,
+                        source_generation: current_ready.source_generation,
+                        reload_required: false,
+                        resume_seconds,
+                    }));
+                }
+                staged_upgrade = Some(selection);
+            }
             _ => {}
         }
     }
 
-    let idempotency_key = extract_idempotency_key(&headers);
-    let (format, available_heights) = state
-        .relay
-        .active_info(&id)
-        .map(|(fmt, heights)| {
-            let pf = match fmt {
-                StreamFormat::Mp4 => PlaybackFormat::Mp4,
-                _ => PlaybackFormat::Hls,
-            };
-            (pf, heights)
-        })
-        .unwrap_or_else(|| (current_ready.format, current_ready.available_heights.clone()));
+    let (format, available_heights) = if let Some(selection) = &staged_upgrade {
+        let (format, heights, _) = MediaRelay::selection_info(selection)
+            .ok_or_else(|| AppError::Unprocessable("quality_unavailable".into()))?;
+        let format = match format {
+            StreamFormat::Mp4 => PlaybackFormat::Mp4,
+            _ => PlaybackFormat::Hls,
+        };
+        (format, heights)
+    } else {
+        state
+            .relay
+            .active_info(&id)
+            .map(|(fmt, heights)| {
+                let pf = match fmt {
+                    StreamFormat::Mp4 => PlaybackFormat::Mp4,
+                    _ => PlaybackFormat::Hls,
+                };
+                (pf, heights)
+            })
+            .unwrap_or_else(|| {
+                (
+                    current_ready.format,
+                    current_ready.available_heights.clone(),
+                )
+            })
+    };
 
     let (new_ready, reload_required) = match kind {
         "renew" => {
@@ -567,7 +699,7 @@ async fn mutate_session(
                 false,
             )
         }
-        "backup" | "refresh" => (
+        "backup" | "refresh" | "upgrade" => (
             RelayReady {
                 available_heights,
                 contract_version: current_ready.contract_version.clone(),
@@ -598,6 +730,17 @@ async fn mutate_session(
             new_ready,
         )
         .await?;
+
+    if let Some(selection) = staged_upgrade
+        && state
+            .relay
+            .replace_selection(&id, selection.clone())
+            .is_none()
+    {
+        return Err(AppError::Internal(
+            "playback quality upgrade could not replace relay selection".into(),
+        ));
+    }
 
     let ready = mutated
         .ready
@@ -675,10 +818,7 @@ fn relay_result_to_response(result: Result<RelayResponse, RelayError>) -> Respon
                 header::CACHE_CONTROL,
                 HeaderValue::from_static("private, no-store"),
             );
-            headers.insert(
-                "referrer-policy",
-                HeaderValue::from_static("no-referrer"),
-            );
+            headers.insert("referrer-policy", HeaderValue::from_static("no-referrer"));
             headers.insert(
                 header::ACCESS_CONTROL_ALLOW_ORIGIN,
                 HeaderValue::from_static("*"),
@@ -719,10 +859,7 @@ fn relay_result_to_response(result: Result<RelayResponse, RelayError>) -> Respon
                 header::CACHE_CONTROL,
                 HeaderValue::from_static("private, no-store"),
             );
-            headers.insert(
-                "referrer-policy",
-                HeaderValue::from_static("no-referrer"),
-            );
+            headers.insert("referrer-policy", HeaderValue::from_static("no-referrer"));
             headers.insert(
                 header::ACCESS_CONTROL_ALLOW_ORIGIN,
                 HeaderValue::from_static("*"),
@@ -825,6 +962,16 @@ async fn refresh_playback_top(
     mutate_session(state, profile_id, id, headers, body, "refresh").await
 }
 
+async fn upgrade_playback_top(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+    Json(body): Json<MutationBody>,
+) -> Result<Json<AuthorizedPlayback>, AppError> {
+    let profile_id = default_profile_id(&state).await?;
+    mutate_session(state, profile_id, id, headers, body, "upgrade").await
+}
+
 // Profile-scoped endpoints
 async fn create_playback_profile(
     State(state): State<AppState>,
@@ -874,4 +1021,13 @@ async fn refresh_playback_profile(
     Json(body): Json<MutationBody>,
 ) -> Result<Json<AuthorizedPlayback>, AppError> {
     mutate_session(state, profile_id, id, headers, body, "refresh").await
+}
+
+async fn upgrade_playback_profile(
+    State(state): State<AppState>,
+    Path((profile_id, id)): Path<(String, String)>,
+    headers: HeaderMap,
+    Json(body): Json<MutationBody>,
+) -> Result<Json<AuthorizedPlayback>, AppError> {
+    mutate_session(state, profile_id, id, headers, body, "upgrade").await
 }

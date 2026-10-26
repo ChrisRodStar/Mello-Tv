@@ -1,13 +1,18 @@
 //! VidFast protocol discovery and source normalization.
 
+use crate::{
+    AdapterError, ProviderHost,
+    common::{self, batch, fetch, get, hash_id, header, post},
+    destination::public_url,
+};
+use regex::Regex;
+use serde::Deserialize;
+use serde_json::Value;
 use std::{
     collections::{BTreeMap, BTreeSet},
     sync::{OnceLock, RwLock},
     time::{Duration, Instant},
 };
-use regex::Regex;
-use serde::Deserialize;
-use serde_json::Value;
 use stream_core::{
     domain::MediaType,
     providers::{
@@ -16,16 +21,12 @@ use stream_core::{
     },
 };
 use stream_provider_codecs::vidfast as codec;
-use crate::{
-    AdapterError, ProviderHost,
-    common::{self, batch, fetch, get, hash_id, header, post},
-    destination::public_url,
-};
 
 const ORIGIN: &str = "https://vidfast.vc";
 
 fn material_cache() -> &'static RwLock<BTreeMap<String, (codec::ProtocolMaterial, Instant)>> {
-    static CACHE: OnceLock<RwLock<BTreeMap<String, (codec::ProtocolMaterial, Instant)>>> = OnceLock::new();
+    static CACHE: OnceLock<RwLock<BTreeMap<String, (codec::ProtocolMaterial, Instant)>>> =
+        OnceLock::new();
     CACHE.get_or_init(|| RwLock::new(BTreeMap::new()))
 }
 
@@ -54,10 +55,12 @@ pub fn resolve(lookup: &Lookup, host: &dyn ProviderHost) -> Result<AdapterResult
 
     let player_url = format!("{ORIGIN}{player_script}");
     let now = Instant::now();
-    let mut material_opt = material_cache()
-        .read()
-        .ok()
-        .and_then(|cache| cache.get(&player_url).filter(|(_, exp)| *exp > now).map(|(m, _)| m.clone()));
+    let mut material_opt = material_cache().read().ok().and_then(|cache| {
+        cache
+            .get(&player_url)
+            .filter(|(_, exp)| *exp > now)
+            .map(|(m, _)| m.clone())
+    });
 
     if material_opt.is_none() {
         let mut player_req = get(&player_url, &embed_url, 3 * 1024 * 1024);
@@ -66,7 +69,10 @@ pub fn resolve(lookup: &Lookup, host: &dyn ProviderHost) -> Result<AdapterResult
         let mat = codec::recognize_player(&player.body)
             .map_err(|_| AdapterError::Protocol("VidFast player version"))?;
         if let Ok(mut cache) = material_cache().write() {
-            cache.insert(player_url, (mat.clone(), now + Duration::from_secs(3600 * 24)));
+            cache.insert(
+                player_url,
+                (mat.clone(), now + Duration::from_secs(3600 * 24)),
+            );
         }
         material_opt = Some(mat);
     }
@@ -81,7 +87,8 @@ pub fn resolve(lookup: &Lookup, host: &dyn ProviderHost) -> Result<AdapterResult
     let mut req = post(challenge_url, &format!("{ORIGIN}/"), 4096);
     req.headers.push(header("Origin", ORIGIN));
     if !material.csrf_token().is_empty() {
-        req.headers.push(header("X-Csrf-Token", material.csrf_token()));
+        req.headers
+            .push(header("X-Csrf-Token", material.csrf_token()));
     }
     let challenge_resp = fetch(host, req)?;
 
@@ -92,7 +99,8 @@ pub fn resolve(lookup: &Lookup, host: &dyn ProviderHost) -> Result<AdapterResult
     let mut req = post(list_url, &format!("{ORIGIN}/"), 256 * 1024);
     req.headers.push(header("Origin", ORIGIN));
     if !material.csrf_token().is_empty() {
-        req.headers.push(header("X-Csrf-Token", material.csrf_token()));
+        req.headers
+            .push(header("X-Csrf-Token", material.csrf_token()));
     }
     let list_resp = fetch(host, req)?;
 
@@ -119,7 +127,8 @@ pub fn resolve(lookup: &Lookup, host: &dyn ProviderHost) -> Result<AdapterResult
         req.timeout_ms = 1_000;
         req.headers.push(header("Origin", ORIGIN));
         if !material.csrf_token().is_empty() {
-            req.headers.push(header("X-Csrf-Token", material.csrf_token()));
+            req.headers
+                .push(header("X-Csrf-Token", material.csrf_token()));
         }
         unlock_requests.push(req);
         active_servers.push(server.name);
@@ -146,24 +155,31 @@ pub fn resolve(lookup: &Lookup, host: &dyn ProviderHost) -> Result<AdapterResult
         let body_str = match std::str::from_utf8(&resp.body) {
             Ok(s) => s,
             Err(_) => {
-                issues.push(common::issue(&AdapterError::Protocol("VidFast unlock text"), "unlock"));
+                issues.push(common::issue(
+                    &AdapterError::Protocol("VidFast unlock text"),
+                    "unlock",
+                ));
                 continue;
             }
         };
         let plaintext = match codec::decrypt_envelope(body_str) {
             Ok(p) => p,
             Err(_) => {
-                issues.push(common::issue(&AdapterError::Protocol("VidFast decrypt source"), "unlock"));
+                issues.push(common::issue(
+                    &AdapterError::Protocol("VidFast decrypt source"),
+                    "unlock",
+                ));
                 continue;
             }
         };
-        let record: SourceRecord = match common::json(&plaintext, 256 * 1024, "VidFast source record") {
-            Ok(r) => r,
-            Err(e) => {
-                issues.push(common::issue(&e, "unlock"));
-                continue;
-            }
-        };
+        let record: SourceRecord =
+            match common::json(&plaintext, 256 * 1024, "VidFast source record") {
+                Ok(r) => r,
+                Err(e) => {
+                    issues.push(common::issue(&e, "unlock"));
+                    continue;
+                }
+            };
         if record.url.is_empty() || seen_urls.contains(&record.url) {
             continue;
         }
@@ -174,35 +190,40 @@ pub fn resolve(lookup: &Lookup, host: &dyn ProviderHost) -> Result<AdapterResult
             _ => false,
         };
         if !tmdb_matches {
-            issues.push(common::issue(&AdapterError::Protocol("VidFast tmdb mismatch"), "sources"));
+            issues.push(common::issue(
+                &AdapterError::Protocol("VidFast tmdb mismatch"),
+                "sources",
+            ));
             continue;
         }
 
-        if lookup.title.media_type == MediaType::Tv {
-            let season_match = record.season.as_ref().and_then(|v| match v {
-                Value::Number(n) => n.as_i64(),
-                Value::String(s) => s.parse::<i64>().ok(),
-                _ => None,
-            }) == lookup.title.season;
-            let episode_match = record.episode.as_ref().and_then(|v| match v {
-                Value::Number(n) => n.as_i64(),
-                Value::String(s) => s.parse::<i64>().ok(),
-                _ => None,
-            }) == lookup.title.episode;
-            if !season_match || !episode_match {
-                issues.push(common::issue(&AdapterError::Protocol("VidFast episode coordinates"), "sources"));
-                continue;
-            }
+        if lookup.title.media_type == MediaType::Tv
+            && (!coordinate_matches(record.season.as_ref(), lookup.title.season)
+                || !coordinate_matches(record.episode.as_ref(), lookup.title.episode))
+        {
+            // Bootstrap validation binds records without coordinates to the requested TV episode.
+            // Supplied coordinates still have to match exactly.
+            issues.push(common::issue(
+                &AdapterError::Protocol("VidFast episode coordinates"),
+                "sources",
+            ));
+            continue;
         }
 
         if public_url(&record.url).is_err() {
-            issues.push(common::issue(&AdapterError::Protocol("VidFast source destination"), "sources"));
+            issues.push(common::issue(
+                &AdapterError::Protocol("VidFast source destination"),
+                "sources",
+            ));
             continue;
         }
         seen_urls.insert(record.url.clone());
 
         if record.no_referrer.is_none() {
-            issues.push(common::issue(&AdapterError::Protocol("VidFast media referrer policy unknown"), "sources"));
+            issues.push(common::issue(
+                &AdapterError::Protocol("VidFast media referrer policy unknown"),
+                "sources",
+            ));
             continue;
         }
 
@@ -217,7 +238,10 @@ pub fn resolve(lookup: &Lookup, host: &dyn ProviderHost) -> Result<AdapterResult
         };
         if record.mp4 == Some(true) {
             if format != StreamFormat::Unknown && format != StreamFormat::Mp4 {
-                issues.push(common::issue(&AdapterError::Protocol("VidFast format declarations conflict"), "sources"));
+                issues.push(common::issue(
+                    &AdapterError::Protocol("VidFast format declarations conflict"),
+                    "sources",
+                ));
                 continue;
             }
             format = StreamFormat::Mp4;
@@ -276,6 +300,18 @@ fn embed_path(title: &ProviderTitle) -> Result<String, AdapterError> {
     })
 }
 
+fn coordinate_matches(value: Option<&Value>, expected: Option<i64>) -> bool {
+    let Some(value) = value else {
+        return true;
+    };
+    let actual = match value {
+        Value::Number(number) => number.as_i64(),
+        Value::String(string) => string.parse::<i64>().ok(),
+        _ => None,
+    };
+    actual == expected
+}
+
 fn parse_bootstrap(body: &[u8], title: &ProviderTitle) -> Result<(String, String), AdapterError> {
     static PATTERNS: OnceLock<Result<(Regex, Regex), regex::Error>> = OnceLock::new();
     let (flight_pat, script_pat) = PATTERNS
@@ -288,7 +324,8 @@ fn parse_bootstrap(body: &[u8], title: &ProviderTitle) -> Result<(String, String
         .as_ref()
         .map_err(|_| AdapterError::Protocol("regex init"))?;
 
-    let html = std::str::from_utf8(body).map_err(|_| AdapterError::Protocol("VidFast html encoding"))?;
+    let html =
+        std::str::from_utf8(body).map_err(|_| AdapterError::Protocol("VidFast html encoding"))?;
 
     let mut flight = String::new();
     for cap in flight_pat.captures_iter(html) {
@@ -321,7 +358,8 @@ fn parse_bootstrap(body: &[u8], title: &ProviderTitle) -> Result<(String, String
         };
 
         let host_matches = props.get("host").and_then(|v| v.as_str()) == Some("vidfast.vc");
-        let id_matches = props.get("id").and_then(|v| v.as_str()) == Some(&title.tmdb_id.get().to_string());
+        let id_matches =
+            props.get("id").and_then(|v| v.as_str()) == Some(&title.tmdb_id.get().to_string());
         if !host_matches || !id_matches {
             continue;
         }
@@ -329,7 +367,8 @@ fn parse_bootstrap(body: &[u8], title: &ProviderTitle) -> Result<(String, String
         if title.media_type == MediaType::Tv {
             let season_str = title.season.map(|s| s.to_string());
             let ep_str = title.episode.map(|e| e.to_string());
-            let season_matches = props.get("season").and_then(|v| v.as_str()) == season_str.as_deref();
+            let season_matches =
+                props.get("season").and_then(|v| v.as_str()) == season_str.as_deref();
             let ep_matches = props.get("episode").and_then(|v| v.as_str()) == ep_str.as_deref();
             if !season_matches || !ep_matches {
                 continue;
@@ -367,5 +406,32 @@ mod tests {
         assert_eq!(record2.no_referrer, Some(true));
         assert_eq!(record2.mp4, Some(true));
         assert!(record2.url.ends_with(".m3u8"));
+    }
+
+    #[test]
+    fn tv_source_coordinates_may_be_omitted_but_must_match_when_present() {
+        let expected_season = Some(1);
+        let expected_episode = Some(1);
+        assert!(coordinate_matches(None, expected_season));
+        assert!(coordinate_matches(
+            Some(&serde_json::json!(1)),
+            expected_episode
+        ));
+        assert!(coordinate_matches(
+            Some(&serde_json::json!("1")),
+            expected_season
+        ));
+        assert!(!coordinate_matches(
+            Some(&serde_json::json!(2)),
+            expected_season
+        ));
+        assert!(!coordinate_matches(
+            Some(&serde_json::json!("not-a-number")),
+            expected_episode
+        ));
+        assert!(!coordinate_matches(
+            Some(&serde_json::json!(null)),
+            expected_episode
+        ));
     }
 }

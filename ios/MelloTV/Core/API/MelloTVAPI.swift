@@ -1,4 +1,5 @@
 import Foundation
+import AVFoundation
 private final class PrivateAPIDelegate: NSObject, URLSessionTaskDelegate, Sendable {
     func urlSession(_ session: URLSession, task: URLSessionTask,
                     willPerformHTTPRedirection response: HTTPURLResponse,
@@ -30,6 +31,7 @@ private final class ActiveOriginState: @unchecked Sendable {
 struct MelloTVAPI: Sendable {
     let baseURL: URL
     var session: URLSession = Self.privateSession
+    var codecSupportOverride: [String: Bool]? = nil
 
     private var isDynamicOrigin: Bool {
         baseURL.host != "fixture.invalid"
@@ -398,8 +400,9 @@ struct MelloTVAPI: Sendable {
     }
 
     func resolvePlayback(request playback: PlaybackRequest, key: String) async throws -> AuthorizedPlayback {
+        let codecs = Self.playbackCodecs(overriding: codecSupportOverride)
         var body: [String: Any] = ["type": playback.type.rawValue, "id": playback.titleID,
-            "device": ["formats": ["hls", "mp4"], "codecs": ["avc1", "mp4a"],
+            "device": ["formats": ["hls", "mp4"], "codecs": codecs,
                        "supports_encrypted_hls": true, "allow_unknown_codecs": false, "allow_unknown_resolution": false,
                        "max_height": 1080]]
         if playback.type == .tv {
@@ -420,9 +423,22 @@ struct MelloTVAPI: Sendable {
         }
     }
 
+    private static func playbackCodecs(overriding override: [String: Bool]?) -> [String] {
+        var codecs = ["avc1", "mp4a"]
+        for (family, codecString) in [
+            ("hvc1", "hvc1.1.6.L120.B0"),
+            ("hev1", "hev1.1.6.L120.B0"),
+        ] {
+            let supported = override?[family]
+                ?? AVURLAsset.isPlayableExtendedMIMEType("video/mp4; codecs=\"\(codecString)\"")
+            if supported { codecs.append(family) }
+        }
+        return codecs
+    }
+
     func changePlayback(_ source: AuthorizedPlayback, request playback: PlaybackRequest,
                         kind: String, key: String) async throws -> AuthorizedPlayback {
-        guard ["renew", "backup", "refresh"].contains(kind) else { throw APIError.invalidData }
+        guard ["renew", "backup", "refresh", "upgrade"].contains(kind) else { throw APIError.invalidData }
         let reply: WirePlayback = try await playbackRequest("profiles/\(playback.profileID)/playback/\(source.id)/\(kind)",
             method: "POST", body: ["expected_revision": source.revision], key: key)
         return try authorized(reply, for: playback)
@@ -462,7 +478,7 @@ struct MelloTVAPI: Sendable {
               let expires = parsedDate(reply.expiresAt), expires > Date() else { throw APIError.invalidData }
         return AuthorizedPlayback(id: reply.id, url: url, format: reply.format, expiresAt: expires,
                                   revision: reply.revision, resumeSeconds: reply.resumeSeconds,
-                                  availableHeights: heights)
+                                  availableHeights: heights, reloadRequired: reply.reloadRequired ?? false)
     }
 
     private func executeSingleRequest<Response: Decodable>(to candidate: URL, path: String, method: String,
@@ -638,6 +654,7 @@ private struct WirePlayback: Decodable {
     let revision: Int
     let resumeSeconds: Double
     let availableHeights: [Int]?
+    let reloadRequired: Bool?
     struct Target: Decodable { let type: MediaType; let id: Int; let season: Int?; let episode: Int? }
 }
 struct AuthorizedPlayback: Sendable {
@@ -648,6 +665,19 @@ struct AuthorizedPlayback: Sendable {
     let revision: Int
     let resumeSeconds: Double
     let availableHeights: [Int]
+    let reloadRequired: Bool
+
+    init(id: String, url: URL, format: String, expiresAt: Date, revision: Int, resumeSeconds: Double,
+         availableHeights: [Int], reloadRequired: Bool = false) {
+        self.id = id
+        self.url = url
+        self.format = format
+        self.expiresAt = expiresAt
+        self.revision = revision
+        self.resumeSeconds = resumeSeconds
+        self.availableHeights = availableHeights
+        self.reloadRequired = reloadRequired
+    }
 }
 
 private func artworkURL(_ raw: String?) -> URL? {
@@ -696,6 +726,12 @@ enum APIError: LocalizedError {
             return ["invalid_input", "invalid_selection", "unsupported_format", "renew_too_early"].contains(code)
         }
         return false
+    }
+
+    var isDefinitiveQualityUpgradeFailure: Bool {
+        guard case .service(let status, let code, _) = self else { return false }
+        return (status == 422 && ["no_source", "quality_unavailable"].contains(code))
+            || (status == 409 && code == "active_quality_unknown")
     }
     var errorDescription: String? {
         switch self {

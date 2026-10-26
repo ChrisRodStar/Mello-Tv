@@ -33,6 +33,10 @@ ios/
 
 ---
 
+## App identity
+
+The iOS bundle identifier is `com.tinymellow.mellotv` (Tiny Mellow / Mello TV). The Home Screen name remains **Mello TV**. This is independent of the separately installed Stream TV app.
+
 ## Building & Running
 
 Open `MelloTV.xcodeproj` in Xcode:

@@ -3,7 +3,7 @@ import Network
 import AVFoundation
 import OSLog
 
-private let preparationLog = Logger(subsystem: "com.streamtv.familystream", category: "Preparation")
+private let preparationLog = Logger(subsystem: Bundle.main.bundleIdentifier ?? "com.tinymellow.mellotv", category: "Preparation")
 
 final class NetworkMonitor: @unchecked Sendable {
     static let shared = NetworkMonitor()
@@ -367,6 +367,10 @@ final class PlaybackSessionOperations {
         try await perform("renew", source: source, request: request)
     }
 
+    func upgrade(_ source: AuthorizedPlayback, request: PlaybackRequest) async throws -> AuthorizedPlayback {
+        try await perform("upgrade", source: source, request: request)
+    }
+
     func recover(_ source: AuthorizedPlayback, request: PlaybackRequest) async throws -> AuthorizedPlayback {
         var current = latest.flatMap { $0.id == source.id ? $0 : nil } ?? source
         if let mutation = pending {
@@ -396,7 +400,9 @@ final class PlaybackSessionOperations {
             pending = nil
             return result
         } catch {
-            if let failure = error as? APIError, failure.requiresSourceRefresh || failure.isTerminalMutation {
+            if let failure = error as? APIError,
+               failure.requiresSourceRefresh || failure.isTerminalMutation
+                    || (mutation.kind == "upgrade" && failure.isDefinitiveQualityUpgradeFailure) {
                 pending = nil
             }
             throw error
@@ -442,6 +448,7 @@ final class NextEpisodePreparation {
     func cancel() {
         pending?.cancel()
         pending = nil
+        attemptedOwner = nil
     }
 }
 

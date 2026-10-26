@@ -91,6 +91,7 @@ pub enum ProbeRoundError {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct ProbeOptions {
     pub max_height: Option<i64>,
+    pub startup_height: Option<i64>,
 }
 pub type ProbeProgress = Arc<dyn Fn(&[ProbedStream]) + Send + Sync>;
 
@@ -169,7 +170,7 @@ impl StreamProber {
         if !(1..=4).contains(&limits.concurrent)
             || !(1..=3).contains(&limits.samples_per_variant)
             || !(1..=128 * 1024).contains(&limits.sample_bytes)
-            || !(1..=4 * 1024 * 1024).contains(&limits.total_sample_bytes)
+            || !(1..=16 * 1024 * 1024).contains(&limits.total_sample_bytes)
             || !(1..=4 * 1024 * 1024).contains(&limits.total_playlist_bytes)
             || limits.source_timeout.is_zero()
             || limits.source_timeout > Duration::from_secs(6)
@@ -374,7 +375,23 @@ impl StreamProber {
                 .filter(|height| *height > 0)
                 .is_none_or(|ceiling| variant.height.is_none_or(|height| height <= ceiling))
         });
-        variants.sort_by_key(|variant| std::cmp::Reverse(variant.height.unwrap_or(0)));
+        // Probe the best rung at or below the startup target first so a
+        // progressive caller can begin quickly. Keep higher rungs in the
+        // same bounded probe round: they remain available for adaptive HLS
+        // playback and complete quality reporting.
+        let startup_height = round.options.startup_height.filter(|height| *height > 0);
+        variants.sort_by_key(|variant| {
+            let height = variant.height.unwrap_or(0);
+            let priority = match startup_height {
+                Some(target) if height == target => 0,
+                Some(target) if height > target => 1,
+                Some(_) if height > 0 => 2,
+                Some(_) => 3,
+                None if height > 0 => 0,
+                None => 1,
+            };
+            (priority, std::cmp::Reverse(height))
+        });
         let mut results = Vec::new();
         for (index, variant) in variants
             .into_iter()
@@ -758,21 +775,28 @@ fn measure(
                 .unwrap_or(delay),
         );
     }
-    // A buffered chunk's post-first-byte read interval can approach zero. Charge
-    // the whole request except admission to avoid optimistic throughput claims.
-    let elapsed = response
+    let measurable_bytes = response
+        .body
+        .len()
+        .saturating_sub(response.metrics.first_chunk_bytes);
+    let window = (measurable_bytes >= 16 * 1024
+        && response.metrics.transfer >= Duration::from_millis(1))
+    .then_some((measurable_bytes, response.metrics.transfer));
+    // Some transports buffer the complete bounded sample into one response
+    // chunk. In that case the post-first-chunk window is unavailable; use the
+    // whole body over the full request interval as a conservative lower bound.
+    let fallback = response
         .metrics
         .total
         .checked_sub(response.metrics.admission_wait)
-        .ok_or(ProbeFailure::Protocol)?;
-    if response.body.len() < 16 * 1024 {
-        return Ok(());
-    }
-    if elapsed < Duration::from_millis(1) {
+        .filter(|elapsed| *elapsed >= Duration::from_millis(1))
+        .filter(|_| response.body.len() >= 16 * 1024)
+        .map(|elapsed| (response.body.len(), elapsed));
+    let Some((bytes, elapsed)) = window.or(fallback) else {
         *all_speeds = false;
         return Ok(());
-    }
-    let speed = response.body.len() as f64 * 8.0 / elapsed.as_secs_f64();
+    };
+    let speed = bytes as f64 * 8.0 / elapsed.as_secs_f64();
     if !speed.is_finite() || speed <= 0.0 {
         *all_speeds = false;
         return Ok(());
@@ -825,4 +849,82 @@ fn validate_range(
         return Err(ProbeFailure::Protocol);
     }
     Ok(total)
+}
+
+#[cfg(test)]
+mod measurement_tests {
+    use super::*;
+    use bytes::Bytes;
+    use http::{HeaderMap, StatusCode};
+    use url::Url;
+
+    fn response(body_bytes: usize, first_chunk_bytes: usize) -> ProbeResult<FetchResponse> {
+        Ok(FetchResponse {
+            url: Url::parse("https://example.test/segment.ts")
+                .map_err(|_| ProbeFailure::Protocol)?,
+            status: StatusCode::OK,
+            headers: HeaderMap::new(),
+            body: Bytes::from(vec![0x47; body_bytes]),
+            metrics: crate::network::FetchMetrics {
+                admission_wait: Duration::from_millis(5),
+                response_headers: Duration::from_secs(2),
+                first_byte: Some(Duration::from_secs(2)),
+                transfer: Duration::from_millis(100),
+                first_chunk_bytes,
+                total: Duration::from_millis(2100),
+                redirects: 0,
+            },
+        })
+    }
+
+    #[test]
+    fn throughput_uses_post_first_chunk_transfer_time_not_ttfb() -> ProbeResult<()> {
+        let mut observation = observation(StreamFormat::Hls);
+        let mut all_speeds = true;
+        measure(
+            &mut observation,
+            &response(128 * 1024, 16 * 1024)?,
+            &mut all_speeds,
+        )?;
+
+        let expected = (112 * 1024 * 8) as f64 / 0.1;
+        let measured = observation.delivery_bps.ok_or(ProbeFailure::Protocol)?;
+        assert!(all_speeds);
+        assert!((measured - expected).abs() < 1.0);
+        assert!(measured > 9_000_000.0);
+        Ok(())
+    }
+
+    #[test]
+    fn one_buffered_chunk_uses_conservative_full_request_rate() -> ProbeResult<()> {
+        let mut observation = observation(StreamFormat::Hls);
+        let mut all_speeds = true;
+        measure(
+            &mut observation,
+            &response(128 * 1024, 128 * 1024)?,
+            &mut all_speeds,
+        )?;
+
+        let conservative = (128 * 1024 * 8) as f64 / 2.095;
+        let measured = observation.delivery_bps.ok_or(ProbeFailure::Protocol)?;
+        assert!(all_speeds);
+        assert!((measured - conservative).abs() < 1.0);
+        assert!((500_000.0..501_000.0).contains(&measured));
+        Ok(())
+    }
+
+    #[test]
+    fn one_buffered_sub_millisecond_sample_remains_unmeasured() -> ProbeResult<()> {
+        let mut observation = observation(StreamFormat::Hls);
+        let mut all_speeds = true;
+        let mut response = response(128 * 1024, 128 * 1024)?;
+        response.metrics.admission_wait = Duration::ZERO;
+        response.metrics.total = Duration::from_micros(500);
+        response.metrics.transfer = Duration::ZERO;
+        measure(&mut observation, &response, &mut all_speeds)?;
+
+        assert!(!all_speeds);
+        assert_eq!(observation.delivery_bps, None);
+        Ok(())
+    }
 }

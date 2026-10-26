@@ -1,4 +1,5 @@
 import Foundation
+import AVFoundation
 import SwiftUI
 
 // Compile this harness with the production API, preparation service and models.
@@ -28,16 +29,33 @@ actor FixtureState {
     var backupNeedsRefresh = false
     var backupFailures = 0
     var createFailures = 0
+    var upgradeFailures = 0
+    var upgradeNoOp = false
+    var upgradeFailureStatus: Int?
+    var upgradeFailureCode: String?
+    var playbackFormat = "mp4"
+    var playbackHeights: [Int] = []
+    var lastCodecs: [String] = []
     var attempts: [(String, String)] = []
     var revisions: [Int] = []
     var delay: UInt64 = 0
 
-    func configure(busy: Bool = false, refresh: Bool = false, delay: UInt64 = 0, backupFailures: Int = 0, createFailures: Int = 0) {
+    func configure(busy: Bool = false, refresh: Bool = false, delay: UInt64 = 0, backupFailures: Int = 0, createFailures: Int = 0,
+                   format: String = "mp4", availableHeights: [Int] = [], upgradeFailures: Int = 0,
+                   upgradeNoOp: Bool = false, upgradeFailureStatus: Int? = nil,
+                   upgradeFailureCode: String? = nil) {
         traceHeaders = []
         creates = 0; deleted = 0; attempts = []; revisions = []
         self.busy = busy; backupNeedsRefresh = refresh; self.delay = delay
         self.backupFailures = backupFailures
         self.createFailures = createFailures
+        self.upgradeFailures = upgradeFailures
+        self.upgradeNoOp = upgradeNoOp
+        self.upgradeFailureStatus = upgradeFailureStatus
+        self.upgradeFailureCode = upgradeFailureCode
+        playbackFormat = format
+        playbackHeights = availableHeights
+        lastCodecs = []
     }
     func respond(_ request: URLRequest) async -> (Int, Data) {
         if let trace = request.value(forHTTPHeaderField: "X-Playback-Trace-ID") { traceHeaders.append(trace) }
@@ -57,6 +75,13 @@ actor FixtureState {
             backupFailures -= 1
             return (502, Data(#"{"error":"private_response"}"#.utf8))
         }
+        if path.hasSuffix("/upgrade"), upgradeFailures > 0 {
+            upgradeFailures -= 1
+            return (502, Data(#"{"error":"private_response"}"#.utf8))
+        }
+        if path.hasSuffix("/upgrade"), let status = upgradeFailureStatus, let code = upgradeFailureCode {
+            return (status, try! JSONSerialization.data(withJSONObject: ["error": code]))
+        }
         if path.hasSuffix("/backup"), backupNeedsRefresh {
             return (409, Data(#"{"error":"source_refresh_required"}"#.utf8))
         }
@@ -72,6 +97,9 @@ actor FixtureState {
             }
         }
         let body = (try? JSONSerialization.jsonObject(with: requestData)) as? [String: Any] ?? [:]
+        if path.hasSuffix("/playback"), let device = body["device"] as? [String: Any] {
+            lastCodecs = device["codecs"] as? [String] ?? []
+        }
         if let revision = body["expected_revision"] as? Int { revisions.append(revision) }
         if path.hasSuffix("/playback") { creates += 1 }
         let number = creates
@@ -80,9 +108,13 @@ actor FixtureState {
         let target: [String: Any] = ["type": "movie", "id": body["id"] as? Int ?? 7]
         let expiry = ISO8601DateFormatter().string(from: Date().addingTimeInterval(3600))
         let playbackID = path.hasSuffix("/playback") ? "session-\(number)" : String(path.split(separator: "/").dropLast().last!)
+        let expectedRevision = body["expected_revision"] as? Int ?? 0
+        let isUpgrade = path.hasSuffix("/upgrade")
+        let revision = isUpgrade && upgradeNoOp ? expectedRevision : expectedRevision + 1
         let reply: [String: Any] = ["id": playbackID, "title": target,
-            "url": "/stream/fixture/entry?st=synthetic", "format": "mp4", "expires_at": expiry,
-            "revision": (body["expected_revision"] as? Int ?? 0) + 1, "resume_seconds": 10]
+            "url": "/stream/fixture/entry?st=synthetic", "format": playbackFormat, "available_heights": playbackHeights,
+            "expires_at": expiry, "revision": revision, "resume_seconds": 10,
+            "reload_required": isUpgrade && !upgradeNoOp]
         return (200, try! JSONSerialization.data(withJSONObject: reply))
     }
 }
@@ -91,6 +123,79 @@ actor FixtureState {
 struct PlaybackReliabilityChecks {
     @MainActor
     static func main() async throws {
+        var seeks = PlaybackSeekQueue()
+        let firstTarget = seeks.target(skipping: 10, from: 100, duration: 300)!
+        let firstSeek = seeks.enqueue(target: firstTarget, tolerance: 0.5)!
+        let secondTarget = seeks.target(skipping: 10, from: 100, duration: 300)!
+        precondition(secondTarget == 120, "repeated skips accumulate from the pending target")
+        precondition(seeks.enqueue(target: secondTarget, tolerance: 0.5) == nil,
+                     "only one AVPlayer seek may run at a time")
+        let thirdTarget = seeks.target(skipping: 10, from: 101, duration: 300)!
+        precondition(thirdTarget == 130)
+        _ = seeks.enqueue(target: thirdTarget, tolerance: 0.5)
+        let nextSeek = seeks.complete(firstSeek.id).next!
+        precondition(nextSeek.target == 130, "intermediate seeks coalesce into the latest target")
+        precondition(!seeks.complete(firstSeek.id).accepted,
+                     "an obsolete completion cannot clear a newer seek")
+        precondition(seeks.complete(nextSeek.id).accepted && seeks.pendingTarget == nil)
+        let cancelled = seeks.enqueue(target: 200, tolerance: 0)!
+        seeks.cancel()
+        precondition(!seeks.complete(cancelled.id).accepted && seeks.pendingTarget == nil)
+        precondition(seeks.target(skipping: -10, from: 2, duration: 300) == 0)
+        precondition(seeks.target(skipping: 10, from: 295, duration: 300) == 300)
+        precondition(seeks.target(skipping: 10, from: .nan, duration: 300) == nil)
+
+        var replacedItemSeeks = PlaybackSeekQueue()
+        let obsoleteItemSeek = replacedItemSeeks.enqueue(target: 90, tolerance: 0)!
+        replacedItemSeeks.cancel() // observeItem invalidates old item's seek queue
+        let replacementItemSeek = replacedItemSeeks.enqueue(target: 210, tolerance: 0)!
+        let obsoleteCompletion = replacedItemSeeks.complete(obsoleteItemSeek.id)
+        precondition(!obsoleteCompletion.accepted && replacedItemSeeks.pendingTarget == 210,
+                     "an old item completion cannot release or clear a replacement item's seek gate")
+        precondition(replacedItemSeeks.complete(replacementItemSeek.id).accepted
+                     && replacedItemSeeks.pendingTarget == nil)
+        print("PASS skip bursts coalesce, accumulate, clamp, and ignore stale item completions")
+
+        var seekTimeout = PlaybackSeekTimeoutState()
+        let oldItemRequest = UUID()
+        seekTimeout.begin(oldItemRequest, now: 10)
+        precondition(!seekTimeout.expire(oldItemRequest, now: 17.9, isForeground: true))
+        precondition(!seekTimeout.expire(oldItemRequest, now: 30, isForeground: false),
+                     "background time cannot clear an active foreground seek")
+        precondition(seekTimeout.expire(oldItemRequest, now: 30, isForeground: true),
+                     "a seek with no completion is released after the bounded foreground deadline")
+        let newItemRequest = UUID()
+        seekTimeout.begin(newItemRequest, now: 31)
+        precondition(!seekTimeout.complete(oldItemRequest)
+                     && !seekTimeout.expire(oldItemRequest, now: 60, isForeground: true)
+                     && seekTimeout.requestID == newItemRequest,
+                     "a stale completion or timeout cannot clear a newer item's seek")
+        precondition(seekTimeout.expire(newItemRequest, now: 39, isForeground: true))
+        print("PASS seek timeout reconciles only its owned request and remains dormant in background")
+
+        var stalledClock = PlaybackClockStallDetector()
+        precondition(!stalledClock.observe(position: 10, now: 0, expectsPlayback: true,
+                                           isForeground: true, isSeeking: false))
+        precondition(!stalledClock.observe(position: 10, now: 14.9, expectsPlayback: true,
+                                           isForeground: true, isSeeking: false))
+        precondition(!stalledClock.observe(position: 10.5, now: 15, expectsPlayback: true,
+                                           isForeground: true, isSeeking: false),
+                     "real progress resets the clock-stall deadline")
+        precondition(!stalledClock.observe(position: 10.5, now: 40, expectsPlayback: false,
+                                           isForeground: true, isSeeking: false))
+        precondition(!stalledClock.observe(position: 10.5, now: 50, expectsPlayback: true,
+                                           isForeground: false, isSeeking: false))
+        precondition(!stalledClock.observe(position: 10.5, now: 51, expectsPlayback: true,
+                                           isForeground: true, isSeeking: true))
+        precondition(!stalledClock.observe(position: 10.5, now: 52, expectsPlayback: true,
+                                           isForeground: true, isSeeking: false))
+        precondition(!stalledClock.observe(position: 10.5, now: 66.9, expectsPlayback: true,
+                                           isForeground: true, isSeeking: false))
+        precondition(stalledClock.observe(position: 10.5, now: 67, expectsPlayback: true,
+                                          isForeground: true, isSeeking: false),
+                     "only 15 seconds of active foreground non-seeking clock stall is actionable")
+        print("PASS clock-stall recovery deadline ignores paused, seeking, and background intervals")
+
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [FixtureProtocol.self]
         let api = MelloTVAPI(baseURL: URL(string: "https://fixture.invalid")!, session: URLSession(configuration: config))
@@ -98,6 +203,88 @@ struct PlaybackReliabilityChecks {
         let request = PlaybackRequest(titleID: 7, type: .movie, title: title.title,
                                       profileID: "fixture-profile", catalogTitle: title)
         let state = FixtureProtocol.state
+
+        var hevcAPI = api
+        hevcAPI.codecSupportOverride = ["hvc1": true, "hev1": true]
+        _ = try await hevcAPI.resolvePlayback(request: request, key: "hevc-supported")
+        let supportedCodecs = await state.lastCodecs
+        precondition(supportedCodecs.contains("hev1") && supportedCodecs.contains("hvc1"),
+                     "supported HEVC families must be advertised in the device request")
+        var noHEVCAPI = api
+        noHEVCAPI.codecSupportOverride = ["hvc1": false, "hev1": false]
+        _ = try await noHEVCAPI.resolvePlayback(request: request, key: "hevc-unsupported")
+        let unsupportedCodecs = await state.lastCodecs
+        precondition(!unsupportedCodecs.contains("hev1") && !unsupportedCodecs.contains("hvc1"),
+                     "unsupported HEVC families must not be advertised")
+        print("PASS device playback request advertises only capability-approved HEVC families")
+
+        await state.configure(format: "hls", availableHeights: [720])
+        let limited = try await api.resolvePlayback(request: request, key: "verified-720")
+        precondition(limited.format == "hls" && limited.availableHeights == [720], "iOS must use only the server's verified rungs")
+        await state.configure(format: "hls", availableHeights: [1080, 720])
+        let upgraded = try await api.resolvePlayback(request: request, key: "verified-1080")
+        precondition(upgraded.availableHeights == [1080, 720], "the verified 1080 rung must reach iOS")
+        print("PASS HLS quality choices follow exact server-verified heights")
+
+        let automaticItem = AVPlayerItem(url: upgraded.url)
+        PlaybackQuality.automatic.apply(to: automaticItem)
+        let replacementAutomaticItem = AVPlayerItem(url: upgraded.url)
+        PlaybackQuality.automatic.apply(to: replacementAutomaticItem)
+        precondition(automaticItem.preferredMaximumResolution == .zero
+                     && replacementAutomaticItem.preferredMaximumResolution == .zero,
+                     "automatic HLS selection must remain unconstrained across item replacement")
+        let manualItem = AVPlayerItem(url: upgraded.url)
+        PlaybackQuality.hd.apply(to: manualItem)
+        let replacementManualItem = AVPlayerItem(url: upgraded.url)
+        PlaybackQuality.hd.apply(to: replacementManualItem)
+        precondition(manualItem.preferredMaximumResolution.height == 720
+                     && replacementManualItem.preferredMaximumResolution.height == 720,
+                     "manual 720p ceiling must survive item replacement")
+        print("PASS automatic and manual quality policies persist across item replacement")
+        await state.configure(format: "mp4")
+        let upgradeSource = try await api.resolvePlayback(request: request, key: "upgrade-source")
+        await state.configure(format: "mp4")
+        let upgradeOperations = PlaybackSessionOperations(api: api)
+        let upgradedSource = try await upgradeOperations.upgrade(upgradeSource, request: request)
+        precondition(upgradedSource.reloadRequired && upgradedSource.format == "mp4"
+                     && upgradedSource.availableHeights.isEmpty && upgradedSource.revision > upgradeSource.revision,
+                     "MP4 upgrades must carry the rotated URL/revision even without HLS heights")
+        print("PASS one-shot MP4 upgrade adopts reload requirement without HLS heights")
+        await state.configure(format: "mp4", upgradeNoOp: true)
+        let noUpgrade = try await upgradeOperations.upgrade(upgradedSource, request: request)
+        precondition(!noUpgrade.reloadRequired && noUpgrade.revision == upgradedSource.revision,
+                     "no-op upgrades must not request a replacement")
+        print("PASS one-shot upgrade no-op preserves the current revision")
+        await state.configure(format: "mp4", upgradeFailures: 3)
+        let ambiguousUpgrade = PlaybackSessionOperations(api: api)
+        do {
+            _ = try await ambiguousUpgrade.upgrade(upgradedSource, request: request)
+            preconditionFailure("fixture should exhaust upgrade transport retries")
+        } catch { }
+        let replayedUpgrade = try await ambiguousUpgrade.upgrade(upgradedSource, request: request)
+        let upgradeAttempts = await state.attempts
+        precondition(replayedUpgrade.reloadRequired && upgradeAttempts.count == 4
+                     && upgradeAttempts.allSatisfy({ $0.0.hasSuffix("/upgrade") })
+                     && Set(upgradeAttempts.map(\.1)).count == 1,
+                     "ambiguous upgrade replay must keep one operation key")
+        print("PASS ambiguous quality upgrade replays with the same operation key")
+        for (status, code) in [(422, "no_source"), (422, "quality_unavailable"), (409, "active_quality_unknown")] {
+            await state.configure(format: "mp4", upgradeFailureStatus: status, upgradeFailureCode: code)
+            let rejectedUpgrade = PlaybackSessionOperations(api: api)
+            do {
+                _ = try await rejectedUpgrade.upgrade(replayedUpgrade, request: request)
+                preconditionFailure("fixture should reject upgrade with \(code)")
+            } catch { }
+            let failedUpgradeAttempts = await state.attempts
+            precondition(failedUpgradeAttempts.count == 1 && failedUpgradeAttempts[0].0.hasSuffix("/upgrade"),
+                         "fixture must first reject the upgrade with \(code)")
+            await state.configure(format: "mp4")
+            _ = try await rejectedUpgrade.recover(replayedUpgrade, request: request)
+            let recoveryAttempts = await state.attempts
+            precondition(recoveryAttempts.count == 1 && recoveryAttempts[0].0.hasSuffix("/backup"),
+                         "definitive \(code) rejection must clear the failed upgrade before recovery")
+        }
+        print("PASS definitive upgrade failures clear pending state so recovery can use backup")
 
         await state.configure(busy: true)
         _ = try await api.resolvePlayback(request: request, key: "stable-create")

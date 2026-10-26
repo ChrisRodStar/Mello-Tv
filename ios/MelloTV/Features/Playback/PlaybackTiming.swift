@@ -95,7 +95,7 @@ final class PlaybackTiming: @unchecked Sendable {
 }
 
 private enum PlaybackTimingLog {
-    private static let logger = Logger(subsystem: "com.streamtv.familystream", category: "PlaybackTiming")
+    private static let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "com.tinymellow.mellotv", category: "PlaybackTiming")
     private static let queue = DispatchQueue(label: "FamilyStream.PlaybackTiming", qos: .utility)
 
     static func append(_ event: PlaybackTiming.Event) {

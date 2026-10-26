@@ -68,7 +68,7 @@ pub fn result(candidates:Vec<CandidateStream>,mut issues:Vec<ProviderFailure>)->
     issues.truncate(128);
     AdapterResult{candidates:Some(candidates),issues,resolver_duration:0}
 }
-pub fn issue(error:&AdapterError,stage:&str)->ProviderFailure{ProviderFailure{category:error.category(),stage:stage.into(),detail:"provider record rejected".into()}}
+pub fn issue(error:&AdapterError,stage:&str)->ProviderFailure{ProviderFailure{category:error.category(),stage:stage.into(),detail:error.to_string()}}
 pub fn provider_id(value:&str)->Result<ProviderId,AdapterError>{ProviderId::new(value).map_err(|_|AdapterError::Unsupported)}
 pub fn hash_id(parts:&[&[u8]])->String{stream_provider_codecs::sha256(parts).iter().take(12).map(|byte|format!("{byte:02x}")).collect()}
 #[allow(dead_code)]

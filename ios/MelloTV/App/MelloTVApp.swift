@@ -36,7 +36,7 @@ enum PlaybackOrientationPolicy {
         let previousOrientation: UIInterfaceOrientation
     }
     private static var leases: [ObjectIdentifier: Lease] = [:]
-    private static let logger = Logger(subsystem: "com.streamtv.familystream", category: "Orientation")
+    private static let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "com.tinymellow.mellotv", category: "Orientation")
 
     static func mask(for window: UIWindow?) -> UIInterfaceOrientationMask {
         if let window, leases[ObjectIdentifier(window)] != nil { return .landscape }

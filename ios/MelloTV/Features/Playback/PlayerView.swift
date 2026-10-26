@@ -5,7 +5,7 @@ import MediaPlayer
 import Observation
 import OSLog
 
-private let playbackLog = Logger(subsystem: "com.streamtv.familystream", category: "Playback")
+private let playbackLog = Logger(subsystem: Bundle.main.bundleIdentifier ?? "com.tinymellow.mellotv", category: "Playback")
 
 @MainActor
 struct PlayerView: View {
@@ -61,6 +61,7 @@ private struct PlaybackSessionView: View {
     @State private var isAdjusting = false
     @State private var adjustmentFeedbackTask: Task<Void, Never>?
     @State private var player: AVPlayer?
+    @State private var isPlaybackSceneActive = false
     @State private var progressTracker: PlaybackProgressTracker?
     @State private var isPlaying = false
     @State private var intendsToPlay = true
@@ -73,15 +74,23 @@ private struct PlaybackSessionView: View {
     @State private var duration: Double = 0
     @State private var isSeeking = false
     @State private var sliderValue: Double = 0
-    @State private var seekFeedback: (direction: Int, id: UUID)?
+    @State private var seekFeedback: (direction: Int, seconds: Int, id: UUID)?
+    @State private var seekQueue = PlaybackSeekQueue()
+    @State private var seekTimeoutState = PlaybackSeekTimeoutState()
+    @State private var seekTimeoutTask: Task<Void, Never>?
+    @State private var playbackClockStall = PlaybackClockStallDetector()
     @State private var hideControlsTask: Task<Void, Never>?
     @State private var feedbackTask: Task<Void, Never>?
     @State private var itemStatusCancellable: AnyCancellable?
     @State private var playerStatusCancellable: AnyCancellable?
     @State private var preparationTask: Task<Void, Never>?
     @State private var renewalTask: Task<Void, Never>?
+    @State private var automaticUpgradeTask: Task<Void, Never>?
+    @State private var automaticUpgradeAttempted = false
+    @State private var sessionFinalizationTask: Task<Void, Never>?
     @State private var recoveryTask: Task<Void, Never>?
     @State private var stallTask: Task<Void, Never>?
+    @State private var playbackClockWatchdogTask: Task<Void, Never>?
     @State private var operations = PlaybackSessionOperations()
     @State private var recoveryAttempts = 0
     @State private var lastAutomaticRecreation: TimeInterval = -.infinity
@@ -104,11 +113,25 @@ private struct PlaybackSessionView: View {
     @State private var unlockHideTask: Task<Void, Never>?
     @State private var nextEpisodeTask: Task<Void, Never>?
     @State private var isLoadingNextEpisode = false
+    @State private var nextEpisodeCandidate: PlaybackRequest?
+    @State private var nextCandidateTask: Task<Void, Never>?
+    @State private var nextEpisodeLookup = NextEpisodeLookupState()
+    @State private var nextCandidateToken: UUID?
+    @State private var episodePrompt = EpisodePromptState()
+    @State private var episodePromptTask: Task<Void, Never>?
+    @State private var episodePromptToken: UUID?
+    @State private var isAtNaturalEnd = false
+    @State private var playbackSegments = PlaybackSegments.empty(duration: 0)
+    @State private var segmentTask: Task<Void, Never>?
+    @State private var loadedSegmentItem: ObjectIdentifier?
     @State private var episodeMessage: String?
     @State private var audioGroup: AVMediaSelectionGroup?
     @State private var subtitleGroup: AVMediaSelectionGroup?
     @State private var selectedAudio: AVMediaSelectionOption?
     @State private var selectedSubtitle: AVMediaSelectionOption?
+    @State private var audioTrackPreference: String?
+    @State private var subtitleTrackPreference: String?
+    @State private var subtitleOffSelected = false
     @State private var loadingTracks = false
 
     private let preparedPlayback = PreparedPlaybackService.shared
@@ -131,6 +154,7 @@ private struct PlaybackSessionView: View {
                             hasStartedPlayback = true
                             isBuffering = false
                             scheduleAutoHide()
+                            considerAutomaticQualityUpgrade()
                         }
                     }
                         .overlay {
@@ -203,7 +227,7 @@ private struct PlaybackSessionView: View {
                             .font(.subheadline.weight(.semibold))
                             .padding(.horizontal, 20)
                             .frame(minHeight: 48)
-                            .playerGlass(in: Capsule())
+                            .playerControlSurface(in: Capsule())
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
@@ -220,13 +244,14 @@ private struct PlaybackSessionView: View {
                     HStack {
                         if feedback.direction > 0 { Spacer() }
                         Label {
-                            Text("10 seconds")
+                            Text("\(feedback.direction > 0 ? "+" : "−")\(feedback.seconds)s")
                         } icon: {
                             PhosphorIcon(feedback.direction < 0 ? "skip-back" : "skip-forward", size: 18, weight: .fill)
                         }
-                        .font(.subheadline.weight(.semibold))
-                        .padding(16)
-                        .playerGlass(in: Capsule())
+                        .font(.subheadline.monospacedDigit().weight(.semibold))
+                        .padding(12)
+                        .shadow(color: .black.opacity(0.8), radius: 3, y: 1)
+                        .transition(.opacity)
                         if feedback.direction < 0 { Spacer() }
                     }
                     .padding(.horizontal, 24)
@@ -238,6 +263,14 @@ private struct PlaybackSessionView: View {
                         .transition(.opacity)
                         .zIndex(10)
                 }
+
+                if hasStartedPlayback, errorMessage == nil, isPlaybackSceneActive,
+                   !isLocked, activePanel == nil, !isSeeking,
+                   seekQueue.pendingTarget == nil, !isAdjusting {
+                    episodeContextPrompts(in: geometry.size)
+                        .transition(.opacity)
+                        .zIndex(8)
+                }
             }
             .foregroundStyle(.white)
         }
@@ -247,20 +280,46 @@ private struct PlaybackSessionView: View {
         .onChange(of: playbackQuality) { _, quality in
             if let item = player?.currentItem { applyQuality(quality, to: item) }
             timing?.record(.qualityLimitChanged, value: Double(quality.height))
+            if quality == .automatic { considerAutomaticQualityUpgrade() }
         }
         .task { startPlayback() }
         .onDisappear { cleanup() }
-        .onChange(of: scenePhase) { _, phase in
+        .onChange(of: scenePhase, initial: true) { _, phase in
+            isPlaybackSceneActive = phase == .active
             if phase == .background {
+                playbackClockStall.reset()
+                if isSeeking, seekQueue.activeRequest == nil {
+                    isSeeking = false
+                    sliderValue = currentTime
+                    progressTracker?.setSeeking(false)
+                }
+                episodePrompt.backgrounded(at: currentTime)
+                episodePromptTask?.cancel()
+                episodePromptTask = nil
+                episodePromptToken = nil
+                nextCandidateTask?.cancel()
+                nextCandidateTask = nil
+                nextCandidateToken = nil
+                nextEpisodeLookup.fail(now: ProcessInfo.processInfo.systemUptime)
+                segmentTask?.cancel()
+                segmentTask = nil
+                loadedSegmentItem = nil
+                playbackSegments = .empty(duration: 0)
                 nextPreparation.cancel()
                 finishAdjustment(immediately: true)
                 gestureSettings.restoreBrightness()
                 intendsToPlay = false
                 player?.pause()
                 progressTracker?.flush()
-            } else if phase == .active, let source = authorizedSource {
-                if source.expiresAt <= Date() { recoverPlayback() }
-                else if source.expiresAt.timeIntervalSinceNow < 90 { startRenewal(immediate: true) }
+            } else if phase == .active {
+                if let seek = seekQueue.activeRequest, let player {
+                    startSeekTimeout(for: seek, on: player)
+                }
+                playbackClockStall.reset()
+                if let source = authorizedSource {
+                    if source.expiresAt <= Date() { recoverPlayback() }
+                    else if source.expiresAt.timeIntervalSinceNow < 90 { startRenewal(immediate: true) }
+                }
             }
         }
         .onChange(of: voiceOverEnabled) { _, enabled in
@@ -304,7 +363,7 @@ private struct PlaybackSessionView: View {
             Button(action: dismiss) {
                 PhosphorIcon("x", size: 17, weight: .bold)
                     .frame(width: 48, height: 48)
-                    .playerGlass(in: Circle())
+                    .playerControlSurface(in: Circle())
                     .contentShape(Circle())
             }
             .accessibilityLabel("Close player")
@@ -334,7 +393,7 @@ private struct PlaybackSessionView: View {
                 } label: {
                     PhosphorIcon("lock-open", size: 20)
                         .frame(width: 48, height: 48)
-                        .playerGlass(in: Circle())
+                        .playerControlSurface(in: Circle())
                         .contentShape(Circle())
                 }
                 .accessibilityLabel("Lock playback controls")
@@ -397,7 +456,7 @@ private struct PlaybackSessionView: View {
                 }
             }
             .frame(width: 76, height: 76)
-            .playerGlass(in: Circle())
+            .shadow(color: .black.opacity(0.65), radius: 4, y: 1)
             .contentShape(Circle())
         }
         .buttonStyle(.plain)
@@ -467,6 +526,10 @@ private struct PlaybackSessionView: View {
                 ), upperBound: max(duration, 1)) { editing in
                     hideControlsTask?.cancel()
                     if editing {
+                        episodePrompt.seekOrScrub(to: currentTime)
+                        episodePromptTask?.cancel()
+                        episodePromptTask = nil
+                        episodePromptToken = nil
                         sliderValue = currentTime
                         isSeeking = true
                         progressTracker?.setSeeking(true)
@@ -513,9 +576,9 @@ private struct PlaybackSessionView: View {
         HStack(spacing: compact ? 8 : 16) {
             actionButton("\(speedLabel)×", icon: "speedometer", compact: compact) { openPanel(.speed) }
                 .accessibilityLabel("Playback speed, \(speedLabel) times")
-            if authorizedSource?.format == "hls", (authorizedSource?.availableHeights.count ?? 0) > 1 {
+            if authorizedSource?.format == "hls", !(authorizedSource?.availableHeights.isEmpty ?? true) {
                 actionButton(playbackQuality.label, icon: "stack", compact: compact) { openPanel(.quality) }
-                    .accessibilityLabel("Maximum quality, \(playbackQuality.label)")
+                    .accessibilityLabel("Video quality, \(playbackQuality.label)")
             }
             if request.type == .tv {
                 actionButton("Episodes", icon: "stack", compact: compact) { openPanel(.episodes) }
@@ -540,7 +603,7 @@ private struct PlaybackSessionView: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 2)
         .frame(maxWidth: .infinity)
-        .playerGlass(in: Capsule())
+        .playerControlSurface(in: Capsule())
     }
 
     private func actionButton(_ title: String, icon: String, compact: Bool,
@@ -572,7 +635,7 @@ private struct PlaybackSessionView: View {
 
             VStack(alignment: .leading, spacing: 12) {
                 HStack(spacing: 12) {
-                    Text(panel == .speed ? "Playback speed" : (panel == .quality ? "Maximum quality" : "Audio & subtitles"))
+                    Text(panel == .speed ? "Playback speed" : (panel == .quality ? "Video quality" : "Audio & subtitles"))
                         .font(.headline)
                     Spacer(minLength: 8)
                     Button { activePanel = nil } label: {
@@ -590,7 +653,7 @@ private struct PlaybackSessionView: View {
             .padding(.bottom, 18)
             .padding(.top, 16)
             .frame(width: min(panel == .speed ? 420 : 520, max(0, size.width - 32)))
-            .playerGlass(in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+            .playerControlSurface(in: RoundedRectangle(cornerRadius: 24, style: .continuous))
             .shadow(color: .black.opacity(0.3), radius: 16, y: 8)
             .padding(.bottom, 12)
             .accessibilityElement(children: .contain)
@@ -632,7 +695,7 @@ private struct PlaybackSessionView: View {
                         playbackQuality = quality
                         activePanel = nil
                     } label: {
-                        Text(quality == .automatic ? "Auto" : "Up to \(quality.label)")
+                        Text(quality.label)
                             .font(.subheadline.weight(playbackQuality == quality ? .bold : .medium))
                             .foregroundStyle(playbackQuality == quality ? MelloTVTheme.accent : .white)
                             .frame(maxWidth: .infinity, minHeight: 48)
@@ -649,9 +712,45 @@ private struct PlaybackSessionView: View {
     }
 
     private func applyQuality(_ quality: PlaybackQuality, to item: AVPlayerItem) {
-        item.preferredMaximumResolution = quality.height == 0 ? .zero : CGSize(width: quality.height * 16 / 9, height: quality.height)
-        // A resolution ceiling leaves throughput-based adaptation to AVPlayer.
-        item.preferredPeakBitRate = 0
+        quality.apply(to: item)
+    }
+
+    private func considerAutomaticQualityUpgrade() {
+        guard playbackQuality == .automatic, hasStartedPlayback, isPlaybackSceneActive,
+              !automaticUpgradeAttempted, automaticUpgradeTask == nil,
+              let source = authorizedSource,
+              !source.availableHeights.contains(1080), source.expiresAt.timeIntervalSinceNow > 90,
+              let activePlayer = player else { return }
+        automaticUpgradeAttempted = true
+        automaticUpgradeTask = Task {
+            defer { automaticUpgradeTask = nil }
+            do {
+                let upgraded = try await operations.upgrade(source, request: request)
+                try Task.checkCancellation()
+                guard self.player === activePlayer, authorizedSource?.revision == source.revision,
+                      upgraded.id == source.id, upgraded.reloadRequired,
+                      upgraded.revision > source.revision else { return }
+                authorizedSource = upgraded
+
+                // The server changes the relay source only after discovery
+                // finds a strictly higher measured rendition. Adopt its signed
+                // URL even when the new source is MP4 and has no HLS height list.
+                captureTrackPreferences(from: activePlayer.currentItem)
+                let position = activePlayer.currentTime().seconds
+                let resumePosition = position.isFinite ? max(0, position) : currentTime
+                activePlayer.pause()
+                let replacement = AVPlayerItem(url: upgraded.url)
+                applyQuality(playbackQuality, to: replacement)
+                activePlayer.replaceCurrentItem(with: replacement)
+                observeItem(replacement)
+                await seekForPlayback(activePlayer, seconds: resumePosition)
+                try Task.checkCancellation()
+                if intendsToPlay { activePlayer.play() }
+            } catch {
+                // A missing higher rendition or a transient probe failure does
+                // not interrupt the already-playing source.
+            }
+        }
     }
 
     private func openPanel(_ panel: PlaybackPanel) {
@@ -684,6 +783,13 @@ private struct PlaybackSessionView: View {
     }
 
     private func switchToEpisode(_ next: PlaybackRequest) {
+        episodePrompt.playNextNow()
+        episodePromptTask?.cancel()
+        episodePromptTask = nil
+        episodePromptToken = nil
+        nextCandidateTask?.cancel()
+        nextCandidateTask = nil
+        nextCandidateToken = nil
         player?.pause()
         progressTracker?.flush()
         onPlayEpisode(next)
@@ -741,6 +847,154 @@ private struct PlaybackSessionView: View {
         }
     }
 
+    private func episodeContextPrompts(in size: CGSize) -> some View {
+        VStack(spacing: 10) {
+            Spacer(minLength: 0)
+            HStack(alignment: .bottom) {
+                if let intro = activeIntroSegment {
+                    Button {
+                        seekTo(intro.end, tolerance: 0)
+                    } label: {
+                        Label(intro.kind == .recap ? "Skip Recap" : "Skip Intro", systemImage: "forward.end.fill")
+                            .font(.subheadline.weight(.semibold))
+                            .padding(.horizontal, 16)
+                            .frame(minHeight: 46)
+                            .background(Color.black.opacity(0.78), in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityHint(intro.kind == .recap ? "Skip to the end of the recap" : "Skip to the end of the intro")
+                }
+
+                Spacer(minLength: 12)
+
+                if episodePrompt.isVisible, let nextEpisodeCandidate {
+                    Button { playPreparedNext(nextEpisodeCandidate) } label: {
+                        Label("Play next", systemImage: "play.fill")
+                            .font(.subheadline.weight(.semibold))
+                            .frame(width: 148, height: 46)
+                            .background {
+                                GeometryReader { geometry in
+                                    ZStack(alignment: .leading) {
+                                        Color.black.opacity(0.82)
+                                        Color.white.opacity(0.24)
+                                            .frame(width: geometry.size.width * nextEpisodeCountdownProgress)
+                                    }
+                                }
+                                .clipShape(RoundedRectangle(cornerRadius: 12))
+                            }
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 12)
+                                    .strokeBorder(Color.white.opacity(0.22), lineWidth: 1)
+                            }
+                    }
+                    .buttonStyle(.plain)
+                    .animation(reduceMotion ? nil : .linear(duration: 1), value: nextEpisodeCountdownProgress)
+                    .accessibilityLabel("Play next episode")
+                    .accessibilityValue(episodePrompt.hasNaturallyEarnedCountdown
+                        ? "Automatically playing in \(episodePrompt.secondsRemaining) seconds" : "")
+                }
+            }
+        }
+        .frame(maxWidth: min(size.width - 32, 720))
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+        .padding(.horizontal, 16)
+        .padding(.bottom, controlsVisible ? 112 : 22)
+    }
+
+    private var activeIntroSegment: PlaybackSegment? {
+        guard duration.isFinite, duration > 0, playbackSegments.duration > 0,
+              abs(playbackSegments.duration - duration) <= max(2, duration * 0.005),
+              !isSeeking, seekQueue.pendingTarget == nil, !isAdjusting,
+              let intro = playbackSegments.segments.first(where: {
+                  ($0.kind == .intro || $0.kind == .recap) && currentTime >= $0.start && currentTime < $0.end
+              }) else { return nil }
+        return intro
+    }
+
+    private var nextEpisodeCountdownProgress: CGFloat {
+        guard episodePrompt.hasNaturallyEarnedCountdown else { return 0 }
+        return CGFloat(EpisodePromptState.countdownLength - episodePrompt.secondsRemaining)
+            / CGFloat(EpisodePromptState.countdownLength)
+    }
+
+    private func loadPlaybackSegments(for item: AVPlayerItem, duration itemDuration: Double) {
+        guard request.type == .tv, itemDuration.isFinite, itemDuration > 0 else { return }
+        let itemID = ObjectIdentifier(item)
+        guard loadedSegmentItem != itemID else { return }
+        loadedSegmentItem = itemID
+        let ownerKey = request.cacheKey
+        let segmentsRequest = request
+        segmentTask?.cancel()
+        segmentTask = Task {
+            let result = await PlaybackSegmentService.shared.segments(for: segmentsRequest, duration: itemDuration)
+            guard !Task.isCancelled, request.cacheKey == ownerKey,
+                  player?.currentItem === item else { return }
+            playbackSegments = result
+            playbackLog.info("Episode timing lookup finished for S\(segmentsRequest.season ?? 0) E\(segmentsRequest.episode ?? 0): \(result.segments.count, privacy: .public) accepted markers")
+            updateEpisodePrompt(position: currentTime, duration: duration, naturallyAdvanced: false)
+        }
+    }
+
+    private func updateEpisodePrompt(position: Double, duration itemDuration: Double, naturallyAdvanced: Bool) {
+        guard request.type == .tv, isPlaybackSceneActive, hasStartedPlayback,
+              errorMessage == nil,
+              nextEpisodeCandidate != nil,
+              itemDuration.isFinite, itemDuration > 0,
+              position.isFinite, player?.timeControlStatus == .playing,
+              !isLocked, activePanel == nil, !isSeeking, seekQueue.pendingTarget == nil,
+              !isAdjusting else { return }
+        let creditsStart = playbackSegments.segments.first(where: { $0.kind == .credits })?.start
+        let speed = Double(max(0.5, playbackSpeed))
+        let lastMinute = itemDuration - 60 * speed
+        let cardTrigger = max(0, min(lastMinute, creditsStart ?? lastMinute))
+        let countdownTrigger = max(0, itemDuration - 10 * speed)
+        episodePrompt.consider(position: position, cardTrigger: cardTrigger,
+                               countdownTrigger: countdownTrigger, naturallyAdvanced: naturallyAdvanced)
+        if episodePrompt.isVisible { ensureEpisodePromptTimer() }
+    }
+
+    private func ensureEpisodePromptTimer() {
+        guard episodePromptTask == nil else { return }
+        let ownerKey = request.cacheKey
+        let activePlayer = player
+        let activeItem = player?.currentItem
+        let token = UUID()
+        episodePromptToken = token
+        episodePromptTask = Task {
+            defer {
+                if episodePromptToken == token {
+                    episodePromptTask = nil
+                    episodePromptToken = nil
+                }
+            }
+            while !Task.isCancelled, episodePrompt.isVisible {
+                do { try await Task.sleep(for: .seconds(1)) } catch { return }
+                guard !Task.isCancelled, request.cacheKey == ownerKey,
+                      self.player === activePlayer, self.player?.currentItem === activeItem,
+                      isPlaybackSceneActive, hasStartedPlayback, errorMessage == nil else { return }
+                guard episodePrompt.isVisible, (isPlaying || isAtNaturalEnd), !isLocked, activePanel == nil,
+                      !isSeeking, seekQueue.pendingTarget == nil, !isAdjusting else { continue }
+                if isAtNaturalEnd, episodePrompt.hasNaturallyEarnedCountdown,
+                   episodePrompt.secondsRemaining == 0 {
+                    guard let nextEpisodeCandidate else { return }
+                    playPreparedNext(nextEpisodeCandidate)
+                    return
+                }
+                if episodePrompt.tick(), isAtNaturalEnd {
+                    continue
+                }
+            }
+        }
+    }
+
+    private func playPreparedNext(_ next: PlaybackRequest) {
+        episodePrompt.playNextNow()
+        episodePromptTask?.cancel()
+        episodePromptTask = nil
+        episodePromptToken = nil
+        switchToEpisode(next.traced(.nextEpisode))
+    }
+
     private func trackColumn(_ title: String, group: AVMediaSelectionGroup?, isSubtitle: Bool) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(title)
@@ -780,7 +1034,14 @@ private struct PlaybackSessionView: View {
         return Button {
             guard let item = player?.currentItem else { return }
             item.select(option, in: group)
-            if isSubtitle { selectedSubtitle = option } else { selectedAudio = option }
+            if isSubtitle {
+                selectedSubtitle = option
+                subtitleOffSelected = option == nil
+                subtitleTrackPreference = option.map(trackPreferenceKey)
+            } else {
+                selectedAudio = option
+                audioTrackPreference = option.map(trackPreferenceKey)
+            }
         } label: {
             HStack {
                 Text(title)
@@ -799,6 +1060,7 @@ private struct PlaybackSessionView: View {
     // MARK: - Playback Logic
 
     private func startPlayback(retry: Bool = false, resumeAt: Double? = nil, playWhenReady: Bool = true) {
+        if hasStartedPlayback { episodePrompt.backgrounded(at: currentTime) }
         cleanup(invalidateRequest: false, abandonPreparation: false)
         let trace = (retry ? nil : request.timing) ?? PlaybackTiming(
             action: retry ? .retry : .presentation, titleID: request.titleID, type: request.type,
@@ -887,6 +1149,7 @@ private struct PlaybackSessionView: View {
                 }
                 newPlayer.defaultRate = playbackSpeed
                 self.player = newPlayer
+                startPlaybackClockWatchdog(for: newPlayer)
                 trace.record(.playerAttached)
                 isLoading = false
                 isBuffering = true
@@ -897,12 +1160,13 @@ private struct PlaybackSessionView: View {
                         isPlaying = status == .playing
                         isBuffering = status == .waitingToPlayAtSpecifiedRate
                         if isPlaying {
+                            isAtNaturalEnd = false
                             trace.record(.playing, width: Double(newPlayer.currentItem?.presentationSize.width ?? 0),
                                          height: Double(newPlayer.currentItem?.presentationSize.height ?? 0))
                             hasStartedPlayback = true
                         } else if isBuffering { trace.record(.waiting) }
                         monitorStall(newPlayer)
-                        if !isPlaying { showControls = true }
+                        if !intendsToPlay { showControls = true }
                         scheduleAutoHide()
                     }
 
@@ -921,8 +1185,13 @@ private struct PlaybackSessionView: View {
                         guard self.player === newPlayer else { return }
                         let size = newPlayer.currentItem?.presentationSize ?? .zero
                         trace.record(.qualityChanged, width: Double(size.width), height: Double(size.height))
-                        if !isSeeking, time.seconds.isFinite {
-                            if let previous = lastObservedPlaybackTime, time.seconds > previous + 0.01,
+                        if !isSeeking, seekQueue.pendingTarget == nil, time.seconds.isFinite {
+                            let previousTime = lastObservedPlaybackTime
+                            let playbackDelta = previousTime.map { time.seconds - $0 }
+                            let naturallyAdvanced = playbackDelta.map {
+                                $0 > 0.01 && $0 <= max(2, Double(max(0.5, playbackSpeed)) * 2)
+                            } ?? false
+                            if naturallyAdvanced,
                                newPlayer.timeControlStatus == .playing {
                                 trace.record(.playbackAdvancing)
                             }
@@ -931,7 +1200,12 @@ private struct PlaybackSessionView: View {
                             if let dur = newPlayer.currentItem?.duration.seconds, dur > 0, dur.isFinite {
                                 self.duration = dur
                                 self.progressTracker?.handlePlaybackItemReady()
+                                if let currentItem = newPlayer.currentItem {
+                                    self.loadPlaybackSegments(for: currentItem, duration: dur)
+                                }
                                 considerNextEpisodePreparation()
+                                updateEpisodePrompt(position: time.seconds, duration: dur,
+                                    naturallyAdvanced: naturallyAdvanced)
                             }
                         }
                     }
@@ -953,17 +1227,78 @@ private struct PlaybackSessionView: View {
     }
 
     private func considerNextEpisodePreparation() {
-        guard request.type == .tv, scenePhase == .active,
+        guard request.type == .tv, isPlaybackSceneActive,
               player?.timeControlStatus == .playing, !isSeeking,
               duration.isFinite, duration > 0, currentTime.isFinite,
-              let source = authorizedSource,
-              source.expiresAt.timeIntervalSinceNow > 180 else { return }
+              authorizedSource != nil else { return }
         let remaining = duration - currentTime
         guard remaining > 0, remaining / Double(max(0.5, playbackSpeed)) <= 120 else { return }
         nextPreparation.prepare(after: request)
+        guard nextCandidateTask == nil,
+              nextEpisodeLookup.beginAttempt(now: ProcessInfo.processInfo.systemUptime) else { return }
+        playbackLog.info("Next episode metadata lookup started for S\(request.season ?? 0) E\(request.episode ?? 0), attempt \(self.nextEpisodeLookup.attempts, privacy: .public)")
+        let owner = request.cacheKey
+        let activePlayer = player
+        let activeItem = player?.currentItem
+        let token = UUID()
+        nextCandidateToken = token
+        nextCandidateTask = Task {
+            defer {
+                if nextCandidateToken == token {
+                    nextCandidateTask = nil
+                    nextCandidateToken = nil
+                }
+            }
+            do {
+                let candidate = try await nextPreparation.nextRequest(after: request)
+                try Task.checkCancellation()
+                guard nextCandidateToken == token, request.cacheKey == owner,
+                      self.player === activePlayer,
+                      self.player?.currentItem === activeItem else { return }
+                nextEpisodeLookup.complete(foundSuccessor: candidate != nil)
+                nextEpisodeCandidate = candidate
+                if let candidate {
+                    playbackLog.info("Next episode metadata ready for S\(candidate.season ?? 0) E\(candidate.episode ?? 0), attempt \(self.nextEpisodeLookup.attempts, privacy: .public)")
+                } else {
+                    playbackLog.info("No next episode was found; caching the no-successor result")
+                }
+            } catch {
+                guard nextCandidateToken == token, request.cacheKey == owner,
+                      self.player === activePlayer,
+                      self.player?.currentItem === activeItem else { return }
+                nextEpisodeLookup.fail(now: ProcessInfo.processInfo.systemUptime)
+                let retryDelay = nextEpisodeLookup.retryAt.map {
+                    max(0, $0 - ProcessInfo.processInfo.systemUptime)
+                } ?? 0
+                playbackLog.error("Next episode metadata lookup failed on attempt \(self.nextEpisodeLookup.attempts, privacy: .public); retry in \(retryDelay, format: .fixed(precision: 1)) seconds")
+            }
+        }
     }
 
     private func observeItem(_ item: AVPlayerItem) {
+        nextCandidateTask?.cancel()
+        nextCandidateTask = nil
+        nextCandidateToken = nil
+        nextEpisodeCandidate = nil
+        nextEpisodeLookup = NextEpisodeLookupState()
+        segmentTask?.cancel()
+        segmentTask = nil
+        loadedSegmentItem = nil
+        playbackSegments = .empty(duration: 0)
+        episodePromptTask?.cancel()
+        episodePromptTask = nil
+        episodePromptToken = nil
+        episodePrompt.bind(to: request.cacheKey)
+        episodePrompt.seekOrScrub(to: currentTime)
+        isAtNaturalEnd = false
+        seekQueue.cancel()
+        seekTimeoutTask?.cancel()
+        seekTimeoutTask = nil
+        seekTimeoutState.reset()
+        isSeeking = false
+        sliderValue = currentTime
+        progressTracker?.setSeeking(false)
+        playbackClockStall.reset()
         let trace = timing
         applyQuality(playbackQuality, to: item)
         if let accessLogObserver { NotificationCenter.default.removeObserver(accessLogObserver) }
@@ -983,6 +1318,10 @@ private struct PlaybackSessionView: View {
                 if status == .readyToPlay {
                     trace?.record(.itemReady, width: item.presentationSize.width, height: item.presentationSize.height)
                     loadTracks(for: item)
+                    let itemDuration = item.duration.seconds
+                    if itemDuration.isFinite, itemDuration > 0 {
+                        loadPlaybackSegments(for: item, duration: itemDuration)
+                    }
                 } else if status == .failed {
                     isPlaying = false
                     isLoading = false
@@ -994,10 +1333,18 @@ private struct PlaybackSessionView: View {
         ) { _ in
             Task { @MainActor in
                 guard player?.currentItem === item else { return }
+                let hadVisiblePrompt = episodePrompt.isVisible
+                isAtNaturalEnd = true
                 intendsToPlay = false
                 isPlaying = false
                 showControls = true
                 progressTracker?.flush()
+                if !hadVisiblePrompt {
+                    episodePrompt.seekOrScrub(to: currentTime)
+                } else {
+                    episodePrompt.naturalEnd()
+                    ensureEpisodePromptTimer()
+                }
             }
         }
     }
@@ -1056,6 +1403,33 @@ private struct PlaybackSessionView: View {
         }
     }
 
+    /// Runs independently of AVPlayer's periodic media-time callbacks, which
+    /// may stop arriving when the playback clock itself is stalled.
+    private func startPlaybackClockWatchdog(for observedPlayer: AVPlayer) {
+        playbackClockWatchdogTask?.cancel()
+        playbackClockStall.reset()
+        playbackClockWatchdogTask = Task { @MainActor in
+            while !Task.isCancelled, self.player === observedPlayer {
+                do { try await Task.sleep(for: .seconds(1)) } catch { return }
+                guard !Task.isCancelled, self.player === observedPlayer else { return }
+                let position = observedPlayer.currentTime().seconds
+                let didStall = playbackClockStall.observe(
+                    position: position,
+                    now: ProcessInfo.processInfo.systemUptime,
+                    expectsPlayback: intendsToPlay && hasStartedPlayback
+                        && observedPlayer.timeControlStatus == .playing,
+                    isForeground: isPlaybackSceneActive,
+                    isSeeking: isSeeking || seekQueue.pendingTarget != nil
+                )
+                if didStall {
+                    playbackClockStall.reset()
+                    playbackLog.error("Playback clock stopped while AVPlayer reported active playback; starting bounded recovery")
+                    recoverPlayback()
+                }
+            }
+        }
+    }
+
     private func recoverPlayback() {
         guard recoveryTask == nil, let source = authorizedSource, let player else { return }
         if source.expiresAt <= Date() { recreateExpiredPlayback(); return }
@@ -1068,7 +1442,7 @@ private struct PlaybackSessionView: View {
         playbackLog.info("Recovering playback; attempt \(recoveryAttempts, privacy: .public)")
         let position = player.currentTime().seconds
         let savedPosition = hasStartedPlayback ? currentTime : (request.startFromBeginning ? 0 : source.resumeSeconds)
-        let resumePosition = position.isFinite ? max(savedPosition, position) : savedPosition
+        let resumePosition = position.isFinite ? max(0, position) : savedPosition
         progressTracker?.flush()
         player.pause()
         errorMessage = nil
@@ -1078,10 +1452,13 @@ private struct PlaybackSessionView: View {
         let previousRenewal = renewalTask
         previousRenewal?.cancel()
         renewalTask = nil
+        let previousUpgrade = automaticUpgradeTask
+        previousUpgrade?.cancel()
         recoveryTask = Task {
             defer { recoveryTask = nil }
             // Settle the old owner before reconciling its pending mutation.
             await previousRenewal?.value
+            await previousUpgrade?.value
             do {
                 try Task.checkCancellation()
                 let recovered = try await operations.recover(source, request: request)
@@ -1144,6 +1521,7 @@ private struct PlaybackSessionView: View {
         guard let player else { return }
         intendsToPlay.toggle()
         if intendsToPlay {
+            isAtNaturalEnd = false
             player.play()
         } else {
             player.pause()
@@ -1154,26 +1532,91 @@ private struct PlaybackSessionView: View {
     }
 
     private func seek(by deltaSeconds: Double) {
-        guard let player, canSeek else { return }
-        let current = player.currentTime().seconds
-        guard current.isFinite else { return }
-        let target = max(0, min(duration, current + deltaSeconds))
-        seekTo(target)
+        guard let player, canSeek,
+              let target = seekQueue.target(skipping: deltaSeconds,
+                  from: player.currentTime().seconds, duration: duration) else { return }
+        seekTo(target, tolerance: 0.5)
     }
 
-    private func seekTo(_ targetSeconds: Double) {
+    private func seekTo(_ targetSeconds: Double, tolerance: Double = 0) {
         guard let player, canSeek, targetSeconds.isFinite else { return }
+        isAtNaturalEnd = false
+        episodePrompt.seekOrScrub(to: targetSeconds)
+        episodePromptTask?.cancel()
+        episodePromptTask = nil
+        episodePromptToken = nil
         hideControlsTask?.cancel()
         progressTracker?.setSeeking(true)
         let target = max(0, min(duration, targetSeconds))
         currentTime = target
-        let cmTime = CMTime(seconds: target, preferredTimescale: 600)
-        player.seek(to: cmTime, toleranceBefore: .zero, toleranceAfter: .zero) { _ in
+        if let request = seekQueue.enqueue(target: target, tolerance: tolerance) {
+            performSeek(request, on: player)
+        }
+    }
+
+    private func performSeek(_ request: PlaybackSeekQueue.Request, on player: AVPlayer) {
+        guard let item = player.currentItem else {
+            seekQueue.cancel()
+            seekTimeoutTask?.cancel()
+            seekTimeoutTask = nil
+            seekTimeoutState.reset()
+            isSeeking = false
+            sliderValue = currentTime
+            progressTracker?.setSeeking(false)
+            return
+        }
+        startSeekTimeout(for: request, on: player)
+        let tolerance = CMTime(seconds: request.tolerance, preferredTimescale: 600)
+        player.seek(to: CMTime(seconds: request.target, preferredTimescale: 600),
+                    toleranceBefore: tolerance, toleranceAfter: tolerance) { _ in
             Task { @MainActor in
-                guard self.player === player else { return }
-                self.progressTracker?.setSeeking(false)
-                scheduleAutoHide()
+                guard self.player === player, player.currentItem === item else { return }
+                let completion = seekQueue.complete(request.id)
+                guard completion.accepted else { return }
+                seekTimeoutTask?.cancel()
+                seekTimeoutTask = nil
+                _ = seekTimeoutState.complete(request.id)
+                if let next = completion.next {
+                    performSeek(next, on: player)
+                } else {
+                    let actualPosition = player.currentTime().seconds
+                    if !isSeeking, actualPosition.isFinite {
+                        currentTime = max(0, actualPosition)
+                        sliderValue = currentTime
+                        lastObservedPlaybackTime = actualPosition
+                    }
+                    progressTracker?.setSeeking(isSeeking)
+                    scheduleAutoHide()
+                }
             }
+        }
+    }
+
+    private func startSeekTimeout(for request: PlaybackSeekQueue.Request, on player: AVPlayer) {
+        guard let item = player.currentItem else { return }
+        seekTimeoutState.begin(request.id, now: ProcessInfo.processInfo.systemUptime)
+        seekTimeoutTask?.cancel()
+        seekTimeoutTask = Task {
+            do { try await Task.sleep(for: .seconds(PlaybackSeekTimeoutState.timeout)) } catch { return }
+            guard !Task.isCancelled, self.player === player, player.currentItem === item,
+                  seekQueue.activeRequest?.id == request.id,
+                  seekTimeoutState.expire(request.id, now: ProcessInfo.processInfo.systemUptime,
+                                          isForeground: isPlaybackSceneActive) else { return }
+
+            item.cancelPendingSeeks()
+            seekQueue.cancel()
+            seekTimeoutTask = nil
+            let actualPosition = player.currentTime().seconds
+            if actualPosition.isFinite {
+                currentTime = max(0, actualPosition)
+                sliderValue = currentTime
+                lastObservedPlaybackTime = actualPosition
+            }
+            isSeeking = false
+            progressTracker?.setSeeking(false)
+            playbackClockStall.reset()
+            playbackLog.error("Player seek completed without its callback; reconciled timeline to AVPlayer clock")
+            scheduleAutoHide()
         }
     }
 
@@ -1190,10 +1633,11 @@ private struct PlaybackSessionView: View {
 
     private func triggerSeekFeedback(direction: Int) {
         let id = UUID()
-        seekFeedback = (direction: direction, id: id)
+        let seconds = seekFeedback.flatMap { $0.direction == direction ? $0.seconds + 10 : nil } ?? 10
+        seekFeedback = (direction: direction, seconds: seconds, id: id)
         feedbackTask?.cancel()
         feedbackTask = Task {
-            do { try await Task.sleep(for: .milliseconds(600)) } catch { return }
+            do { try await Task.sleep(for: .milliseconds(750)) } catch { return }
             if seekFeedback?.id == id {
                 seekFeedback = nil
             }
@@ -1241,10 +1685,55 @@ private struct PlaybackSessionView: View {
             guard !Task.isCancelled, player?.currentItem === item else { return }
             audioGroup = audio
             subtitleGroup = subtitles
-            if let audio { selectedAudio = item.currentMediaSelection.selectedMediaOption(in: audio) }
-            if let subtitles { selectedSubtitle = item.currentMediaSelection.selectedMediaOption(in: subtitles) }
+            if let audio {
+                let matching = audioTrackPreference.flatMap { preference in audio.options.first { trackPreferenceKey($0) == preference } }
+                if let matching {
+                    item.select(matching, in: audio)
+                    selectedAudio = matching
+                } else {
+                    selectedAudio = item.currentMediaSelection.selectedMediaOption(in: audio)
+                }
+                if audioTrackPreference == nil, let selectedAudio {
+                    audioTrackPreference = trackPreferenceKey(selectedAudio)
+                }
+            }
+            if let subtitles {
+                if subtitleOffSelected, subtitles.allowsEmptySelection {
+                    item.select(nil, in: subtitles)
+                    selectedSubtitle = nil
+                } else if let preference = subtitleTrackPreference,
+                          let matching = subtitles.options.first(where: { trackPreferenceKey($0) == preference }) {
+                    item.select(matching, in: subtitles)
+                    selectedSubtitle = matching
+                } else {
+                    selectedSubtitle = item.currentMediaSelection.selectedMediaOption(in: subtitles)
+                    if subtitleTrackPreference == nil, let selectedSubtitle {
+                        subtitleTrackPreference = trackPreferenceKey(selectedSubtitle)
+                    }
+                }
+            }
             loadingTracks = false
         }
+    }
+
+    private func captureTrackPreferences(from item: AVPlayerItem?) {
+        guard let item else { return }
+        if let audioGroup, let option = item.currentMediaSelection.selectedMediaOption(in: audioGroup) {
+            audioTrackPreference = trackPreferenceKey(option)
+        }
+        if let subtitleGroup {
+            if let option = item.currentMediaSelection.selectedMediaOption(in: subtitleGroup) {
+                subtitleTrackPreference = trackPreferenceKey(option)
+                subtitleOffSelected = false
+            } else if subtitleGroup.allowsEmptySelection {
+                subtitleTrackPreference = nil
+                subtitleOffSelected = true
+            }
+        }
+    }
+
+    private func trackPreferenceKey(_ option: AVMediaSelectionOption) -> String {
+        "\(option.locale?.identifier ?? "")|\(option.displayName.lowercased())"
     }
 
     private func dismiss() {
@@ -1254,11 +1743,21 @@ private struct PlaybackSessionView: View {
 
     private func cleanup(invalidateRequest: Bool = true, abandonPreparation: Bool = true) {
         timing?.record(.closed)
+        let qualityUpgradeToSettle = automaticUpgradeTask
+        qualityUpgradeToSettle?.cancel()
         // cleanup can run both from Close and onDisappear. Once handed to the
         // player, this is the active session, not an unused speculative source.
         if abandonPreparation, !acceptedPreparation { preparedEpisode?.cancel() }
         nextEpisodeTask?.cancel()
         nextEpisodeTask = nil
+        nextCandidateTask?.cancel()
+        nextCandidateTask = nil
+        nextCandidateToken = nil
+        episodePromptTask?.cancel()
+        episodePromptTask = nil
+        episodePromptToken = nil
+        segmentTask?.cancel()
+        segmentTask = nil
         pendingEpisode = nil
         unlockHideTask?.cancel()
         unlockHideTask = nil
@@ -1285,6 +1784,14 @@ private struct PlaybackSessionView: View {
         recoveryTask = nil
         stallTask?.cancel()
         stallTask = nil
+        playbackClockWatchdogTask?.cancel()
+        playbackClockWatchdogTask = nil
+        seekQueue.cancel()
+        seekTimeoutTask?.cancel()
+        seekTimeoutTask = nil
+        seekTimeoutState.reset()
+        playbackClockStall.reset()
+        isSeeking = false
         player?.currentItem?.cancelPendingSeeks()
         if let timeObserver, let player { player.removeTimeObserver(timeObserver) }
         timeObserver = nil
@@ -1300,7 +1807,16 @@ private struct PlaybackSessionView: View {
         hideControlsTask?.cancel()
         player?.pause()
         progressTracker?.stop()
-        if let finishingSource { PlaybackSessionFinalizer.shared.finish(finishingSource, request: request) }
+        if let finishingSource, sessionFinalizationTask == nil {
+            if let qualityUpgradeToSettle {
+                sessionFinalizationTask = Task {
+                    await qualityUpgradeToSettle.value
+                    PlaybackSessionFinalizer.shared.finish(finishingSource, request: request)
+                }
+            } else {
+                PlaybackSessionFinalizer.shared.finish(finishingSource, request: request)
+            }
+        }
         progressTracker = nil
         player = nil
     }
@@ -1506,7 +2022,7 @@ private struct PlaybackEpisodesSheet: View {
                 }
                 .padding(.horizontal, 18)
                 .frame(minHeight: 48)
-                .playerGlass(in: Capsule())
+                .playerControlSurface(in: Capsule())
                 .contentShape(Rectangle())
             }
             .disabled(seasons.isEmpty)
@@ -1519,7 +2035,7 @@ private struct PlaybackEpisodesSheet: View {
             Button { dismiss() } label: {
                 PhosphorIcon("x", size: 16, weight: .bold)
                     .frame(width: 48, height: 48)
-                    .playerGlass(in: Circle())
+                    .playerControlSurface(in: Circle())
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Close episodes")
@@ -1800,6 +2316,8 @@ private struct PlayerTouchSurface: UIViewRepresentable {
         weak var panRecognizer: UIPanGestureRecognizer?
         private var activeKind: PlayerAdjustment.Kind?
         private var hasBegun = false
+        private var lastSeekTap: TimeInterval = -.infinity
+        private var lastSeekWasForward = false
 
         init(_ parent: PlayerTouchSurface) { self.parent = parent }
 
@@ -1851,12 +2369,26 @@ private struct PlayerTouchSurface: UIViewRepresentable {
         }
 
         @objc func singleTap(_ recognizer: UITapGestureRecognizer) {
-            if recognizer.state == .ended { parent.onTap() }
+            guard recognizer.state == .ended, let view = recognizer.view else { return }
+            let location = recognizer.location(in: view)
+            let now = ProcessInfo.processInfo.systemUptime
+            // A trailing tap in a skip burst continues skipping instead of
+            // unexpectedly revealing the complete playback overlay.
+            if now - lastSeekTap < 0.75,
+               (location.x >= view.bounds.width / 2) == lastSeekWasForward {
+                lastSeekTap = now
+                parent.onDoubleTap(location, view.bounds.width)
+            } else {
+                parent.onTap()
+            }
         }
 
         @objc func doubleTap(_ recognizer: UITapGestureRecognizer) {
             guard recognizer.state == .ended, let view = recognizer.view else { return }
-            parent.onDoubleTap(recognizer.location(in: view), view.bounds.width)
+            let location = recognizer.location(in: view)
+            lastSeekTap = ProcessInfo.processInfo.systemUptime
+            lastSeekWasForward = location.x >= view.bounds.width / 2
+            parent.onDoubleTap(location, view.bounds.width)
         }
     }
 }
@@ -2018,20 +2550,8 @@ private final class PlayerGestureSettings {
     }
 }
 
-private enum PlaybackQuality: Int, CaseIterable, Identifiable {
-    case automatic = 0, fullHD = 1080, hd = 720, sd = 480, low = 360
-    var id: Int { rawValue }
-    var height: Int { rawValue }
-    var label: String { self == .automatic ? "Auto" : "\(rawValue)p" }
-}
-
 private extension View {
-    @ViewBuilder
-    func playerGlass<S: Shape>(in shape: S) -> some View {
-        if #available(iOS 26.0, *) {
-            self.glassEffect(.regular, in: shape)
-        } else {
-            self.background(.ultraThinMaterial, in: shape)
-        }
+    func playerControlSurface<S: Shape>(in shape: S) -> some View {
+        background(.black.opacity(0.65), in: shape)
     }
 }

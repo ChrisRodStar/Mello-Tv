@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		C10000000000000000000001 /* PlaybackSegments.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000001 /* PlaybackSegments.swift */; };
         B10000000000000000000001 /* HeroSatinBackdrop.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000001; };
         B10000000000000000000002 /* HeroSatin.metal in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000002; };
 		A10000000000000000000001 /* MelloTVApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000001 /* MelloTVApp.swift */; };
@@ -47,6 +48,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		C20000000000000000000001 /* PlaybackSegments.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaybackSegments.swift; sourceTree = "<group>"; };
         B20000000000000000000001 /* HeroSatinBackdrop.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MelloTV/DesignSystem/Effects/HeroSatinBackdrop.swift; sourceTree = SOURCE_ROOT; };
         B20000000000000000000002 /* HeroSatin.metal */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.metal; path = MelloTV/DesignSystem/Effects/HeroSatin.metal; sourceTree = SOURCE_ROOT; };
 		A20000000000000000000001 /* MelloTVApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MelloTVApp.swift; sourceTree = "<group>"; };
@@ -270,6 +272,7 @@
 			children = (
 				A2000000000000000000009B /* PlaybackTiming.swift */,
 				A2000000000000000000001D /* PlaybackModels.swift */,
+				C20000000000000000000001 /* PlaybackSegments.swift */,
 				A2000000000000000000001E /* PreparedPlaybackService.swift */,
 				A2000000000000000000001F /* PlaybackProgressTracker.swift */,
 				A20000000000000000000020 /* ResumePlaybackHelper.swift */,
@@ -398,6 +401,7 @@
 				A1000000000000000000001B /* ProfilePageView.swift in Sources */,
 				A1000000000000000000009B /* PlaybackTiming.swift in Sources */,
 				A1000000000000000000001C /* PlaybackModels.swift in Sources */,
+				C10000000000000000000001 /* PlaybackSegments.swift in Sources */,
 				A1000000000000000000001D /* PreparedPlaybackService.swift in Sources */,
 				A1000000000000000000001E /* PlaybackProgressTracker.swift in Sources */,
 				A1000000000000000000001F /* ResumePlaybackHelper.swift in Sources */,
@@ -505,7 +509,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 0.5.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.streamtv.familystream;
+				PRODUCT_BUNDLE_IDENTIFIER = com.tinymellow.mellotv;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) DEBUG";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -527,7 +531,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 0.5.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.streamtv.familystream;
+				PRODUCT_BUNDLE_IDENTIFIER = com.tinymellow.mellotv;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				TARGETED_DEVICE_FAMILY = "1,2";

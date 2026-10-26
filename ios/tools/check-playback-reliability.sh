@@ -9,6 +9,7 @@ xcrun swiftc -D DEBUG -parse-as-library -o "$build_dir/checks" \
   "$root/MelloTV/Core/Configuration/ServerAddress.swift" \
   "$root/MelloTV/Features/Playback/PlaybackTiming.swift" \
   "$root/MelloTV/Features/Playback/PlaybackModels.swift" \
+  "$root/MelloTV/Features/Playback/PlaybackSegments.swift" \
   "$root/MelloTV/Features/Playback/PreparedPlaybackService.swift" \
   "$root/tools/PlaybackReliabilityChecks.swift"
 "$build_dir/checks"
