@@ -97,13 +97,6 @@ If you enjoy using Mello TV or want to support ongoing development across Tiny M
 
 [![Buy Me A Coffee](https://img.buymeacoffee.com/button-api/?text=Buy%20me%20a%20coffee&emoji=☕&slug=chrissinclair&button_colour=FFDD00&font_colour=000000&font_family=Cookie&outline_colour=000000&coffee_colour=ffffff)](https://buymeacoffee.com/chrissinclair)
 
-### Top Contributors
-
-<a href="https://github.com/ChrisRodStar/stream/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=ChrisRodStar/stream" alt="contrib.rocks image" />
-</a>
-
-<p align="right">(<a href="#readme-top">back to top</a>)</p>
 
 ## License
 
