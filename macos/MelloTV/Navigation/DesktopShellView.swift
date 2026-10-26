@@ -10,14 +10,13 @@ struct DesktopShellView: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            DesktopSidebarView(navigation: navigation, model: model, process: process, actions: actions)
+            DesktopSidebarView(navigation: navigation, actions: actions)
                 .frame(width: navigation.isSidebarExpanded ? 208 : 72)
             DesktopContentView(destination: $navigation.selection, model: model, process: process, port: port, actions: actions)
                 .padding(.top, 8)
                 .padding(.trailing, 8)
                 .padding(.bottom, 8)
         }
-        .frame(minWidth: 1150, minHeight: 750)
         .background(MelloTVTheme.workspace.ignoresSafeArea())
         .foregroundStyle(.primary)
         .preferredColorScheme(.dark)

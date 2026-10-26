@@ -12,7 +12,7 @@ final class WelcomeWindowController: NSWindowController {
         self.port = port
         self.onCompleted = onCompleted
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 560, height: 640),
+            contentRect: NSRect(origin: .zero, size: WindowSizing.welcomeContent),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
@@ -29,7 +29,7 @@ final class WelcomeWindowController: NSWindowController {
         window.toolbarStyle = .unified
         window.backgroundColor = MelloTVTheme.onboardingBackground
         window.isMovableByWindowBackground = true
-        window.contentMinSize = NSSize(width: 360, height: 400)
+        window.contentMinSize = WindowSizing.welcomeMinimumContent
         window.appearance = NSAppearance(named: .darkAqua)
         window.isReleasedWhenClosed = false
         window.center()
@@ -39,7 +39,7 @@ final class WelcomeWindowController: NSWindowController {
     required init?(coder: NSCoder) { nil }
 
     func present() {
-        window?.contentView = NSHostingView(rootView: WelcomeOnboardingView(port: port) { [weak self] in
+        window?.contentViewController = WindowContentController(rootView: WelcomeOnboardingView(port: port) { [weak self] in
             guard let self = self else { return }
             UserDefaults.standard.set(true, forKey: Self.completedKey)
             self.close()

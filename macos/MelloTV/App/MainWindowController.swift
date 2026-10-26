@@ -7,6 +7,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
     private let process: ServerProcessState
     private let actions: AppActions
     private let navigation = DesktopNavigation()
+    private var hasPresented = false
     private let sidebarID = NSToolbarItem.Identifier("MelloTVSidebar")
     private let refreshID = NSToolbarItem.Identifier("MelloTVRefresh")
     private let websiteID = NSToolbarItem.Identifier("MelloTVWebsite")
@@ -16,7 +17,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         self.model = ServerStatusStore(port: port)
         self.process = process
         self.actions = actions
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1150, height: 750),
+        let window = NSWindow(contentRect: NSRect(origin: .zero, size: WindowSizing.mainFrame),
                               styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         window.title = "Mello TV"
         window.titleVisibility = .hidden
@@ -34,32 +35,11 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         toolbar.showsBaselineSeparator = false
         window.toolbar = toolbar
         window.toolbarStyle = .unified
-        let hostingController = NSHostingController(rootView: DesktopShellView(navigation: navigation, model: model, process: process, port: port, actions: actions))
-        hostingController.sizingOptions = []
-        window.contentViewController = hostingController
-        let minWidth: CGFloat = 1150
-        let minHeight: CGFloat = 750
-        window.minSize = NSSize(width: minWidth, height: minHeight)
-        window.contentMinSize = NSSize(width: minWidth, height: minHeight)
-        if let contentView = window.contentView {
-            NSLayoutConstraint.activate([
-                contentView.widthAnchor.constraint(greaterThanOrEqualToConstant: minWidth),
-                contentView.heightAnchor.constraint(greaterThanOrEqualToConstant: minHeight)
-            ])
-        }
-        window.center()
+        window.contentViewController = WindowContentController(rootView: DesktopShellView(navigation: navigation, model: model, process: process, port: port, actions: actions))
         window.setFrameAutosaveName("MelloTVDesktopWindow")
-        if window.frame.width < minWidth || window.frame.height < minHeight {
-            window.setContentSize(NSSize(width: 1150, height: 750))
-            window.center()
-        }
     }
 
     required init?(coder: NSCoder) { nil }
-
-    func windowWillResize(_ sender: NSWindow, to frameSize: NSSize) -> NSSize {
-        NSSize(width: max(frameSize.width, 1150), height: max(frameSize.height, 750))
-    }
 
     func present(destination: DesktopDestination? = nil) {
         if let destination = destination { navigation.selection = destination }
@@ -67,6 +47,16 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         model.refreshNow()
         showWindow(nil)
         window?.makeKeyAndOrderFront(nil)
+        if !hasPresented, let window {
+            // First presentation realizes the toolbar and its final title-bar height.
+            // Apply whole-frame dimensions afterward so AppKit does not add that
+            // chrome to an opening frame established before presentation.
+            window.contentView?.layoutSubtreeIfNeeded()
+            window.minSize = WindowSizing.mainFrame
+            window.setFrame(NSRect(origin: window.frame.origin, size: WindowSizing.mainFrame), display: true)
+            window.center()
+            hasPresented = true
+        }
         NSApp.activate(ignoringOtherApps: true)
     }
 
@@ -76,6 +66,11 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
     }
 
     func windowWillClose(_ notification: Notification) { model.stop() }
+
+    func windowWillResize(_ sender: NSWindow, to frameSize: NSSize) -> NSSize {
+        // Enforce the same frame policy during live resizing, independently of layout.
+        WindowSizing.constrainedMainFrame(frameSize)
+    }
 
     @objc func toggleSidebar() { navigation.isSidebarExpanded.toggle() }
     @objc private func refresh() { model.refreshNow() }
