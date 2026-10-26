@@ -235,7 +235,7 @@ struct NetworkView: View {
                         )
                     }
 
-                    Text("Zero-config DNS-SD service (_mellotv._tcp) active on \(statusService.primaryInterfaceName)")
+                    Text("Zero-config broadcast active on \(statusService.primaryInterfaceName)")
                         .font(.system(size: 12))
                         .foregroundStyle(MelloTVTheme.textSecondary)
                 }
@@ -320,8 +320,8 @@ struct NetworkView: View {
                     .background(MelloTVTheme.sunken, in: RoundedRectangle(cornerRadius: 8))
                 } else {
                     Text(statusService.isTailscaleInstalled
-                        ? "Connect Tailscale to securely stream movies outside your home network."
-                        : "Install Tailscale for zero-configuration encrypted streaming away from home.")
+                        ? "Tailscale installed · Connect to stream away from home."
+                        : "Install Tailscale for encrypted streaming away from home.")
                         .font(.system(size: 11))
                         .foregroundStyle(MelloTVTheme.textSecondary)
                         .lineSpacing(2)
@@ -370,8 +370,8 @@ struct NetworkView: View {
                 }
 
                 Text(statusService.isVPNActive
-                    ? "VPN active. If local devices cannot discover Mello TV, enable LAN bypass in VPN settings."
-                    : "No system VPN tunnel detected. Local devices have direct low-latency access.")
+                    ? "Secure tunnel active · Enable local network access for LAN clients."
+                    : "Direct local network connection active.")
                     .font(.system(size: 11))
                     .foregroundStyle(MelloTVTheme.textSecondary)
                     .lineSpacing(2)
@@ -486,7 +486,7 @@ struct NetworkView: View {
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(MelloTVTheme.accent)
 
-            Text("The Mello TV iOS app automatically connects to this server over Bonjour without typing IP addresses.")
+            Text("Companion iOS & Apple TV apps connect automatically over LAN and Tailscale.")
                 .font(.system(size: 12))
                 .foregroundStyle(MelloTVTheme.textSecondary)
 

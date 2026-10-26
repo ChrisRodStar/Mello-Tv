@@ -38,20 +38,22 @@ final class ProfileStore {
     func loadProfiles() async {
         isLoading = true
         errorMessage = nil
-        do {
-            if ServerAddress.fallbackURLs.isEmpty {
-                isDiscoveringServer = true
-                if let discovered = await ServerAddress.ensureResolved() {
-                    discoveredServers = [discovered]
-                }
-                isDiscoveringServer = false
+        if ServerAddress.fallbackURLs.isEmpty || (ServerAddress.isCellularOnly && !ServerAddress.isTailscaleAddress(ServerAddress.baseURL)) {
+            isDiscoveringServer = true
+            if let discovered = await ServerAddress.ensureResolved() {
+                discoveredServers = [discovered]
+                ServerAddress.saveDiscoveredServer(discovered)
             }
-            refreshServerMetadata()
+            isDiscoveringServer = false
+        }
+        refreshServerMetadata()
 
+        do {
             let loaded = try await api.profiles()
             refreshServerMetadata()
             self.profiles = loaded
-            isLoading = false
+            self.isLoading = false
+            self.errorMessage = nil
 
             // Restore active profile from persistence (checking both server identity and current URL)
             let savedID = ProfilePersistence.activeProfileID(for: persistenceIdentityURL)
@@ -69,12 +71,41 @@ final class ProfileStore {
                 self.activeProfile = nil
             }
         } catch {
+            // Initial request failed. Immediately call ServerAddress.ensureResolved() and switch to resolved server.
+            isDiscoveringServer = true
+            if let resolved = await ServerAddress.ensureResolved() {
+                isDiscoveringServer = false
+                discoveredServers = [resolved]
+                ServerAddress.saveDiscoveredServer(resolved)
+                refreshServerMetadata()
+                do {
+                    let loaded = try await api.profiles()
+                    refreshServerMetadata()
+                    self.profiles = loaded
+                    self.isLoading = false
+                    self.errorMessage = nil
+
+                    let savedID = ProfilePersistence.activeProfileID(for: persistenceIdentityURL)
+                        ?? ProfilePersistence.activeProfileID(for: ServerAddress.baseURL)
+                    if let savedID, let match = loaded.first(where: { $0.id == savedID }) {
+                        self.activeProfile = match
+                        ProfilePersistence.setActiveProfileID(match.id, for: persistenceIdentityURL)
+                        checkOnboarding(for: match)
+                    } else if let first = loaded.first, loaded.count == 1 {
+                        selectProfile(first)
+                    } else {
+                        self.activeProfile = nil
+                    }
+                    return
+                } catch {
+                    // Retry with resolved server failed
+                }
+            }
+
             isDiscoveringServer = false
             isLoading = false
             errorMessage = error.localizedDescription
-            Task {
-                await scanForServers()
-            }
+            await scanForServers()
         }
     }
 

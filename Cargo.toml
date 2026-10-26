@@ -54,6 +54,7 @@ tough = { version = "0.24.0", default-features = false }
 tempfile = "3.27.0"
 crypto_secretbox = { version = "0.1.1", default-features = false, features = ["alloc", "salsa20"] }
 subtle = { version = "2.6.1", default-features = false }
+socket2 = "0.6"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

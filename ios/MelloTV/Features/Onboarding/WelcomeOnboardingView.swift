@@ -64,6 +64,16 @@ struct WelcomeOnboardingView: View {
         .background { CatalogPageSurface().ignoresSafeArea() }
         .foregroundStyle(MelloTVTheme.text)
         .task {
+            if manualServerAddress.isEmpty {
+                #if canImport(UIKit)
+                if let clip = UIPasteboard.general.string,
+                   let url = ServerAddress.normalizeServerURL(clip) {
+                    manualServerAddress = url.absoluteString
+                } else if let ts = ServerAddress.tailscaleURL {
+                    manualServerAddress = ts.absoluteString
+                }
+                #endif
+            }
             if profileStore.discoveredServers.isEmpty && !isBusy && !isConnected {
                 await profileStore.scanForServers()
             }
@@ -193,7 +203,7 @@ struct WelcomeOnboardingView: View {
                             VStack(alignment: .leading, spacing: 5) {
                                 Text(isBusy ? "Looking for your server" : "No server found yet")
                                     .font(.subheadline.weight(.semibold))
-                                Text(isBusy ? "This may take a few moments." : "Check that your server is running and you're on the same Wi-Fi.")
+                                Text(isBusy ? "This may take a few moments." : "Check that your server is running and you're on the same Wi-Fi or connected via Tailscale.")
                                     .font(.subheadline)
                                     .foregroundStyle(MelloTVTheme.textSecondary)
                             }

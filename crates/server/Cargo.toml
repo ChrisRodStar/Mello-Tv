@@ -20,6 +20,7 @@ serde_json.workspace = true
 chrono.workspace = true
 async-trait.workspace = true
 tokio-util.workspace = true
+socket2 = { workspace = true }
 getrandom.workspace = true
 sha2.workspace = true
 

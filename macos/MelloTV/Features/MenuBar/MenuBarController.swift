@@ -143,7 +143,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
 
     func update(running: Bool) {
         guard statusItem != nil else { return }
-        statusMenuItem.title = running ? "● Running on port \(port)" : "○ Server stopped"
+        statusMenuItem.title = running ? "● Running on port \(String(port))" : "○ Server stopped"
         addressMenuItem.title = running ? "Network: \(server.primaryServerAddress())" : "Network: Offline"
         openBrowserMenuItem.isEnabled = running
         copyAddressMenuItem.isEnabled = running

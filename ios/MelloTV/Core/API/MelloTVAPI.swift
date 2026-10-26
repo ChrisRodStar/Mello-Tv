@@ -43,9 +43,26 @@ struct MelloTVAPI: Sendable {
     private var candidateBaseURLs: [URL] {
         guard isDynamicOrigin else { return [baseURL] }
         let primary = ActiveOriginState.shared.current(default: ServerAddress.baseURL)
-        let list = [primary, ServerAddress.baseURL] + ServerAddress.fallbackURLs + [baseURL]
+        var list = [primary, ServerAddress.baseURL]
+        if let ts = ServerAddress.tailscaleURL {
+            list.append(ts)
+        }
+        list.append(contentsOf: ServerAddress.tailscaleCandidateURLs)
+        list.append(contentsOf: ServerAddress.fallbackURLs)
+        list.append(baseURL)
+
         var seen = Set<URL>()
-        return list.filter { seen.insert($0).inserted }
+        var unique = list.filter { seen.insert($0).inserted }
+
+        if ServerAddress.isCellularOnly || ServerAddress.isTailscaleActive {
+            unique.sort { a, b in
+                let aIsTS = ServerAddress.isTailscaleAddress(a)
+                let bIsTS = ServerAddress.isTailscaleAddress(b)
+                if aIsTS != bIsTS { return aIsTS }
+                return false
+            }
+        }
+        return unique
     }
 
     private static let privateSession: URLSession = {
@@ -448,68 +465,96 @@ struct MelloTVAPI: Sendable {
                                   availableHeights: heights)
     }
 
+    private func executeSingleRequest<Response: Decodable>(to candidate: URL, path: String, method: String,
+                                                           bodyData: Data?, query: [URLQueryItem],
+                                                           key: String?, timingID: UUID?,
+                                                           timeout: TimeInterval? = nil) async throws -> Response {
+        guard ["http", "https"].contains(candidate.scheme) else { throw APIError.invalidAddress }
+        var components = URLComponents(url: candidate.appending(path: "api/v1/" + path), resolvingAgainstBaseURL: false)
+        components?.queryItems = query.isEmpty ? nil : query
+        guard let url = components?.url, url.host == candidate.host else { throw APIError.invalidAddress }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = method
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue(candidate.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/")), forHTTPHeaderField: "Origin")
+
+        if let timeout {
+            request.timeoutInterval = timeout
+        } else if method == "POST" && path.hasSuffix("/playback") {
+            request.timeoutInterval = 35
+        } else {
+            request.timeoutInterval = 4.0
+        }
+
+        if let key { request.setValue(key, forHTTPHeaderField: "Idempotency-Key") }
+        if let timingID { request.setValue(timingID.uuidString.lowercased(), forHTTPHeaderField: "X-Playback-Trace-ID") }
+        if let bodyData {
+            request.httpBody = bodyData
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        }
+
+        let (data, response) = try await session.data(for: request)
+        if isDynamicOrigin {
+            ActiveOriginState.shared.update(candidate)
+            ServerAddress.markEndpointActive(candidate)
+        }
+
+        guard let http = response as? HTTPURLResponse else { throw APIError.invalidResponse }
+        guard (200..<300).contains(http.statusCode) else {
+            if http.statusCode == 404 { throw APIError.serverStatus(404) }
+            let code = (try? JSONDecoder().decode(FailureReply.self, from: data))?.error ?? "unavailable"
+            throw APIError.service(status: http.statusCode, code: code, message: Self.message(for: code))
+        }
+        if http.statusCode == 204, let empty = EmptyReply() as? Response { return empty }
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        guard let reply = try? decoder.decode(Response.self, from: data) else { throw APIError.invalidData }
+        return reply
+    }
+
     private func request<Response: Decodable>(_ path: String, method: String = "GET", body: [String: Any]? = nil,
                                                query: [URLQueryItem] = [], key: String? = nil, timingID: UUID? = nil,
                                                allowDiscoveryRetry: Bool = true) async throws -> Response {
         guard !path.contains(".."), !path.hasPrefix("/") else { throw APIError.invalidAddress }
         let bodyData: Data? = if let body { try JSONSerialization.data(withJSONObject: body) } else { nil }
-        let candidates = candidateBaseURLs
-        var lastConnectionError: Error?
 
-        for candidate in candidates {
-            guard ["http", "https"].contains(candidate.scheme) else { continue }
-            var components = URLComponents(url: candidate.appending(path: "api/v1/" + path), resolvingAgainstBaseURL: false)
-            components?.queryItems = query.isEmpty ? nil : query
-            guard let url = components?.url, url.host == candidate.host else { continue }
-            var request = URLRequest(url: url)
-            request.httpMethod = method
-            request.setValue("application/json", forHTTPHeaderField: "Accept")
-            request.setValue(candidate.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/")), forHTTPHeaderField: "Origin")
-            if candidates.count > 1 {
-                request.timeoutInterval = method == "POST" && path.hasSuffix("/playback") ? 35 : 4
-            }
-            if let key { request.setValue(key, forHTTPHeaderField: "Idempotency-Key") }
-            if let timingID { request.setValue(timingID.uuidString.lowercased(), forHTTPHeaderField: "X-Playback-Trace-ID") }
-            if let bodyData {
-                request.httpBody = bodyData
-                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            }
-            let data: Data
-            let response: URLResponse
-            do {
-                (data, response) = try await session.data(for: request)
-                if isDynamicOrigin {
-                    ActiveOriginState.shared.update(candidate)
-                    ServerAddress.markEndpointActive(candidate)
-                }
-            } catch {
-                if Task.isCancelled { throw CancellationError() }
-                lastConnectionError = error
-                continue
-            }
-            guard let http = response as? HTTPURLResponse else { throw APIError.invalidResponse }
-            guard (200..<300).contains(http.statusCode) else {
-                if http.statusCode == 404 { throw APIError.serverStatus(404) }
-                let code = (try? JSONDecoder().decode(FailureReply.self, from: data))?.error ?? "unavailable"
-                throw APIError.service(status: http.statusCode, code: code, message: Self.message(for: code))
-            }
-            if http.statusCode == 204, let empty = EmptyReply() as? Response { return empty }
-            let decoder = JSONDecoder()
-            decoder.keyDecodingStrategy = .convertFromSnakeCase
-            guard let reply = try? decoder.decode(Response.self, from: data) else { throw APIError.invalidData }
-            return reply
-        }
+        // Fast path: try the current effective origin first
+        let primary = effectiveBaseURL
+        do {
+            return try await executeSingleRequest(to: primary, path: path, method: method,
+                                                  bodyData: bodyData, query: query, key: key, timingID: timingID)
+        } catch {
+            if Task.isCancelled { throw CancellationError() }
+            if case APIError.service = error { throw error }
+            if case APIError.serverStatus = error { throw error }
+            if case APIError.serverMessage = error { throw error }
 
-        if lastConnectionError != nil {
+            // Origin failed with connection/network issue.
+            // Immediately trigger parallel resolution via ensureResolved() instead of sequentially hanging for 4s on dead candidates.
             if isDynamicOrigin && allowDiscoveryRetry {
-                if let discovered = await ServerAddress.ensureResolved() {
-                    ActiveOriginState.shared.update(discovered.primaryURL)
-                    return try await request(path, method: method, body: body, query: query, key: key, timingID: timingID, allowDiscoveryRetry: false)
+                if let resolved = await ServerAddress.ensureResolved() {
+                    ActiveOriginState.shared.update(resolved.primaryURL)
+                    return try await request(path, method: method, body: body, query: query,
+                                             key: key, timingID: timingID, allowDiscoveryRetry: false)
                 }
             }
+
+            // Fallback: try remaining candidates if any
+            let remaining = candidateBaseURLs.filter { $0 != primary }
+            for candidate in remaining {
+                do {
+                    return try await executeSingleRequest(to: candidate, path: path, method: method,
+                                                          bodyData: bodyData, query: query, key: key, timingID: timingID,
+                                                          timeout: 4.0)
+                } catch {
+                    if Task.isCancelled { throw CancellationError() }
+                    continue
+                }
+            }
+
             throw APIError.connection("Can’t reach Mello TV. Make sure the Mello TV server is running on your network or Tailscale.")
         }
-        throw APIError.invalidAddress
     }
 
     private static func message(for code: String) -> String {

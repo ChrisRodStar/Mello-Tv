@@ -178,6 +178,37 @@ async fn shutdown_signal() {
     }
 }
 
+fn bind_ipv4_listener(port: u16) -> std::io::Result<tokio::net::TcpListener> {
+    let socket = socket2::Socket::new(
+        socket2::Domain::IPV4,
+        socket2::Type::STREAM,
+        Some(socket2::Protocol::TCP),
+    )?;
+    let _ = socket.set_reuse_address(true);
+    socket.set_nonblocking(true)?;
+    let addr: std::net::SocketAddr = (std::net::Ipv4Addr::UNSPECIFIED, port).into();
+    socket.bind(&addr.into())?;
+    socket.listen(1024)?;
+    let std_listener: std::net::TcpListener = socket.into();
+    tokio::net::TcpListener::from_std(std_listener)
+}
+
+fn bind_ipv6_listener(port: u16) -> std::io::Result<tokio::net::TcpListener> {
+    let socket = socket2::Socket::new(
+        socket2::Domain::IPV6,
+        socket2::Type::STREAM,
+        Some(socket2::Protocol::TCP),
+    )?;
+    let _ = socket.set_only_v6(true);
+    let _ = socket.set_reuse_address(true);
+    socket.set_nonblocking(true)?;
+    let addr: std::net::SocketAddr = (std::net::Ipv6Addr::UNSPECIFIED, port).into();
+    socket.bind(&addr.into())?;
+    socket.listen(1024)?;
+    let std_listener: std::net::TcpListener = socket.into();
+    tokio::net::TcpListener::from_std(std_listener)
+}
+
 async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let _ = tracing_subscriber::fmt()
         .with_env_filter(
@@ -246,13 +277,97 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     let router = routes::build_router_with_static(state.clone(), config.static_dir.clone());
 
-    let addr = format!("{}:{}", config.host, config.port);
-    let listener = tokio::net::TcpListener::bind(&addr).await?;
-    tracing::info!(%addr, "stream HTTP API daemon listening");
+    let is_dual_stack = config.host == "0.0.0.0" || config.host == "::";
+    let mut listeners = Vec::new();
 
-    axum::serve(listener, router)
-        .with_graceful_shutdown(shutdown_signal())
-        .await?;
+    if is_dual_stack {
+        match bind_ipv4_listener(config.port) {
+            Ok(listener) => {
+                tracing::info!(
+                    port = config.port,
+                    "bound dual-stack IPv4 listener on 0.0.0.0:{}",
+                    config.port
+                );
+                listeners.push(listener);
+            }
+            Err(err) => {
+                tracing::warn!(
+                    port = config.port,
+                    error = %err,
+                    "failed to bind IPv4 listener on 0.0.0.0"
+                );
+            }
+        }
+
+        match bind_ipv6_listener(config.port) {
+            Ok(listener) => {
+                tracing::info!(
+                    port = config.port,
+                    "bound dual-stack IPv6 listener on [::]:{}",
+                    config.port
+                );
+                listeners.push(listener);
+            }
+            Err(err) => {
+                tracing::warn!(
+                    port = config.port,
+                    error = %err,
+                    "failed to bind IPv6 listener on [::]"
+                );
+            }
+        }
+
+        if listeners.is_empty() {
+            return Err(format!(
+                "failed to bind either IPv4 or IPv6 listener on port {}",
+                config.port
+            )
+            .into());
+        }
+    } else {
+        let addr = format!("{}:{}", config.host, config.port);
+        let listener = tokio::net::TcpListener::bind(&addr).await?;
+        tracing::info!(%addr, "stream HTTP API daemon listening");
+        listeners.push(listener);
+    }
+
+    let (shutdown_tx, _) = tokio::sync::broadcast::channel::<()>(1);
+    let mut serve_handles = Vec::new();
+
+    for listener in listeners {
+        let local_addr = listener.local_addr().ok();
+        let router = router.clone();
+        let mut shutdown_rx = shutdown_tx.subscribe();
+        serve_handles.push(tokio::spawn(async move {
+            let res = axum::serve(listener, router)
+                .with_graceful_shutdown(async move {
+                    let _ = shutdown_rx.recv().await;
+                })
+                .await;
+            (local_addr, res)
+        }));
+    }
+
+    tokio::select! {
+        _ = shutdown_signal() => {
+            tracing::info!("shutdown signal received, initiating graceful shutdown");
+            let _ = shutdown_tx.send(());
+        }
+    }
+
+    for handle in serve_handles {
+        match handle.await {
+            Ok((addr, Ok(()))) => {
+                tracing::debug!(?addr, "listener shutdown cleanly");
+            }
+            Ok((addr, Err(e))) => {
+                tracing::error!(?addr, error = %e, "listener error");
+            }
+            Err(e) => {
+                tracing::error!(error = %e, "serve task join error");
+            }
+        }
+    }
 
     tracing::info!("flushing storage repositories on shutdown");
     let _ = state.catalog.shutdown().await;
@@ -301,5 +416,18 @@ mod tests {
         assert_eq!(config.db_path, PathBuf::from("data"));
         assert!(config.proxy.is_none());
         assert!(config.static_dir.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_dual_stack_binding() {
+        let v4 = bind_ipv4_listener(0);
+        assert!(v4.is_ok());
+        if let Ok(v4_listener) = v4 {
+            let port = v4_listener.local_addr().map(|a| a.port()).unwrap_or(0);
+            assert!(port > 0);
+        }
+
+        let v6 = bind_ipv6_listener(0);
+        assert!(v6.is_ok());
     }
 }
