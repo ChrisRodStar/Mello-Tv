@@ -6,6 +6,7 @@
 [![Contributors](https://img.shields.io/github/contributors/ChrisRodStar/stream?style=for-the-badge&color=green)](#top-contributors)
 [![Stars](https://img.shields.io/github/stars/ChrisRodStar/stream?style=for-the-badge&color=gold)](https://github.com/ChrisRodStar/stream/stargazers)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20iOS%20%7C%20Web-blue?style=for-the-badge)](#platforms)
+[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-Donate-yellow?style=for-the-badge&logo=buy-me-a-coffee)](https://buymeacoffee.com/chrissinclair)
 
 # Mello TV 🎬
 
@@ -88,9 +89,13 @@ Full setup guides, configuration options, and architecture notes are available o
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
-## Contributing
+## Contributing & Support
 
 Pull requests, bug reports, and provider improvements are welcome! Feel free to open an [issue](https://github.com/ChrisRodStar/stream/issues) or start a [discussion](https://github.com/ChrisRodStar/stream/discussions).
+
+If you enjoy using Mello TV or want to support ongoing development across Tiny Mello projects:
+
+[![Buy Me A Coffee](https://img.buymeacoffee.com/button-api/?text=Buy%20me%20a%20coffee&emoji=☕&slug=chrissinclair&button_colour=FFDD00&font_colour=000000&font_family=Cookie&outline_colour=000000&coffee_colour=ffffff)](https://buymeacoffee.com/chrissinclair)
 
 ### Top Contributors
 

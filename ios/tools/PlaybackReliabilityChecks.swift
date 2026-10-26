@@ -93,7 +93,7 @@ struct PlaybackReliabilityChecks {
     static func main() async throws {
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [FixtureProtocol.self]
-        let api = FamilyStreamAPI(baseURL: URL(string: "https://fixture.invalid")!, session: URLSession(configuration: config))
+        let api = MelloTVAPI(baseURL: URL(string: "https://fixture.invalid")!, session: URLSession(configuration: config))
         let title = MediaTitle(tmdbID: 7, type: .movie, title: "Synthetic fixture")
         let request = PlaybackRequest(titleID: 7, type: .movie, title: title.title,
                                       profileID: "fixture-profile", catalogTitle: title)
