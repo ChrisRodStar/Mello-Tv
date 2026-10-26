@@ -41,3 +41,6 @@ bin/
 # Logs & Temp
 *.log
 tmp/
+
+# Local deployment tooling
+/deploy/

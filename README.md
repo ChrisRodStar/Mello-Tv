@@ -49,7 +49,6 @@ Because resolving and relaying streams uses local compute and bandwidth, exposin
 
 ```bash
 git clone https://github.com/ChrisRodStar/stream.git && cd stream
-cp deploy/.env.example .env   # add your TMDB_API_KEY
 cargo run -p stream-server    # http://localhost:8080
 ```
 

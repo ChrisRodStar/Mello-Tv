@@ -1,8 +1,0 @@
-**
-!artifacts/
-!artifacts/api
-!artifacts/catalog
-!artifacts/providers
-!artifacts/family-stream-relay
-!runtime/
-!runtime/**
