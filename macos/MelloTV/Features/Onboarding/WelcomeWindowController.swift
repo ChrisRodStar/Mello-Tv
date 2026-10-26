@@ -13,7 +13,7 @@ final class WelcomeWindowController: NSWindowController {
         self.onCompleted = onCompleted
         let window = NSWindow(
             contentRect: NSRect(origin: .zero, size: WindowSizing.welcomeContent),
-            styleMask: [.titled, .closable, .miniaturizable, .resizable],
+            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
@@ -21,16 +21,9 @@ final class WelcomeWindowController: NSWindowController {
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
         window.titlebarSeparatorStyle = .none
-        let toolbar = NSToolbar(identifier: "WelcomeToolbar")
-        toolbar.displayMode = .iconOnly
-        toolbar.allowsUserCustomization = false
-        toolbar.showsBaselineSeparator = false
-        window.toolbar = toolbar
-        window.toolbarStyle = .unified
-        window.backgroundColor = MelloTVTheme.onboardingBackground
+        window.backgroundColor = MelloTVTheme.workspaceColor
         window.isMovableByWindowBackground = true
         window.contentMinSize = WindowSizing.welcomeMinimumContent
-        window.appearance = NSAppearance(named: .darkAqua)
         window.isReleasedWhenClosed = false
         window.center()
         super.init(window: window)

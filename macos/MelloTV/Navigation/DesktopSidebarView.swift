@@ -17,31 +17,34 @@ struct DesktopSidebarView: View {
                     destinationButton(.providers)
                     destinationButton(.network)
                 }
-                sidebarSection("Maintenance") {
-                    destinationButton(.updates)
-                    SidebarRowButton(title: "Logs", symbol: "doc.text", expanded: expanded,
-                                     action: actions.openLogs)
-                    SidebarRowButton(title: "Data folder", symbol: "folder", expanded: expanded,
-                                     action: actions.openData)
-                }
             }
 
             Spacer(minLength: 32)
 
             VStack(spacing: 4) {
-                SidebarRowButton(title: "Welcome guide", symbol: "book.closed", expanded: expanded,
-                                 action: actions.showWelcome)
-                SidebarRowButton(title: "Support", symbol: "heart.fill", expanded: expanded,
-                                 symbolColor: Color(red: 0.94, green: 0.22, blue: 0.29)) {
+                destinationButton(.settings)
+                    .padding(.bottom, 12)
+                SidebarRowButton(
+                    title: "Welcome guide",
+                    symbol: "book.closed",
+                    expanded: expanded,
+                    action: actions.showWelcome
+                )
+                SidebarRowButton(
+                    title: "Support",
+                    symbol: "heart.fill",
+                    expanded: expanded,
+                    symbolColor: Color(red: 0.94, green: 0.22, blue: 0.29)
+                ) {
                     NSWorkspace.shared.open(AppLinks.buyMeACoffeeURL)
                 }
                 .help("Support Mello TV on Buy Me a Coffee")
             }
         }
         .padding(.horizontal, 12)
-        .padding(.top, 20)
+        .padding(.top, 24)
         .padding(.bottom, 20)
-        .background(MelloTVTheme.workspace)
+        .background(Color.clear)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Main navigation")
     }
@@ -53,13 +56,14 @@ struct DesktopSidebarView: View {
                     Image(nsImage: icon)
                         .resizable()
                         .scaledToFit()
-                        .frame(width: 34, height: 34)
+                        .frame(width: 32, height: 32)
                         .accessibilityHidden(true)
                 }
                 if expanded {
                     Text("Mello TV")
                         .font(.system(size: 15, weight: .semibold))
                         .tracking(-0.3)
+                        .foregroundStyle(MelloTVTheme.text)
                         .lineLimit(1)
                     Spacer(minLength: 0)
                 }
@@ -78,8 +82,8 @@ struct DesktopSidebarView: View {
                                                @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(title)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(.tertiary)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(MelloTVTheme.textSecondary)
                 .padding(.leading, 12)
                 .frame(height: 14)
                 .opacity(expanded ? 1 : 0)
@@ -90,8 +94,12 @@ struct DesktopSidebarView: View {
     }
 
     private func destinationButton(_ destination: DesktopDestination) -> some View {
-        SidebarRowButton(title: destination.rawValue, symbol: destination.symbol,
-                         expanded: expanded, selected: navigation.selection == destination) {
+        SidebarRowButton(
+            title: destination.rawValue,
+            symbol: destination.symbol,
+            expanded: expanded,
+            selected: navigation.selection == destination
+        ) {
             navigation.selection = destination
         }
         .keyboardShortcut(destination.shortcut, modifiers: .command)
@@ -112,19 +120,19 @@ private struct SidebarRowButton: View {
             HStack(spacing: 12) {
                 Image(systemName: symbol)
                     .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(symbolColor ?? (selected ? .white : .white.opacity(0.6)))
+                    .foregroundStyle(symbolColor ?? (selected ? MelloTVTheme.text : MelloTVTheme.textSecondary))
                     .frame(width: 20, height: 20)
                     .accessibilityHidden(true)
                 if expanded {
                     Text(title)
                         .font(.system(size: 13, weight: selected ? .semibold : .regular))
+                        .foregroundStyle(selected ? MelloTVTheme.text : MelloTVTheme.textSecondary)
                         .lineLimit(1)
                     Spacer(minLength: 0)
                 }
             }
-            .foregroundStyle(selected ? Color.white : Color.white.opacity(0.78))
             .frame(maxWidth: .infinity, alignment: expanded ? .leading : .center)
-            .frame(height: 40)
+            .frame(height: 38)
             .padding(.horizontal, expanded ? 12 : 0)
             .contentShape(Rectangle())
         }
@@ -143,8 +151,10 @@ private struct SidebarRowStyle: ButtonStyle {
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .background(selected ? MelloTVTheme.selection : hovered || configuration.isPressed ? MelloTVTheme.quietFill : .clear,
-                        in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+            .background(
+                selected ? MelloTVTheme.selection : hovered || configuration.isPressed ? MelloTVTheme.quietFill : .clear,
+                in: RoundedRectangle(cornerRadius: 9, style: .continuous)
+            )
             .opacity(configuration.isPressed ? 0.65 : 1)
             .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: hovered)
             .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: configuration.isPressed)

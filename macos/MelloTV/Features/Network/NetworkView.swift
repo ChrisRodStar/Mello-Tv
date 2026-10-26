@@ -19,29 +19,68 @@ struct NetworkView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            DashboardSectionHeading(title: "Network", detail: "The iOS app discovers your server on the same Wi-Fi.")
-            Table(connections) {
-                TableColumn("Connection", value: \.kind).width(min: 100, ideal: 130, max: 170)
-                TableColumn("Address") { connection in
-                    Text(connection.address).font(.system(.body, design: .monospaced))
-                        .textSelection(.enabled).lineLimit(1).truncationMode(.middle)
+        DesktopPage(maxWidth: 780) {
+            VStack(alignment: .leading, spacing: 28) {
+                DesktopPageHeading(title: "Network", detail: "Connect from the iOS app or a browser.")
+                VStack(spacing: 14) {
+                    ForEach(["This Mac", "Home network", "Tailscale"], id: \.self) { kind in
+                        let addresses = connections.filter { $0.kind == kind }
+                        if let primary = addresses.first {
+                            connectionCard(primary, alternatives: Array(addresses.dropFirst()))
+                        }
+                    }
                 }
-                TableColumn("") { connection in
-                    Button {
-                        NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(connection.address, forType: .string)
-                    } label: { Image(systemName: "doc.on.doc") }
-                        .buttonStyle(.borderless)
-                        .help("Copy address")
-                        .accessibilityLabel("Copy \(connection.kind) address")
-                }
-                .width(32)
+                Text("The iOS app finds your server automatically on the same Wi-Fi. Use Tailscale to connect away from home.")
+                    .font(.system(size: 12)).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            .tableStyle(.inset(alternatesRowBackgrounds: true))
+        }
+    }
+
+    private func connectionCard(_ connection: DashboardConnection, alternatives: [DashboardConnection]) -> some View {
+        HStack(spacing: 18) {
+            Image(systemName: connection.kind == "This Mac" ? "desktopcomputer" : connection.kind == "Tailscale" ? "network" : "wifi")
+                .font(.system(size: 22, weight: .medium))
+                .foregroundStyle(MelloTVTheme.accent)
+                .frame(width: 48, height: 48)
+                .background(MelloTVTheme.accent.opacity(0.10), in: Circle())
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 7) {
+                Text(connection.kind).font(.system(size: 16, weight: .semibold))
+                Text(connection.address).font(.system(size: 12, design: .monospaced))
+                    .foregroundStyle(.secondary).textSelection(.enabled)
+                    .lineLimit(1).truncationMode(.middle)
+            }
+            Spacer(minLength: 8)
+            if !alternatives.isEmpty {
+                Menu {
+                    ForEach(alternatives) { address in
+                        Button("Copy \(address.address)") { copy(address.address) }
+                    }
+                } label: {
+                    Text("\(alternatives.count) more")
+                        .font(.system(size: 11)).foregroundStyle(.secondary)
+                }
+                .fixedSize()
+                .menuStyle(.borderlessButton)
+                .help("Additional addresses")
+            }
+            Button { copy(connection.address) } label: {
+                Image(systemName: "doc.on.doc")
+            }
+            .buttonStyle(StudioButtonStyle())
+            .help("Copy \(connection.kind) address")
+            .accessibilityLabel("Copy \(connection.kind) address")
         }
         .padding(22)
+        .modifier(StudioSurface())
     }
+
+    private func copy(_ address: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(address, forType: .string)
+    }
+
 }
 
 private struct DashboardConnection: Identifiable {

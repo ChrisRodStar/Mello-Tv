@@ -9,7 +9,7 @@ The native SwiftUI and AppKit app manages the local Mello TV server. Onboarding 
 - `MelloTV/Core/`: configuration and server response models.
 - `MelloTV/Services/`: server supervision, status polling, and login-item integration.
 - `MelloTV/UI/`: shared colors and presentation components.
-- `MelloTV/Features/`: Overview, Providers, Network, Updates, Onboarding, and Menu Bar.
+- `MelloTV/Features/`: Overview, Providers, Network, Settings, Onboarding, and Menu Bar.
 
 App state and window controllers stay on the main actor. The server status store handles HTTP polling separately from view presentation. Provider activity is server-reported operational metadata; update availability remains unconfigured until a release source is supplied.
 
@@ -26,3 +26,7 @@ Run `./macos/package-macos.sh` from the repository root. It builds the web asset
 The bundle uses `MelloTV` for the native executable and `MelloTVServer` for its bundled server. The internal Rust package remains `stream-server`. The shared iOS Icon Composer document is compiled for macOS during packaging.
 
 Server data and logs live under `~/Library/Application Support/Mello TV` and `~/Library/Logs/Mello TV`. Existing legacy directories are moved as complete directories on first launch, after the previous app and server have exited. If a move fails, the app continues using the existing directory. No database is reset.
+
+## Settings
+
+Settings stays in the native content pane, with General, Server, Updates, and About sections. General saves a Dock-only, menu-bar-only, or combined presentation preference and applies it immediately. The menu bar and application menu both expose Settings; the application shortcut is Command-comma. Launch at login is shared between General and the menu-bar command. Server contains process controls and shortcuts to logs and data. Updates reports installed app/provider versions without claiming an availability check.

@@ -16,14 +16,17 @@ struct DesktopContentView: View {
                 ProvidersView(providers: model.snapshot?.media.providers ?? [], online: process.isRunning && model.isReachable)
             case .network:
                 NetworkView(port: port, endpoints: process.isRunning && model.isReachable ? model.snapshot?.endpoints ?? [] : [])
-            case .updates:
-                UpdatesView(version: model.snapshot?.appVersion ?? Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—", mode: model.snapshot?.providerUpdates.mode)
+            case .settings:
+                SettingsView(preferences: actions.preferences, process: process, snapshot: model.snapshot, actions: actions)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(MelloTVTheme.content)
-        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-        .overlay { RoundedRectangle(cornerRadius: 22, style: .continuous).strokeBorder(MelloTVTheme.hairline, lineWidth: 1) }
-        .shadow(color: .black.opacity(0.06), radius: 16, y: 5)
+        .background(MelloTVTheme.contentBackground)
+        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .strokeBorder(MelloTVTheme.border, lineWidth: 1)
+        }
+        .shadow(color: Color.black.opacity(0.35), radius: 24, y: 8)
     }
 }

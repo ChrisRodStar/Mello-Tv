@@ -48,16 +48,17 @@ struct OverviewView: View {
     private var pageHeader: some View {
         HStack(alignment: .firstTextBaseline) {
             Text("Overview")
-                .font(.system(size: 20, weight: .medium))
+                .font(.system(size: 20, weight: .semibold))
                 .tracking(-0.4)
+                .foregroundStyle(MelloTVTheme.text)
             Spacer()
             if let updated = model.lastRefreshed {
                 HStack(spacing: 5) {
-                    Circle().fill(.white.opacity(0.3)).frame(width: 3, height: 3)
+                    Circle().fill(MelloTVTheme.mutedSubtle).frame(width: 3, height: 3)
                     Text("Updated \(updated.formatted(date: .omitted, time: .shortened))")
                 }
                 .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(MelloTVTheme.textSecondary)
             }
         }
     }
@@ -66,24 +67,25 @@ struct OverviewView: View {
         VStack(alignment: .leading, spacing: short ? 16 : 22) {
             HStack(spacing: 8) {
                 Circle()
-                    .fill(online ? Color(red: 0.43, green: 0.82, blue: 0.64) : process.isRunning ? .orange : .secondary)
+                    .fill(online ? Color(red: 0.35, green: 0.85, blue: 0.55) : process.isRunning ? .orange : MelloTVTheme.mutedSubtle)
                     .frame(width: 6, height: 6)
                     .accessibilityHidden(true)
                 Text(online ? "Running on this Mac" : process.isRunning ? "Connecting to this Mac" : "Server stopped")
                     .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(MelloTVTheme.textSecondary)
             }
             VStack(alignment: .leading, spacing: 12) {
                 Text(headline)
                     .font(.system(size: short ? 32 : 38, weight: .semibold))
                     .tracking(short ? -1.1 : -1.5)
                     .lineSpacing(-1)
+                    .foregroundStyle(MelloTVTheme.text)
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityAddTraits(.isHeader)
                 Text(detail)
                     .font(.system(size: 13))
                     .lineSpacing(4)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(MelloTVTheme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
             HStack(spacing: 14) {
@@ -92,17 +94,17 @@ struct OverviewView: View {
                         .font(.system(size: 12, weight: .medium))
                         .padding(.horizontal, 13)
                         .frame(height: 34)
-                        .foregroundStyle(process.isRunning ? Color.white.opacity(0.88) : Color.white)
-                        .background(process.isRunning ? Color.white.opacity(0.07) : MelloTVTheme.accent,
+                        .foregroundStyle(process.isRunning ? MelloTVTheme.text : Color.white)
+                        .background(process.isRunning ? MelloTVTheme.sunken : MelloTVTheme.accent,
                                     in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-                        .overlay { RoundedRectangle(cornerRadius: 9).strokeBorder(.white.opacity(0.09), lineWidth: 1) }
+                        .overlay { RoundedRectangle(cornerRadius: 9).strokeBorder(MelloTVTheme.border, lineWidth: 1) }
                 }
                 .buttonStyle(OverviewPressStyle())
                 if process.isRunning {
                     Button(action: actions.restartServer) {
                         Image(systemName: "arrow.clockwise")
                             .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(MelloTVTheme.textSecondary)
                             .frame(width: 30, height: 34)
                             .contentShape(Rectangle())
                     }
@@ -145,12 +147,12 @@ struct OverviewView: View {
             .help("View network addresses")
         }
         .padding(.vertical, short ? 17 : 22)
-        .overlay(alignment: .top) { Rectangle().fill(.white.opacity(0.09)).frame(height: 1) }
-        .overlay(alignment: .bottom) { Rectangle().fill(.white.opacity(0.09)).frame(height: 1) }
+        .overlay(alignment: .top) { Rectangle().fill(MelloTVTheme.border).frame(height: 1) }
+        .overlay(alignment: .bottom) { Rectangle().fill(MelloTVTheme.border).frame(height: 1) }
     }
 
     private var railDivider: some View {
-        Rectangle().fill(.white.opacity(0.07)).frame(width: 1, height: 40)
+        Rectangle().fill(MelloTVTheme.border).frame(width: 1, height: 40)
             .padding(.horizontal, 2)
     }
 

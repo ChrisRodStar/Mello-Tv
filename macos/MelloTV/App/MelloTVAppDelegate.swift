@@ -3,8 +3,10 @@ import Cocoa
 @MainActor
 final class MelloTVAppDelegate: NSObject, NSApplicationDelegate {
     private let server = ServerController(port: 8080)
-    private let loginItem = LoginItemService()
+    private let preferences = AppPreferences()
     private lazy var actions: AppActions = AppActions(
+        preferences: preferences,
+        openSettings: { [weak self] in self?.mainWindow.present(destination: .settings) },
         openDashboard: { [weak self] in self?.mainWindow.present() },
         toggleServer: { [weak self] in self?.server.toggle() },
         restartServer: { [weak self] in self?.server.restart() },
@@ -16,12 +18,14 @@ final class MelloTVAppDelegate: NSObject, NSApplicationDelegate {
     )
     private lazy var mainWindow: MainWindowController = MainWindowController(port: server.port, process: server.state, actions: actions)
     private lazy var welcomeWindow: WelcomeWindowController = WelcomeWindowController(port: server.port) { [weak self] in self?.mainWindow.present() }
-    private lazy var menuBar: MenuBarController = MenuBarController(server: server, loginItem: loginItem, actions: actions)
+    private lazy var menuBar: MenuBarController = MenuBarController(server: server, preferences: preferences, actions: actions)
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         configureApplicationMenu()
-        loginItem.migrateExistingPreference()
-        menuBar.setup()
+        preferences.applyPresentation = { [weak self] mode in
+            self?.applyPresentation(mode) ?? false
+        }
+        _ = applyPresentation(preferences.presentation)
         server.onStateChange = { [weak self] running in
             self?.menuBar.update(running: running)
             self?.mainWindow.serverStateChanged()
@@ -44,6 +48,20 @@ final class MelloTVAppDelegate: NSObject, NSApplicationDelegate {
         else { welcomeWindow.present() }
     }
 
+    private func applyPresentation(_ mode: AppPresentation) -> Bool {
+        let keyWindow = NSApp.keyWindow
+        // Create the status item before hiding the Dock icon; remove it only
+        // after the Dock is available when switching back to Dock-only mode.
+        if mode.showsMenuBar { menuBar.setVisible(true) }
+        guard NSApp.setActivationPolicy(mode.showsDock ? .regular : .accessory) else { return false }
+        menuBar.setVisible(mode.showsMenuBar)
+        if let keyWindow {
+            keyWindow.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+        }
+        return true
+    }
+
     private func openWebsite() { NSWorkspace.shared.open(AppLinks.clientURL(port: server.port)) }
 
     @objc private func quit() {
@@ -54,7 +72,7 @@ final class MelloTVAppDelegate: NSObject, NSApplicationDelegate {
     @objc private func showOverview() { mainWindow.present(destination: .overview) }
     @objc private func showProviders() { mainWindow.present(destination: .providers) }
     @objc private func showNetwork() { mainWindow.present(destination: .network) }
-    @objc private func showUpdates() { mainWindow.present(destination: .updates) }
+    @objc private func showSettings() { mainWindow.present(destination: .settings) }
     @objc private func toggleSidebar() { mainWindow.toggleSidebar() }
     @objc private func refreshStatus() { mainWindow.present() }
 
@@ -63,6 +81,8 @@ final class MelloTVAppDelegate: NSObject, NSApplicationDelegate {
         let appItem = NSMenuItem()
         let appMenu = NSMenu(title: "Mello TV")
         appMenu.addItem(withTitle: "About Mello TV", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        appMenu.addItem(.separator())
+        add("Settings…", action: #selector(showSettings), key: ",", to: appMenu)
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Hide Mello TV", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
         appMenu.addItem(.separator())
@@ -75,7 +95,7 @@ final class MelloTVAppDelegate: NSObject, NSApplicationDelegate {
         add("Overview", action: #selector(showOverview), key: "1", to: viewMenu)
         add("Providers", action: #selector(showProviders), key: "2", to: viewMenu)
         add("Network", action: #selector(showNetwork), key: "3", to: viewMenu)
-        add("Updates", action: #selector(showUpdates), key: "4", to: viewMenu)
+        add("Settings", action: #selector(showSettings), key: "4", to: viewMenu)
         viewMenu.addItem(.separator())
         let sidebar = add("Toggle Sidebar", action: #selector(toggleSidebar), key: "s", to: viewMenu)
         sidebar.keyEquivalentModifierMask = [.command, .control]

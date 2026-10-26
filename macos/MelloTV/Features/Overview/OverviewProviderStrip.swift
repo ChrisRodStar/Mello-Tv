@@ -44,11 +44,11 @@ private struct SourceWordmark: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text(provider.name)
                     .font(.system(size: 13, weight: .semibold)).tracking(-0.4)
-                    .foregroundStyle(.white.opacity(isReachable ? 0.88 : 0.4))
+                    .foregroundStyle(isReachable ? MelloTVTheme.text : MelloTVTheme.textSecondary)
                     .lineLimit(1).minimumScaleFactor(0.85)
                 HStack(spacing: 5) {
                     Circle().fill(tone).frame(width: 4, height: 4).accessibilityHidden(true)
-                    Text(status).font(.system(size: 9, weight: .medium)).foregroundStyle(.secondary)
+                    Text(status).font(.system(size: 9, weight: .medium)).foregroundStyle(MelloTVTheme.textSecondary)
                         .lineLimit(1)
                 }
             }
@@ -56,7 +56,7 @@ private struct SourceWordmark: View {
             .padding(.horizontal, 6)
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
-            .background(hovered ? Color.white.opacity(0.045) : .clear, in: RoundedRectangle(cornerRadius: 8))
+            .background(hovered ? MelloTVTheme.quietFill : .clear, in: RoundedRectangle(cornerRadius: 8))
         }
         .buttonStyle(OverviewPressStyle())
         .onHover { hovered = $0 }

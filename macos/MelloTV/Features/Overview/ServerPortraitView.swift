@@ -58,7 +58,7 @@ struct ServerPortraitView: View {
         ZStack {
             ForEach(0..<3, id: \.self) { index in
                 RoundedRectangle(cornerRadius: 38 + CGFloat(index) * 8, style: .continuous)
-                    .stroke(.white.opacity(0.07 - Double(index) * 0.016), lineWidth: 0.7)
+                    .stroke(MelloTVTheme.border.opacity(0.8 - Double(index) * 0.2), lineWidth: 0.7)
                     .padding(CGFloat(2 - index) * 18)
                     .rotationEffect(.degrees(-9))
             }

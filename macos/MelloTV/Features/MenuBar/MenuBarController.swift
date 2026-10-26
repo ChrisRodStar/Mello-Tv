@@ -1,9 +1,9 @@
 import Cocoa
 
 @MainActor
-final class MenuBarController: NSObject {
+final class MenuBarController: NSObject, NSMenuDelegate {
     private let server: ServerController
-    private let loginItem: LoginItemService
+    private let preferences: AppPreferences
     private let actions: AppActions
     private var port: Int { server.port }
     private var statusItem: NSStatusItem!
@@ -18,14 +18,24 @@ final class MenuBarController: NSObject {
     private var launchAtLoginMenuItem: NSMenuItem!
     
 
-    init(server: ServerController, loginItem: LoginItemService, actions: AppActions) {
+    init(server: ServerController, preferences: AppPreferences, actions: AppActions) {
         self.server = server
-        self.loginItem = loginItem
+        self.preferences = preferences
         self.actions = actions
         super.init()
     }
 
-    func setup() {
+    func setVisible(_ visible: Bool) {
+        if visible {
+            if statusItem == nil { setup() }
+            update(running: server.state.isRunning)
+        } else if let statusItem {
+            NSStatusBar.system.removeStatusItem(statusItem)
+            self.statusItem = nil
+        }
+    }
+
+    private func setup() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         guard let button = statusItem.button else { return }
         
@@ -49,6 +59,7 @@ final class MenuBarController: NSObject {
     private func buildMenu() {
         menu = NSMenu()
         menu.autoenablesItems = false
+        menu.delegate = self
         
         // App header
         let titleItem = NSMenuItem(title: "Mello TV", action: nil, keyEquivalent: "")
@@ -111,10 +122,14 @@ final class MenuBarController: NSObject {
         menu.addItem(supportItem)
         menu.addItem(NSMenuItem.separator())
 
+        let settingsItem = NSMenuItem(title: "Settings…", action: #selector(openSettingsAction), keyEquivalent: ",")
+        settingsItem.target = self
+        menu.addItem(settingsItem)
+
         // Launch at login
         launchAtLoginMenuItem = NSMenuItem(title: "Launch at Login", action: #selector(toggleLaunchAtLoginAction), keyEquivalent: "")
         launchAtLoginMenuItem.target = self
-        launchAtLoginMenuItem.state = loginItem.isEnabled ? .on : .off
+        launchAtLoginMenuItem.state = preferences.launchAtLogin ? .on : .off
         menu.addItem(launchAtLoginMenuItem)
         
         menu.addItem(NSMenuItem.separator())
@@ -127,6 +142,7 @@ final class MenuBarController: NSObject {
     
 
     func update(running: Bool) {
+        guard statusItem != nil else { return }
         statusMenuItem.title = running ? "● Running on port \(port)" : "○ Server stopped"
         addressMenuItem.title = running ? "Network: \(server.primaryServerAddress())" : "Network: Offline"
         openBrowserMenuItem.isEnabled = running
@@ -136,6 +152,11 @@ final class MenuBarController: NSObject {
         statusItem.button?.appearsDisabled = false
     }
 
+    func menuWillOpen(_ menu: NSMenu) {
+        launchAtLoginMenuItem.state = preferences.launchAtLogin ? .on : .off
+    }
+
+    @objc private func openSettingsAction() { actions.openSettings() }
     @objc private func openDashboardAction() { actions.openDashboard() }
     @objc private func openBrowserAction() { actions.openWebsite() }
     @objc private func openWelcomeGuideAction() { actions.showWelcome() }
@@ -150,7 +171,7 @@ final class MenuBarController: NSObject {
     }
     @objc private func supportCreatorAction() { NSWorkspace.shared.open(AppLinks.buyMeACoffeeURL) }
     @objc private func toggleLaunchAtLoginAction() {
-        loginItem.setEnabled(!loginItem.isEnabled)
-        launchAtLoginMenuItem.state = loginItem.isEnabled ? .on : .off
+        preferences.setLaunchAtLogin(!preferences.launchAtLogin)
+        launchAtLoginMenuItem.state = preferences.launchAtLogin ? .on : .off
     }
 }
