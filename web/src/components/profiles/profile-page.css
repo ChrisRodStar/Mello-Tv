@@ -791,3 +791,42 @@
     animation: none;
   }
 }
+
+.profile-app-settings {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 12px;
+  margin: 0 0 32px;
+}
+.profile-app-settings > a,
+.profile-app-settings > button {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 20px;
+  min-height: 60px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--raised);
+  color: var(--text);
+  text-align: left;
+  font-size: 14px;
+}
+.profile-app-settings > a {
+  flex: 1;
+}
+.profile-app-settings small {
+  display: block;
+  margin-top: 4px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.profile-app-settings .coffee-glyph {
+  color: #ffdd00;
+  font-size: 24px;
+}
+.profile-app-settings > a:hover,
+.profile-app-settings > button:hover {
+  background: var(--raised-hover);
+}

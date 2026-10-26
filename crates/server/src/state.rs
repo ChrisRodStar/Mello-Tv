@@ -11,6 +11,7 @@ pub struct AppState {
     pub relay: Arc<MediaRelay>,
     pub household_account_id: String,
     pub http_port: u16,
+    pub started_at: std::time::Instant,
 }
 
 impl AppState {
@@ -27,6 +28,7 @@ impl AppState {
             relay: Arc::new(MediaRelay::new()),
             household_account_id,
             http_port: 8080,
+            started_at: std::time::Instant::now(),
         }
     }
 

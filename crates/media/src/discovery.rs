@@ -186,7 +186,16 @@ impl Drop for Waiter {
         }
     }
 }
+struct ProviderObservation {
+    version: Version,
+    generation: u64,
+    observed_at: i64,
+    failure: Option<ErrorCategory>,
+    candidate_count: i64,
+}
+
 struct Inner {
+    observations: Mutex<BTreeMap<ProviderId, ProviderObservation>>,
     providers: Arc<dyn ProviderCatalog>,
     prober: StreamProber,
     limits: DiscoveryLimits,
@@ -245,6 +254,7 @@ impl DiscoveryCoordinator {
             .map_err(|_| DiscoveryError::Capacity)?;
         Ok(Self {
             inner: Arc::new(Inner {
+                observations: Mutex::new(BTreeMap::new()),
                 providers,
                 prober,
                 slots: Semaphore::new(limits.concurrent_providers),
@@ -518,6 +528,24 @@ impl Inner {
         };
         let result = tokio::select! {biased;_=cancel.cancelled()=>Err(ErrorCategory::Cancelled),result=tokio::time::timeout(self.limits.provider_timeout,operation)=>result.unwrap_or(Err(ErrorCategory::Timeout))};
         let duration = i64::try_from(start.elapsed().as_nanos()).unwrap_or(i64::MAX);
+        // Cancellation and title-specific lack of support do not indicate an outage.
+        if !matches!(&result, Err(ErrorCategory::Cancelled | ErrorCategory::Unsupported))
+            && let Ok(mut observations) = self.observations.lock()
+            && (observations.len() < 32 || observations.contains_key(provider.id()))
+        {
+            let (failure, candidate_count) = match &result {
+                Ok(value) => (None, value.candidates.as_ref().map_or(0, |items| items.len() as i64)),
+                Err(category) => (Some(*category), 0),
+            };
+            let observed_at: DateTime<Utc> = SystemTime::now().into();
+            observations.insert(provider.id().clone(), ProviderObservation {
+                version: provider.version().clone(),
+                generation: provider.generation(),
+                observed_at: observed_at.timestamp(),
+                failure,
+                candidate_count,
+            });
+        }
         match result {
             Ok(value) => {
                 let candidates = value.candidates.clone().unwrap_or_default();
@@ -655,6 +683,28 @@ impl Inner {
 
 #[async_trait]
 impl stream_core::ports::MediaEngine for DiscoveryCoordinator {
+    fn diagnostics(&self) -> stream_core::ports::media::MediaDiagnostics {
+        use stream_core::ports::media::{MediaDiagnostics, ProviderDiagnostic};
+        let Ok(providers) = self.inner.providers.snapshot() else {
+            return MediaDiagnostics::default();
+        };
+        let observations = self.inner.observations.lock().ok();
+        MediaDiagnostics {
+            configured: !self.inner.closed.load(Ordering::Acquire) && !providers.is_empty(),
+            providers: providers.into_iter().map(|provider| {
+                let observation = observations.as_ref()
+                    .and_then(|items| items.get(provider.id()))
+                    .filter(|item| item.version == *provider.version() && item.generation == provider.generation());
+                ProviderDiagnostic {
+                    id: provider.id().to_string(),
+                    version: provider.version().to_string(),
+                    last_observed_at: observation.map(|item| item.observed_at),
+                    last_failure: observation.and_then(|item| item.failure),
+                    candidate_count: observation.map(|item| item.candidate_count),
+                }
+            }).collect(),
+        }
+    }
     async fn resolve_stream(
         &self,
         lookup: &Lookup,

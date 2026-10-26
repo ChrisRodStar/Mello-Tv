@@ -4,6 +4,7 @@ import type { Profile, Title, WatchProgress } from '../../model';
 
 import { useProfileLibrary } from '../../hooks/useProfileLibrary';
 import { Icon } from '../common/Icon';
+import { BUY_ME_A_COFFEE_URL } from '../../config/links';
 import { ProfileAvatar } from './ProfileAvatar';
 
 type ProfileTab = 'continue' | 'list' | 'history';
@@ -191,10 +192,7 @@ export function ProfilePage({
     });
   }, [library.progress]);
 
-  const historyDays = useMemo(
-    () => groupHistoryByDay(library.progress),
-    [library.progress],
-  );
+  const historyDays = useMemo(() => groupHistoryByDay(library.progress), [library.progress]);
 
   async function handlePlay(item: WatchProgress) {
     if (resolvingKey) return;
@@ -272,6 +270,19 @@ export function ProfilePage({
           </span>
         </button>
       </header>
+
+      <section className="profile-app-settings" aria-label="Mello TV settings and support">
+        <a href={BUY_ME_A_COFFEE_URL} target="_blank" rel="noopener noreferrer">
+          <span className="coffee-glyph" aria-hidden="true">
+            ☕
+          </span>
+          <span>
+            Buy Me a Coffee<small>Support independent, ad-free TV.</small>
+          </span>
+          <Icon name="right" />
+        </a>
+
+      </section>
 
       <div className="personal-profile-picker-row">
         <div className="personal-profile-tabs" role="tablist" aria-label="Library collection">
@@ -387,10 +398,7 @@ export function ProfilePage({
                             )}
                           </span>
                           {fraction !== null && (
-                            <span
-                              className="profile-continue-capsule-track"
-                              aria-hidden="true"
-                            >
+                            <span className="profile-continue-capsule-track" aria-hidden="true">
                               <span
                                 className="profile-continue-capsule-fill"
                                 style={{ width: `${Math.round(fraction * 100)}%` }}
@@ -411,11 +419,7 @@ export function ProfilePage({
             <div className="personal-library-empty">
               <h2>Save something for later</h2>
               <p>Tap the bookmark on any title to add it to My List.</p>
-              <button
-                type="button"
-                className="personal-browse-titles-btn"
-                onClick={onBrowse}
-              >
+              <button type="button" className="personal-browse-titles-btn" onClick={onBrowse}>
                 Browse titles
               </button>
             </div>
@@ -453,9 +457,7 @@ export function ProfilePage({
                 <header className="profile-history-day-header">
                   {day.date ? (
                     <>
-                      <span className="profile-history-day-number">
-                        {day.date.getDate()}
-                      </span>
+                      <span className="profile-history-day-number">{day.date.getDate()}</span>
                       <div className="profile-history-day-labels">
                         <span className="profile-history-day-title">
                           {formatHistoryDayTitle(day.date)}
@@ -502,12 +504,7 @@ export function ProfilePage({
                             aria-label={`${item.completed ? (item.title.type === 'tv' ? 'Continue' : 'Play') : 'Resume'} ${item.title.title}`}
                           >
                             {thumbSrc ? (
-                              <img
-                                src={thumbSrc}
-                                alt=""
-                                loading="lazy"
-                                decoding="async"
-                              />
+                              <img src={thumbSrc} alt="" loading="lazy" decoding="async" />
                             ) : (
                               <ArtworkFallback
                                 title={item.title.title}
@@ -518,10 +515,7 @@ export function ProfilePage({
                               className="profile-history-artwork-shade"
                               aria-hidden="true"
                             />
-                            <span
-                              className="profile-history-play-glyph"
-                              aria-hidden="true"
-                            >
+                            <span className="profile-history-play-glyph" aria-hidden="true">
                               {isPreparing ? (
                                 <span className="profile-inline-spinner" />
                               ) : (

@@ -1,5 +1,7 @@
 import { memo } from 'react';
 
+import { BUY_ME_A_COFFEE_URL } from '../../config/links';
+
 import type { Profile } from '../../lib/profiles';
 import type { Category } from '../../types';
 import { ProfileAvatar } from '../profiles/ProfileAvatar';
@@ -70,15 +72,25 @@ export const Navigation = memo(function Navigation({
           <span>Search</span>
         </button>
       </div>
-      <button
-        type="button"
-        className={profilesOpen ? 'navigation-profile active' : 'navigation-profile'}
-        aria-current={profilesOpen ? 'page' : undefined}
-        onClick={onProfiles}
-      >
-        <ProfileAvatar profile={profile} />
-        <span>Profile</span>
-      </button>
+      <div className="navigation-footer">
+        <button
+          type="button"
+          className={profilesOpen ? 'navigation-profile active' : 'navigation-profile'}
+          aria-current={profilesOpen ? 'page' : undefined}
+          onClick={onProfiles}
+        >
+          <ProfileAvatar profile={profile} />
+          <span>Profile</span>
+        </button>
+        <a
+          className="navigation-support"
+          href={BUY_ME_A_COFFEE_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          Support Mello TV
+        </a>
+      </div>
     </nav>
   );
 });

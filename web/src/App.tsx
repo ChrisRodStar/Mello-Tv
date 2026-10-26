@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { Title, WatchProgress } from './model';
 
+
 import { CatalogContent } from './components/catalog/CatalogContent';
 import { TitleDetails } from './components/details/TitleDetails';
 import { Navigation } from './components/navigation/Navigation';
@@ -111,6 +112,7 @@ export function App({ resolvePlayback }: { resolvePlayback?: PlaybackResolver } 
     setInitialPlayback(undefined);
     setSelected(null);
   }, []);
+
 
   return (
     <div

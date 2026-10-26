@@ -188,11 +188,17 @@ async fn status(State(state): State<AppState>) -> Json<serde_json::Value> {
         .unwrap_or(false);
     let announcement =
         crate::discovery::build_announcement(&state.household_account_id, state.http_port);
+    let catalog_available = state.catalog.health().await.is_ok();
+    let media = state.media.diagnostics();
 
     Json(json!({
         "version": "api.v1",
         "status": "ok",
         "catalog_snapshot": if has_snapshot { "retained" } else { "missing" },
+        "catalog_status": if catalog_available { "ok" } else { "unavailable" },
+        "uptime_seconds": state.started_at.elapsed().as_secs(),
+        "media": media,
+        "provider_updates": { "mode": "bundled", "available": null },
         "service": announcement.service,
         "app_version": announcement.app_version,
         "server_id": announcement.server_id,

@@ -225,3 +225,27 @@
     gap: 4px;
   }
 }
+
+.side-navigation .navigation-footer {
+  grid-row: 3;
+  align-self: end;
+  display: grid;
+  gap: 8px;
+}
+.side-navigation .navigation-footer .navigation-profile {
+  grid-row: auto;
+}
+.navigation-support {
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 11px;
+  padding: 10px 0;
+}
+.navigation-support:hover {
+  color: var(--text);
+}
+
+@media (max-width: 700px) {
+  .side-navigation .navigation-footer { grid-row: auto; display: contents; }
+  .navigation-support { display: none; }
+}
