@@ -1,111 +1,56 @@
-<a id="readme-top"></a>
-
 <div align="center">
 
-<img src="docs/assets/mello-tv-ios.png" alt="Mello TV app icon" width="128">
-
-[![Version](https://img.shields.io/badge/version-v0.1.0--alpha.2-e50914?style=for-the-badge)](https://github.com/ChrisRodStar/Mello-Tv/releases)
-[![Contributors](https://img.shields.io/github/contributors/ChrisRodStar/Mello-Tv?style=for-the-badge&color=green)](https://github.com/ChrisRodStar/Mello-Tv/graphs/contributors)
-[![Stars](https://img.shields.io/github/stars/ChrisRodStar/Mello-Tv?style=for-the-badge&color=gold)](https://github.com/ChrisRodStar/Mello-Tv/stargazers)
-[![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20iOS%20%7C%20Web-blue?style=for-the-badge)](#platforms)
-[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-Donate-yellow?style=for-the-badge&logo=buy-me-a-coffee)](https://buymeacoffee.com/chrissinclair)
+<img src="docs/assets/mello-tv-ios.png" alt="Mello TV" width="112">
 
 # Mello TV
 
-Current release: **0.1.0-alpha.2** (pre-release).
+### Your own streaming stack. Self-hosted on your Mac, watched anywhere.
 
-### _Support Mello TV’s development by starring this repository!_
-
-#### Self-hosted streaming server and native apps built for your home.
-Powered by a single, lightweight Rust engine with zero-config network discovery across iPhone, Mac, and the web.
-
-**[Mello Watch](https://mellowatch.com)** · **[Documentation](https://mellowatch.com/docs)** · **[Discussions](https://github.com/ChrisRodStar/Mello-Tv/discussions)** · **[Issues](https://github.com/ChrisRodStar/Mello-Tv/issues)**
+[![Version](https://img.shields.io/badge/version-v0.1.0--alpha.2-e50914?style=for-the-badge)](https://github.com/ChrisRodStar/Mello-Tv/releases)
+[![Stars](https://img.shields.io/github/stars/ChrisRodStar/Mello-Tv?style=for-the-badge&color=gold)](https://github.com/ChrisRodStar/Mello-Tv/stargazers)
+[![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20iOS%20%7C%20Web-blue?style=for-the-badge)](#platforms)
+[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-Donate-yellow?style=for-the-badge&logo=buy-me-a-coffee)](https://buymeacoffee.com/chrissinclair)
 
 </div>
 
 ---
 
-**Mello TV** is a private, self-hosted streaming server and app suite for movies and TV shows. Run the server in your Mac menu bar, open the **Mello TV** app on your iPhone or browser, and start watching right away—no port forwarding, no manual IP setup, and no third-party ads or redirects.
+I built Mello TV because free movie sites suck. You click play and spend ten minutes fighting off fake download buttons, sketchy popups, and random redirects just to watch an episode of something in bed.
 
-It resolves streams across multiple providers in parallel and relays video cleanly to your devices while keeping your household profiles, watchlists, and playback progress in sync.
+Mello TV makes your Mac do all the dirty work in the background. It finds the sources, strips out the garbage ads and trackers, and streams clean video straight to your iPhone or browser. You just leave it running in your menu bar, open your phone, and it auto-connects over your Wi-Fi. No typing in IP addresses, no router port forwarding, no hassle.
 
-**Multiple streaming providers, with source availability and quality depending on the title.**
+> **Privacy heads-up:** Run a VPN on the Mac hosting Mello TV. This is meant for your own personal home network (or through Tailscale on the go). Keep your connection private and safe.
 
-> [!CAUTION]
-> Mello TV is designed for **personal and home use only.**  
-> While we do not prevent remote hosting, it is intended to run on your local network or private Tailscale mesh.*
->
-> Users are responsible for ensuring compliance with applicable laws and the terms of service of upstream providers.
+---
 
-<details><summary>*:</summary>
+### Platforms
 
-Mello TV automatically resolves direct media streams from third-party providers while stripping out ads, popups, and malicious redirects, then proxies the clean video stream to your devices.
+<p align="center">
+  <img src="docs/assets/platforms.svg" alt="Mello TV Platforms" width="100%">
+</p>
 
-Because resolving and relaying streams uses local compute and bandwidth, exposing an unprotected instance to the public internet can invite abuse. We strongly recommend running Mello TV on your home network and using [Tailscale](https://tailscale.com) when watching away from home.
+---
 
-</details>
+### Quick Start
 
-We recommend running a reputable **VPN on the Mac hosting Mello TV** for upstream network privacy. Tailscale connects your devices privately; it does not route the server’s outbound traffic through a VPN unless you configure an exit node.
+1. **Install the Mac host** — Grab the DMG from [Releases](https://github.com/ChrisRodStar/Mello-Tv/releases) and drag **Mello TV** into your Applications folder.
+2. **Add TMDB** — Grab a free API key at [themoviedb.org](https://www.themoviedb.org). In Mello TV, go to **Settings → Server → Catalog** and paste it in. It saves securely to your Mac Keychain and loads all your posters, descriptions, and seasons.
+3. **Start watching** — Head to `http://localhost:8080` in your browser, or sideload the iOS IPA onto your iPhone. If you're on the same Wi-Fi, it finds the server immediately.
 
-## Quick Start
+---
 
-Download the macOS DMG from [Releases](https://github.com/ChrisRodStar/Mello-Tv/releases), open it, and drag **Mello TV** into **Applications**.
+<div align="center">
 
-Open **Settings → Server → Catalog · TMDB** and save your own [TMDB API key or API Read Access Token](https://www.themoviedb.org/settings/api). Mello TV validates it and stores it in your Mac’s Keychain. Then open the web client or iOS app and create your profile.
+### Support Mello TV
 
-A fresh installation starts empty. Profile setup fetches real titles, and your genres and favorites generate personalized recommendations. Missing title and season details are fetched as needed.
+If you're using this and want to help support the project, drop a star on the repo or buy me a coffee!
 
-The iOS companion is distributed as an **IPA** for signing or re-signing with your sideloading app. The Mac app includes the local server and web client. Windows and Linux releases are planned for later.
-
-Builds, signing credentials, notarization, and packaging stay local, outside Git tracking. Only finished app downloads belong in a release.
-
-For full setup guides, iOS companion installation, and remote Tailscale streaming → **[Documentation](https://mellowatch.com/docs)**
-
-<p align="right">(<a href="#readme-top">back to top</a>)</p>
-
-## Features
-
-* **Zero-Config Discovery** – iOS and web clients automatically find your Mello TV server on Wi-Fi via UDP broadcast and Bonjour
-* **Seamless Tailscale Roaming** – learns your server’s Tailscale address automatically so you can keep watching away from home
-* **Multi-Source Streaming** – resolves and ranks multiple movie and TV sources with automatic backup failover
-* **Clean Private Relay** – proxies playlists and segments locally so client devices never touch third-party ad networks or trackers
-* **Native iOS & Web Apps** – fluid SwiftUI iPhone app and responsive web interface with a matching cinema aesthetic
-* **Household Profiles** – personalized recommendations, watch history, Favorites, and Continue Watching shelves for everyone at home
-* **Single Lightweight Binary** – 100% Rust backend with embedded SQLite storage and zero headless browser bloat
-
-<p align="right">(<a href="#readme-top">back to top</a>)</p>
-
-## Platforms
-
-Mello TV is built as an all-in-one ecosystem inside a single repository:
-
-* **Mello TV Server (`crates/` & `macos/`)** – Runs in the macOS menu bar on Apple Silicon Macs with macOS 13 or later. Windows and Linux releases are not available yet.
-* **Mello TV for iOS (`ios/`)** – Native SwiftUI & AVKit player with instant local discovery, background stream pre-warming, and tactile controls.
-* **Mello TV Web (`web/`)** – Built-in web client served directly by your server at `http://localhost:8080`.
-
-<p align="right">(<a href="#readme-top">back to top</a>)</p>
-
-## Documentation
-
-Full setup guides, configuration options, and architecture notes are available on **[Mello Watch](https://mellowatch.com/docs)**.
-
-See the [release versioning policy](docs/VERSIONING.md) for the current alpha version and Apple bundle-number mapping.
-
-<p align="right">(<a href="#readme-top">back to top</a>)</p>
-
-## Contributing & Support
-
-Pull requests, bug reports, and provider improvements are welcome! Feel free to open an [issue](https://github.com/ChrisRodStar/Mello-Tv/issues) or start a [discussion](https://github.com/ChrisRodStar/Mello-Tv/discussions).
-
-If you enjoy using Mello TV or want to support ongoing development across Tiny Mellow projects:
+<br/>
 
 [![Buy Me A Coffee](https://img.buymeacoffee.com/button-api/?text=Buy%20me%20a%20coffee&emoji=☕&slug=chrissinclair&button_colour=FFDD00&font_colour=000000&font_family=Cookie&outline_colour=000000&coffee_colour=ffffff)](https://buymeacoffee.com/chrissinclair)
 
+<br/><br/>
 
-## License
+<sub>For personal home use. Metadata and posters provided by <a href="https://www.themoviedb.org">TMDB</a>.</sub>
 
-Designed for personal, non-commercial household use.
-
-Mello TV relays streams from third-party providers. Metadata and artwork are provided by [TMDB](https://www.themoviedb.org).
-
-<p align="right">(<a href="#readme-top">back to top</a>)</p>
+</div>
