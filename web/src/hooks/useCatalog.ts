@@ -22,8 +22,8 @@ export function useCatalog(category: Category = 'all', profile?: Profile) {
     key: string;
     data: Catalog;
   } | null>(null);
-  const [failure, setFailure] = useState<string | null>(null);
-  const error = enabled && failure === key ? 'Catalog unavailable' : '';
+  const [failure, setFailure] = useState<{ key: string; message: string } | null>(null);
+  const error = enabled && failure?.key === key ? failure.message : '';
   const [health, setHealth] = useState<ServiceHealth | null>(null);
   const [checking, setChecking] = useState(false);
   const [attempt, setAttempt] = useState(0);
@@ -48,16 +48,19 @@ export function useCatalog(category: Category = 'all', profile?: Profile) {
         const data = await loadCatalog(
           profileId,
           category,
-          AbortSignal.any([controller.signal, AbortSignal.timeout(30000)]),
+          AbortSignal.any([controller.signal, AbortSignal.timeout(120000)]),
         );
         if (controller.signal.aborted) return;
         cache.current.set(key, { expires: Date.now() + 30_000, data });
         setResult({ key, data });
         setFailure(null);
         setHealth(null);
-      } catch {
+      } catch (cause) {
         if (controller.signal.aborted) return;
-        setFailure(key);
+        setFailure({
+          key,
+          message: cause instanceof Error ? cause.message : 'Catalog unavailable. Try again.',
+        });
         setHealth(null);
         try {
           const result = await apiJSON(

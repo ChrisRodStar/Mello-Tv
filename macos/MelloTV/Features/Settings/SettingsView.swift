@@ -273,7 +273,9 @@ struct SettingsView: View {
                 }
             }
 
-            FootnoteText(text: "The local server enables streaming, metadata scraping, and companion device synchronization.")
+            CatalogCredentialSettings(onRestart: actions.restartServer)
+
+            FootnoteText(text: "The local server enables streaming, catalog updates, and companion device synchronization.")
         }
     }
 
@@ -422,6 +424,22 @@ struct SettingsView: View {
                     }
                     .buttonStyle(.plain)
                 }
+            }
+
+            VStack(spacing: 8) {
+                Link(destination: URL(string: "https://www.themoviedb.org")!) {
+                    if let url = Bundle.main.resourceURL?.appendingPathComponent("web/attribution/tmdb-logo.svg"),
+                       let logo = NSImage(contentsOf: url) {
+                        Image(nsImage: logo).resizable().scaledToFit().frame(width: 68, height: 49)
+                            .accessibilityLabel("TMDB")
+                    } else {
+                        Text("TMDB")
+                    }
+                }
+                Text("This product uses the TMDB API but is not endorsed or certified by TMDB.")
+                    .font(.caption)
+                    .foregroundStyle(MelloTVTheme.textSecondary)
+                    .multilineTextAlignment(.center)
             }
 
             FootnoteText(text: "Crafted with care by Chris Sinclair.")

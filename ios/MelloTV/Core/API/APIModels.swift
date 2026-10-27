@@ -97,10 +97,22 @@ struct CatalogResponse: Codable, Sendable {
     var featured: [MediaTitle]? = nil
 }
 
+struct CatalogGenerationStatus: Codable, Sendable {
+    enum State: String, Codable, Sendable { case pending, ready, unavailable, failed }
+    let status: State
+    let updatedAt: String?
+    let reason: String?
+    enum CodingKeys: String, CodingKey {
+        case status, reason
+        case updatedAt = "updated_at"
+    }
+}
+
 struct SearchResponse: Codable, Sendable {
     let titles: [MediaTitle]
     let page: Int
     let totalPages: Int
+    let limit: Int
 }
 
 struct TitleDetails: Codable, Sendable {

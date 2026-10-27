@@ -3,6 +3,7 @@ import { apiJSON, noContent, profilePath, combineSignal } from '../lib/api';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { profileListSchema } from '../model';
+import { waitForCatalogReady } from '../lib/catalog';
 
 import { initialProfiles, type Profile, type ProfileState } from '../lib/profiles';
 
@@ -97,8 +98,13 @@ export function useProfiles() {
     setSaving(true);
     setError('');
     try {
-      const signal = combineSignal(controller.signal, 30000);
+      const signal = combineSignal(controller.signal, 120000);
       let savedID: string | undefined;
+      const preferencesChanged = Boolean(
+        profile &&
+          JSON.stringify(current.current.profiles.find((item) => item.id === profile.id)?.preferences) !==
+            JSON.stringify(profile.preferences),
+      );
       if (method === 'DELETE')
         await apiJSON(profilePath(path.slice(1)), noContent, { method: 'DELETE', signal });
       else if (profile)
@@ -108,6 +114,8 @@ export function useProfiles() {
           current.current.profiles.find((p) => p.id === profile.id),
           signal,
         );
+      if (profile?.preferences.completed && preferencesChanged && method !== 'POST' && savedID)
+        await waitForCatalogReady(savedID, signal);
       const profiles = await readProfiles(signal);
       if (!alive.current || controller.signal.aborted) return false;
       apply(

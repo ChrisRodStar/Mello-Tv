@@ -43,17 +43,34 @@ export async function apiJSON<T>(
     signal: options.signal ?? AbortSignal.timeout(12000),
     cache: 'no-store',
   });
+  if (response.status === 202) throw new APIError(202, 'pending');
   if (!response.ok) {
     let code = 'unavailable';
     try {
-      const value = z.object({ error: z.string() }).parse(await response.json());
+      const payload = await response.json();
+      const value = z.object({ error: z.string() }).parse(payload);
       code = value.error;
     } catch {
       /* fixed public failure */
     }
     throw new APIError(response.status, code);
   }
-  return schema.parse(response.status === 204 ? undefined : await response.json());
+  if (response.status === 204) return schema.parse(undefined);
+  const payload: unknown = await response.json();
+  if (payload && typeof payload === 'object' && 'status' in payload) {
+    const state = (payload as { status?: unknown }).status;
+    if (
+      state === 'pending' &&
+      'key' in payload &&
+      !('records' in payload) &&
+      !('data' in payload)
+    ) throw new APIError(202, 'pending');
+    if (state === 'unavailable' || state === 'failed') {
+      const reason = (payload as { reason?: unknown }).reason;
+      throw new Error(typeof reason === 'string' ? reason : 'Catalog data could not be loaded. Try again.');
+    }
+  }
+  return schema.parse(payload);
 }
 export const noContent = z.undefined();
 export function profilePath(id: string) {
@@ -64,6 +81,9 @@ export function requestID() {
 }
 export function isMissing(error: unknown) {
   return error instanceof APIError && error.status === 404;
+}
+export function isPending(error: unknown) {
+  return error instanceof APIError && error.status === 202;
 }
 export function combineSignal(signal: AbortSignal, milliseconds = 12000) {
   return AbortSignal.any([signal, AbortSignal.timeout(milliseconds)]);

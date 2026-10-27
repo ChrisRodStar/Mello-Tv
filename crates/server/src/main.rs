@@ -3,6 +3,7 @@ use std::{path::PathBuf, process::ExitCode, sync::Arc};
 use stream_core::ports::MediaEngine;
 use stream_media::DiscoveryCoordinator;
 use stream_server::{
+    catalog_service::CatalogWorker,
     routes,
     state::{AppState, NoopMediaEngine},
 };
@@ -244,7 +245,6 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     let catalog_db = config.db_path.join("catalog.db");
     let catalog = CatalogStore::open(catalog_db).await?;
-    stream_server::seed::seed_if_empty(&catalog).await?;
 
     let key = if let Ok(bytes) = tokio::fs::read(config.db_path.join("api-encryption")).await {
         if bytes.len() == 32 {
@@ -276,7 +276,16 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
 
-    let state = AppState::new(Arc::new(catalog), Arc::new(accounts), media, household_id)
+    let catalog = Arc::new(catalog);
+    let catalog_worker = match CatalogWorker::from_env(catalog.clone()) {
+        Ok(worker) => Some(Arc::new(worker)),
+        Err(error) => {
+            tracing::warn!(error = %error, "catalog worker unavailable");
+            None
+        }
+    };
+    let state = AppState::new(catalog, Arc::new(accounts), media, household_id)
+        .with_catalog_worker(catalog_worker)
         .with_port(config.port);
 
     stream_server::discovery::spawn_discovery_services(

@@ -179,12 +179,14 @@ async fn title_and_cross_ids_parity() -> TestResult {
     assert_eq!(body["data"]["imdb_id"], "tt0137523");
     assert_eq!(body["data"]["mal_id"], 123);
 
-    // Missing title returns 404
+    // A missing title with no profile is explicitly unavailable and does not fetch metadata.
     let res = client
         .get(format!("{base}/api/v1/titles/movie/999999"))
         .send()
         .await?;
-    assert_eq!(res.status(), reqwest::StatusCode::NOT_FOUND);
+    assert_eq!(res.status(), reqwest::StatusCode::OK);
+    let missing: Value = res.json().await?;
+    assert_eq!(missing["status"], "unavailable");
 
     Ok(())
 }
@@ -249,12 +251,14 @@ async fn season_and_episode_coordinates_parity() -> TestResult {
     assert_eq!(body["data"]["show_id"], 100);
     assert_eq!(body["data"]["episode"], 2);
 
-    // Non-existent episode returns 404
+    // A missing episode is explicit when no profile exists to authorize catalog generation.
     let res = client
         .get(format!("{base}/api/v1/tv/100/seasons/1/episodes/99"))
         .send()
         .await?;
-    assert_eq!(res.status(), reqwest::StatusCode::NOT_FOUND);
+    assert_eq!(res.status(), reqwest::StatusCode::OK);
+    let body: Value = res.json().await?;
+    assert_eq!(body["status"], "unavailable");
 
     Ok(())
 }

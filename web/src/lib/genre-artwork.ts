@@ -14,7 +14,11 @@ export function genreArtworkCandidates(shelves: Shelf[]) {
   return Object.fromEntries(
     preferenceGenres.map((genre) => {
       const unique = new Map<string, Candidate>();
-      for (const shelf of shelves.filter((shelf) => shelf.id === `onboarding-${genre.id}`)) {
+      for (const shelf of shelves.filter((shelf) =>
+        shelf.id === `onboarding-${genre.id}` ||
+        shelf.id === `favorites-movie-${genre.id}` ||
+        shelf.id === `favorites-tv-${genre.id}`,
+      )) {
         for (const title of shelf.titles) {
           for (const value of [title.backdrop, title.poster]) {
             const imageUrl = publicArtwork(value);

@@ -417,6 +417,7 @@ final class SearchStore {
     private(set) var errorMessage: String?
     private(set) var currentPage = 1
     private(set) var totalPages = 1
+    private var pageSize = 20
 
     var hasMore: Bool {
         currentPage < totalPages
@@ -459,6 +460,7 @@ final class SearchStore {
         hasSearched = false
         currentPage = 1
         totalPages = 1
+        pageSize = 20
     }
 
     func search(_ query: String) async {
@@ -468,6 +470,7 @@ final class SearchStore {
         isLoading = true
         errorMessage = nil
         currentPage = 1
+        pageSize = 20
 
         do {
             async let searchTask = api.search(query, page: 1)
@@ -480,6 +483,7 @@ final class SearchStore {
             self.titles = rankedTitles
             self.currentPage = searchResponse.page
             self.totalPages = searchResponse.totalPages
+            self.pageSize = searchResponse.limit
             self.cachedCatalogSections = catalogSections
             self.shelves = assembleShelves(for: query, searchTitles: rankedTitles, catalogSections: catalogSections)
             self.hasSearched = true
@@ -500,7 +504,7 @@ final class SearchStore {
         let nextPage = currentPage + 1
 
         do {
-            let response = try await api.search(query, page: nextPage)
+            let response = try await api.search(query, page: nextPage, pageSize: pageSize)
             guard activeRequestID == requestID, activeQuery == query, !Task.isCancelled else { return }
 
             var existingIDs = Set(titles.map(\.id))
@@ -511,6 +515,7 @@ final class SearchStore {
             self.titles = rankedTitles
             self.currentPage = response.page
             self.totalPages = response.totalPages
+            self.pageSize = response.limit
             self.shelves = assembleShelves(for: query, searchTitles: rankedTitles, catalogSections: self.cachedCatalogSections)
             self.isLoadingMore = false
         } catch {

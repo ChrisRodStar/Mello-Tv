@@ -567,3 +567,57 @@ async fn invalid_cross_ids_writes_are_rejected() -> TestResult {
     store.close().await?;
     Ok(())
 }
+
+#[tokio::test]
+async fn deleting_profile_catalog_records_advances_revision_and_rolls_back_on_overflow()
+-> TestResult {
+    let store = CatalogStore::from_database(Database::in_memory(64).await?).await?;
+    let instant = now()?;
+    store
+        .put(
+            write("recommendations", "profile-a", json!({"sections":[]})),
+            instant,
+        )
+        .await?;
+    store
+        .put(
+            write("recommendations", "profile-b", json!({"sections":[]})),
+            instant,
+        )
+        .await?;
+    let prior = store.export_raw(instant).await?.revision;
+    store.delete("recommendations", "profile-a").await?;
+    assert!(matches!(
+        store.get("recommendations", "profile-a", instant).await,
+        Err(StorageError::NotFound)
+    ));
+    assert!(
+        store
+            .get("recommendations", "profile-b", instant)
+            .await
+            .is_ok()
+    );
+    let deleted = store.export_raw(instant).await?.revision;
+    assert_eq!(deleted, prior + 1);
+    store.delete("recommendations", "profile-a").await?;
+    assert_eq!(store.export_raw(instant).await?.revision, deleted);
+    store
+        .database()
+        .call(|connection| {
+            connection.execute("UPDATE revision SET value=?1", [i64::MAX])?;
+            Ok(())
+        })
+        .await?;
+    assert!(matches!(
+        store.delete("recommendations", "profile-b").await,
+        Err(StorageError::Capacity)
+    ));
+    assert!(
+        store
+            .get("recommendations", "profile-b", instant)
+            .await
+            .is_ok()
+    );
+    store.close().await?;
+    Ok(())
+}

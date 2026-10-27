@@ -52,7 +52,9 @@ git clone https://github.com/ChrisRodStar/stream.git && cd stream
 cargo run -p stream-server    # http://localhost:8080
 ```
 
-Native macOS releases are distributed as a DMG containing the app and an Applications shortcut. Build, signing, and packaging commands are maintained locally outside Git tracking.
+Native macOS releases are distributed as a DMG containing the app and an Applications shortcut. After installation, open **Settings → Server → Catalog · TMDB**, save your own TMDB API key or API Read Access Token, then create a profile in the web or iOS client. The Mac validates and stores the credential in Keychain. Standalone servers read `TMDB_API_KEY` or `TMDB_READ_ACCESS_TOKEN` from their private runtime environment; do not commit credentials.
+
+A fresh installation starts empty. Profile creation fetches real onboarding choices, and completed genre/favorite selections generate personalized recommendations. Missing metadata is fetched on demand; no starter titles are bundled. Build, signing, and packaging commands are maintained locally outside Git tracking.
 
 For full setup guides, iOS companion installation, and remote Tailscale streaming → **[Documentation](https://mellowatch.com/docs)**
 

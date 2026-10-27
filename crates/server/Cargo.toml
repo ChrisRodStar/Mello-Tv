@@ -22,10 +22,10 @@ async-trait.workspace = true
 tokio-util.workspace = true
 socket2 = { workspace = true }
 getrandom.workspace = true
+reqwest = { workspace = true }
 sha2.workspace = true
 
 [dev-dependencies]
-reqwest = { workspace = true }
 tempfile = { workspace = true }
 
 [lints]

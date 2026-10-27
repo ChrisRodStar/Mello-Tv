@@ -233,6 +233,7 @@ final class ProfileStore {
         var updated = current
         updated.preferences = preferences
         let newProfiles = try await api.updateProfile(updated)
+        try await api.onboardingGenerate(profileID: current.id)
         self.profiles = newProfiles
         self.activeProfile = updated
         showOnboarding = false
