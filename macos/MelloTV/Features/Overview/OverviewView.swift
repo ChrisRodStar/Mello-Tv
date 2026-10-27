@@ -9,7 +9,7 @@ struct OverviewView: View {
 
     private var online: Bool { process.isRunning && model.isReachable }
     private var providers: [ServerSnapshot.ProviderStatus] { model.snapshot?.media.providers ?? [] }
-    private var libraryReady: Bool { online && model.snapshot?.catalogStatus == "ok" && model.snapshot?.catalogSnapshot == "retained" }
+    private var libraryReady: Bool { online && model.snapshot?.catalogStatus == "ready" && model.snapshot?.catalogSnapshot == "retained" }
     private var mediaReady: Bool { online && model.snapshot?.media.configured == true }
     private var attention: Int { providers.filter(\.needsAttention).count }
     private var ready: Bool { online && libraryReady && mediaReady }
