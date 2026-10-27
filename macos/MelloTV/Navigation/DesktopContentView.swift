@@ -18,7 +18,7 @@ struct DesktopContentView: View {
             case .network:
                 NetworkView(port: port, endpoints: process.isRunning && model.isReachable ? model.snapshot?.endpoints ?? [] : [])
             case .settings:
-                SettingsView(preferences: actions.preferences, process: process, snapshot: model.snapshot, actions: actions)
+                SettingsView(preferences: actions.preferences, updater: actions.updater, process: process, snapshot: model.snapshot, actions: actions)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

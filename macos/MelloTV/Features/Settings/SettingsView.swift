@@ -20,6 +20,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
 
 struct SettingsView: View {
     @ObservedObject var preferences: AppPreferences
+    @ObservedObject var updater: AppUpdateService
     @ObservedObject var process: ServerProcessState
     let snapshot: ServerSnapshot?
     let actions: AppActions
@@ -284,6 +285,52 @@ struct SettingsView: View {
         VStack(spacing: 16) {
             SettingsCard {
                 SettingsItemRow(
+                    icon: "arrow.triangle.2.circlepath",
+                    iconColor: MelloTVTheme.accent,
+                    title: "Software Updates",
+                    subtitle: updater.statusMessage
+                ) {
+                    Button("Check for Updates…", action: updater.checkForUpdates)
+                        .disabled(!updater.canCheckForUpdates)
+                        .controlSize(.regular)
+                }
+
+                SettingsDivider()
+
+                SettingsItemRow(
+                    icon: "clock",
+                    iconColor: MelloTVTheme.muted,
+                    title: "Check Automatically",
+                    subtitle: "Look for new versions in the background"
+                ) {
+                    Toggle("Check automatically", isOn: Binding(
+                        get: { updater.automaticallyChecksForUpdates },
+                        set: { updater.setAutomaticallyChecksForUpdates($0) }
+                    ))
+                    .toggleStyle(.switch)
+                    .labelsHidden()
+                }
+
+                SettingsDivider()
+
+                SettingsItemRow(
+                    icon: "arrow.down.circle",
+                    iconColor: MelloTVTheme.muted,
+                    title: "Update Automatically",
+                    subtitle: "Download and install when streaming is idle"
+                ) {
+                    Toggle("Update automatically", isOn: Binding(
+                        get: { updater.automaticallyDownloadsUpdates },
+                        set: { updater.setAutomaticallyDownloadsUpdates($0) }
+                    ))
+                    .toggleStyle(.switch)
+                    .labelsHidden()
+                    .disabled(!updater.automaticallyChecksForUpdates)
+                }
+            }
+
+            SettingsCard {
+                SettingsItemRow(
                     icon: "sparkles",
                     iconColor: Color(red: 0.85, green: 0.35, blue: 0.8),
                     title: "Mello TV Core",
@@ -325,7 +372,7 @@ struct SettingsView: View {
                 }
             }
 
-            FootnoteText(text: "Provider extensions and server updates are packaged and distributed with Mello TV releases.")
+            FootnoteText(text: "Updates include the Mac app, server, and bundled providers. Installation waits until streaming is idle, then restarts Mello TV. Your profiles and library are kept.")
         }
     }
 

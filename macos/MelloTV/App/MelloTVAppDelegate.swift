@@ -1,11 +1,14 @@
 import Cocoa
+import Sparkle
 
 @MainActor
 final class MelloTVAppDelegate: NSObject, NSApplicationDelegate {
     private let server = ServerController(port: 8080)
     private let preferences = AppPreferences()
+    private lazy var updater = AppUpdateService(port: server.port, isServerRunning: { [weak self] in self?.server.isRunning == true })
     private lazy var actions: AppActions = AppActions(
         preferences: preferences,
+        updater: updater,
         openSettings: { [weak self] in self?.mainWindow.present(destination: .settings) },
         openDashboard: { [weak self] in self?.mainWindow.present() },
         toggleServer: { [weak self] in self?.server.toggle() },
@@ -31,12 +34,17 @@ final class MelloTVAppDelegate: NSObject, NSApplicationDelegate {
             self?.mainWindow.serverStateChanged()
         }
         server.start()
+        updater.start()
         presentMainWindow()
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         if !flag { presentMainWindow() }
         return true
+    }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        updater.applicationShouldTerminate(sender)
     }
 
     func applicationWillTerminate(_ notification: Notification) { stopServer(waitTimeout: 3) }
@@ -65,7 +73,6 @@ final class MelloTVAppDelegate: NSObject, NSApplicationDelegate {
     private func openWebsite() { NSWorkspace.shared.open(AppLinks.clientURL(port: server.port)) }
 
     @objc private func quit() {
-        server.stop(waitTimeout: 2)
         NSApp.terminate(nil)
     }
 
@@ -89,6 +96,9 @@ final class MelloTVAppDelegate: NSObject, NSApplicationDelegate {
         let appItem = NSMenuItem()
         let appMenu = NSMenu(title: "Mello TV")
         add("About Mello TV", action: #selector(showAbout), key: "", to: appMenu)
+        let updateItem = NSMenuItem(title: "Check for Updates…", action: #selector(SPUStandardUpdaterController.checkForUpdates(_:)), keyEquivalent: "")
+        updateItem.target = updater.controller
+        appMenu.addItem(updateItem)
         appMenu.addItem(.separator())
         add("Settings…", action: #selector(showSettings), key: ",", to: appMenu)
         appMenu.addItem(.separator())
