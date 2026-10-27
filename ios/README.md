@@ -1,6 +1,6 @@
 # Mello TV for iOS 📱
 
-Native SwiftUI and AVKit client for **Mello TV** (`v0.1.0-alpha.1`), featuring zero-config local server discovery, seamless Tailscale roaming, background stream pre-warming, and tactile cinema playback controls.
+Native SwiftUI and AVKit client for **Mello TV** (`v0.1.0-alpha.2`), featuring zero-config local server discovery, seamless Tailscale roaming, background stream pre-warming, and tactile cinema playback controls.
 
 ---
 

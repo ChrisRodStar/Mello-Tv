@@ -4,7 +4,7 @@
 
 <img src="docs/assets/mello-tv-ios.png" alt="Mello TV app icon" width="128">
 
-[![Version](https://img.shields.io/badge/version-v0.1.0--alpha.1-e50914?style=for-the-badge)](https://github.com/ChrisRodStar/Mello-Tv/releases)
+[![Version](https://img.shields.io/badge/version-v0.1.0--alpha.2-e50914?style=for-the-badge)](https://github.com/ChrisRodStar/Mello-Tv/releases)
 [![Contributors](https://img.shields.io/github/contributors/ChrisRodStar/Mello-Tv?style=for-the-badge&color=green)](https://github.com/ChrisRodStar/Mello-Tv/graphs/contributors)
 [![Stars](https://img.shields.io/github/stars/ChrisRodStar/Mello-Tv?style=for-the-badge&color=gold)](https://github.com/ChrisRodStar/Mello-Tv/stargazers)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20iOS%20%7C%20Web-blue?style=for-the-badge)](#platforms)
@@ -12,7 +12,7 @@
 
 # Mello TV
 
-Current release: **0.1.0-alpha.1** (pre-release).
+Current release: **0.1.0-alpha.2** (pre-release).
 
 ### _Support Mello TV’s development by starring this repository!_
 

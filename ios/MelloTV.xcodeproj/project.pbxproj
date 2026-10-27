@@ -500,7 +500,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = C9MTFET49E;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = MelloTV/Resources/Info.plist;
@@ -509,7 +509,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 0.1.0;
-				MELLO_RELEASE_VERSION = "0.1.0-alpha.1";
+				MELLO_RELEASE_VERSION = "0.1.0-alpha.2";
 				PRODUCT_BUNDLE_IDENTIFIER = com.tinymellow.mellotv;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) DEBUG";
@@ -523,7 +523,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = C9MTFET49E;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = MelloTV/Resources/Info.plist;
@@ -532,7 +532,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 0.1.0;
-				MELLO_RELEASE_VERSION = "0.1.0-alpha.1";
+				MELLO_RELEASE_VERSION = "0.1.0-alpha.2";
 				PRODUCT_BUNDLE_IDENTIFIER = com.tinymellow.mellotv;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
