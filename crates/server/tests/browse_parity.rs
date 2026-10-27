@@ -64,6 +64,12 @@ fn sample_season(show_id: i64, season_num: i32) -> Value {
 }
 
 async fn spawn_test_server() -> Result<(String, Arc<CatalogStore>), Box<dyn std::error::Error>> {
+    let (base, catalog, _) = spawn_test_server_with_relay().await?;
+    Ok((base, catalog))
+}
+
+async fn spawn_test_server_with_relay()
+-> Result<(String, Arc<CatalogStore>, Arc<stream_media::MediaRelay>), Box<dyn std::error::Error>> {
     let catalog_db = Database::in_memory(64).await?;
     let catalog = Arc::new(CatalogStore::from_database(catalog_db).await?);
 
@@ -75,6 +81,7 @@ async fn spawn_test_server() -> Result<(String, Arc<CatalogStore>), Box<dyn std:
     let media = Arc::new(NoopMediaEngine);
     let state = AppState::new(catalog.clone(), accounts, media, household_id);
 
+    let relay = state.relay.clone();
     let router = routes::build_router(state);
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
@@ -85,7 +92,7 @@ async fn spawn_test_server() -> Result<(String, Arc<CatalogStore>), Box<dyn std:
         let _ = axum::serve(listener, router).await;
     });
 
-    Ok((base_url, catalog))
+    Ok((base_url, catalog, relay))
 }
 
 #[tokio::test]
@@ -397,5 +404,28 @@ async fn snapshot_export_and_artwork_redirect_parity() -> TestResult {
         .expect("cache-control present");
     assert_eq!(cache_control.to_str()?, "private, max-age=86400");
 
+    Ok(())
+}
+
+#[tokio::test]
+async fn update_readiness_follows_playback_activity_without_caching() -> TestResult {
+    let (base, _, relay) = spawn_test_server_with_relay().await?;
+    let response = reqwest::get(format!("{base}/api/v1/update-readiness")).await?;
+    assert_eq!(response.status(), reqwest::StatusCode::OK);
+    assert_eq!(response.headers()["cache-control"], "no-store");
+    let body: Value = response.json().await?;
+    assert_eq!(body, json!({"safe_to_restart": true, "active_streams": 0}));
+    relay.note_playback_activity("playing");
+    let body: Value = reqwest::get(format!("{base}/api/v1/update-readiness"))
+        .await?
+        .json()
+        .await?;
+    assert_eq!(body, json!({"safe_to_restart": false, "active_streams": 1}));
+    relay.revoke_session("playing");
+    let body: Value = reqwest::get(format!("{base}/api/v1/update-readiness"))
+        .await?
+        .json()
+        .await?;
+    assert_eq!(body, json!({"safe_to_restart": true, "active_streams": 0}));
     Ok(())
 }

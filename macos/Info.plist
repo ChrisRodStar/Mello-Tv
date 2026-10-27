@@ -28,6 +28,16 @@
     <string>0.1.0-alpha.2</string>
     <key>LSMinimumSystemVersion</key>
     <string>13.0</string>
+    <key>SUFeedURL</key>
+    <string>https://raw.githubusercontent.com/ChrisRodStar/Mello-Tv/main/macos/appcast.xml</string>
+    <key>SUPublicEDKey</key>
+    <string>5VLmlt9p90NdermnFaWXrbhW5ErER0f+o+wbMg55uy0=</string>
+    <key>SUEnableAutomaticChecks</key>
+    <true/>
+    <key>SUAutomaticallyUpdate</key>
+    <true/>
+    <key>SUSendProfileInfo</key>
+    <false/>
     <key>NSHighResolutionCapable</key>
     <true/>
     <key>NSHumanReadableCopyright</key>

@@ -1,5 +1,6 @@
 struct AppActions {
     let preferences: AppPreferences
+    let updater: AppUpdateService
     let openSettings: () -> Void
     let openDashboard: () -> Void
     let toggleServer: () -> Void
