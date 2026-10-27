@@ -42,7 +42,7 @@ For a server launched directly from a terminal or service manager, supply `TMDB_
 
 ## Software updates
 
-Mello TV uses Sparkle 2.10.1 for signed whole-app updates, including the bundled server, web player, and providers. **Check for Updates…** is available in Settings → Updates and the Mello TV menu. Background checking and automatic installation can be disabled independently in Settings. Installation waits for streaming to become idle; an unavailable readiness check postpones installation. Relaunching restarts the server. Profiles, watch history, metadata, and Keychain credentials stay outside the app bundle.
+Mello TV uses Sparkle 2.10.1 for signed whole-app updates, including the bundled server, web player, and providers. **Check for Updates…** is available in Settings → Updates and the Mello TV menu. Background checking and automatic installation can be disabled independently in Settings. Installation waits for streaming to become idle; in-flight media delivery and recent playback/progress activity defer it. The server retains a three-minute grace period between requests, so an update may wait after viewing stops. An unavailable readiness check postpones installation. Relaunching restarts the server. Profiles, watch history, metadata, and Keychain credentials stay outside the app bundle.
 
 Existing releases without Sparkle need one manual DMG installation to gain in-app updates. Updates must preserve compatibility with existing companion clients.
 
