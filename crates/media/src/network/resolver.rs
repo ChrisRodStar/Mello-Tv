@@ -42,19 +42,19 @@ async fn resolve_cached(host: &str) -> Result<Vec<SocketAddr>, TransportError> {
     let now = Instant::now();
     let cached = {
         let cache = dns_cache().read().unwrap_or_else(|e| e.into_inner());
-        cache.get(host).filter(|e| e.expires_at > now).map(|e| e.addresses.clone())
+        cache
+            .get(host)
+            .filter(|e| e.expires_at > now)
+            .map(|e| e.addresses.clone())
     };
     if let Some(addresses) = cached {
         return Ok(addresses);
     }
 
-    let lookup = tokio::time::timeout(
-        Duration::from_secs(5),
-        tokio::net::lookup_host((host, 0)),
-    )
-    .await
-    .map_err(|_| TransportError::Dns)?
-    .map_err(|_| TransportError::Dns)?;
+    let lookup = tokio::time::timeout(Duration::from_secs(5), tokio::net::lookup_host((host, 0)))
+        .await
+        .map_err(|_| TransportError::Dns)?
+        .map_err(|_| TransportError::Dns)?;
 
     let mut addresses = Vec::new();
     for address in lookup {

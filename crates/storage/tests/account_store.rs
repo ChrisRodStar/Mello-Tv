@@ -832,7 +832,8 @@ async fn playback_allocation_rejects_nonpositive_or_inverted_timestamps() -> Tes
     ));
 
     let mut go_zero = allocation("go_zero")?;
-    go_zero.created_at = DateTime::from_timestamp(-62_135_596_800, 0).ok_or("valid go-zero timestamp")?;
+    go_zero.created_at =
+        DateTime::from_timestamp(-62_135_596_800, 0).ok_or("valid go-zero timestamp")?;
     assert!(matches!(
         store.create_playback(&owner, "first", go_zero).await,
         Err(StorageError::InvalidInput(_))

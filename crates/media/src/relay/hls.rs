@@ -24,7 +24,8 @@ impl HlsManifestRewriter {
     where
         F: FnMut(String) -> String,
     {
-        let raw_text = std::str::from_utf8(manifest_bytes).map_err(|_| HlsRewriteError::InvalidUtf8)?;
+        let raw_text =
+            std::str::from_utf8(manifest_bytes).map_err(|_| HlsRewriteError::InvalidUtf8)?;
         let text = raw_text.strip_prefix('\u{feff}').unwrap_or(raw_text).trim();
 
         let mut lines = text.lines();
@@ -54,7 +55,8 @@ impl HlsManifestRewriter {
                 out.push_str(token);
                 out.push('\n');
             } else if line.contains("URI=\"") {
-                let rewritten = rewrite_tag_uri(line, base_url, session_id, token, &mut register_uri)?;
+                let rewritten =
+                    rewrite_tag_uri(line, base_url, session_id, token, &mut register_uri)?;
                 out.push_str(&rewritten);
                 out.push('\n');
             } else {

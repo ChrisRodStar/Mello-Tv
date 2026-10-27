@@ -10,7 +10,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let db_path = "/tmp/mello_api.sqlite";
     let _ = fs::remove_file(db_path);
     // Copy locally so we have a clean consistent snapshot
-    fs::copy("/Volumes/Pi/stream-tv/state/application/api.sqlite", db_path)?;
+    fs::copy(
+        "/Volumes/Pi/stream-tv/state/application/api.sqlite",
+        db_path,
+    )?;
 
     println!("Testing AccountStore::open with key on Mello database...");
     let accounts = AccountStore::open(db_path, key).await?;
@@ -25,7 +28,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!(" - Profile ID: {}, Name: {}", p.id, p.name);
         let hist = accounts.history(&household_id, &p.id, 100).await?;
         println!("   * {} history items", hist.len());
-        let favs = accounts.list_titles(&household_id, &p.id, stream_storage::accounts::ListKind::Favorites).await?;
+        let favs = accounts
+            .list_titles(
+                &household_id,
+                &p.id,
+                stream_storage::accounts::ListKind::Favorites,
+            )
+            .await?;
         println!("   * {} favorites", favs.len());
     }
 

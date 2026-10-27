@@ -1,13 +1,18 @@
 //! VidCore protocol discovery and source normalization.
 
+use crate::{
+    AdapterError, ProviderHost,
+    common::{self, batch, fetch, get, hash_id, header, post},
+    destination::public_url,
+};
+use regex::Regex;
+use serde::Deserialize;
+use serde_json::Value;
 use std::{
     collections::{BTreeMap, BTreeSet},
     sync::{OnceLock, RwLock},
     time::{Duration, Instant},
 };
-use regex::Regex;
-use serde::Deserialize;
-use serde_json::Value;
 use stream_core::{
     domain::MediaType,
     providers::{
@@ -16,11 +21,6 @@ use stream_core::{
     },
 };
 use stream_provider_codecs::vidcore::Protocol;
-use crate::{
-    AdapterError, ProviderHost,
-    common::{self, batch, fetch, get, hash_id, header, post},
-    destination::public_url,
-};
 
 const ORIGIN: &str = "https://vidcore.io";
 
@@ -131,7 +131,10 @@ pub fn resolve(lookup: &Lookup, host: &dyn ProviderHost) -> Result<AdapterResult
             };
             if let Ok(proto) = Protocol::from_source(source) {
                 if let Ok(mut cache) = protocol_cache().write() {
-                    cache.insert(chunk_url, (proto.clone(), now + Duration::from_secs(3600 * 24)));
+                    cache.insert(
+                        chunk_url,
+                        (proto.clone(), now + Duration::from_secs(3600 * 24)),
+                    );
                 }
                 if let Ok(mut guard) = latest_protocol().write() {
                     *guard = Some((proto.clone(), now + Duration::from_secs(3600 * 24)));
@@ -149,12 +152,18 @@ pub fn resolve(lookup: &Lookup, host: &dyn ProviderHost) -> Result<AdapterResult
         .challenge(&token, timestamp, &nonce)
         .map_err(|_| AdapterError::Protocol("VidCore challenge"))?;
 
-    let challenge_url = format!("{ORIGIN}{}/{}/{}", protocol.base(), protocol.challenge_action(), challenge_str);
+    let challenge_url = format!(
+        "{ORIGIN}{}/{}/{}",
+        protocol.base(),
+        protocol.challenge_action(),
+        challenge_str
+    );
     let mut req = post(challenge_url, &embed_url, 64 * 1024);
     req.timeout_ms = 2_000;
     req.headers.push(header("Origin", ORIGIN));
     if !protocol.csrf_token().is_empty() {
-        req.headers.push(header("X-Csrf-Token", protocol.csrf_token()));
+        req.headers
+            .push(header("X-Csrf-Token", protocol.csrf_token()));
     }
     let challenge_resp = fetch(host, req)?;
 
@@ -162,12 +171,18 @@ pub fn resolve(lookup: &Lookup, host: &dyn ProviderHost) -> Result<AdapterResult
         .ticket(&challenge_resp.body)
         .map_err(|_| AdapterError::Protocol("VidCore ticket"))?;
 
-    let list_url = format!("{ORIGIN}{}/{}/{}", protocol.base(), protocol.list_action(), ticket_str);
+    let list_url = format!(
+        "{ORIGIN}{}/{}/{}",
+        protocol.base(),
+        protocol.list_action(),
+        ticket_str
+    );
     let mut req = post(list_url, &embed_url, 64 * 1024);
     req.timeout_ms = 2_000;
     req.headers.push(header("Origin", ORIGIN));
     if !protocol.csrf_token().is_empty() {
-        req.headers.push(header("X-Csrf-Token", protocol.csrf_token()));
+        req.headers
+            .push(header("X-Csrf-Token", protocol.csrf_token()));
     }
     let list_resp = fetch(host, req)?;
 
@@ -175,7 +190,8 @@ pub fn resolve(lookup: &Lookup, host: &dyn ProviderHost) -> Result<AdapterResult
         .decode_response(&list_resp.body)
         .map_err(|_| AdapterError::Protocol("VidCore list decode"))?;
 
-    let servers: Vec<ServerRecord> = common::json(&decrypted_list, 64 * 1024, "VidCore server list")?;
+    let servers: Vec<ServerRecord> =
+        common::json(&decrypted_list, 64 * 1024, "VidCore server list")?;
     if servers.is_empty() {
         return Err(AdapterError::Unavailable("VidCore servers"));
     }
@@ -185,16 +201,26 @@ pub fn resolve(lookup: &Lookup, host: &dyn ProviderHost) -> Result<AdapterResult
     let mut seen_servers = BTreeSet::new();
 
     for server in servers.into_iter().take(8) {
-        if server.name.is_empty() || server.name.len() > 128 || seen_servers.contains(&server.name) || server.data.is_empty() {
+        if server.name.is_empty()
+            || server.name.len() > 128
+            || seen_servers.contains(&server.name)
+            || server.data.is_empty()
+        {
             continue;
         }
         seen_servers.insert(server.name.clone());
-        let unlock_url = format!("{ORIGIN}{}/{}/{}", protocol.base(), protocol.unlock_action(), server.data);
+        let unlock_url = format!(
+            "{ORIGIN}{}/{}/{}",
+            protocol.base(),
+            protocol.unlock_action(),
+            server.data
+        );
         let mut req = post(unlock_url, &embed_url, 256 * 1024);
         req.timeout_ms = 1_000;
         req.headers.push(header("Origin", ORIGIN));
         if !protocol.csrf_token().is_empty() {
-            req.headers.push(header("X-Csrf-Token", protocol.csrf_token()));
+            req.headers
+                .push(header("X-Csrf-Token", protocol.csrf_token()));
         }
         unlock_requests.push(req);
         active_servers.push(server.name);
@@ -221,17 +247,21 @@ pub fn resolve(lookup: &Lookup, host: &dyn ProviderHost) -> Result<AdapterResult
         let decrypted = match protocol.decode_response(&resp.body) {
             Ok(d) => d,
             Err(_) => {
-                issues.push(common::issue(&AdapterError::Protocol("VidCore decode source"), "unlock"));
+                issues.push(common::issue(
+                    &AdapterError::Protocol("VidCore decode source"),
+                    "unlock",
+                ));
                 continue;
             }
         };
-        let record: SourceRecord = match common::json(&decrypted, 256 * 1024, "VidCore source record") {
-            Ok(r) => r,
-            Err(e) => {
-                issues.push(common::issue(&e, "unlock"));
-                continue;
-            }
-        };
+        let record: SourceRecord =
+            match common::json(&decrypted, 256 * 1024, "VidCore source record") {
+                Ok(r) => r,
+                Err(e) => {
+                    issues.push(common::issue(&e, "unlock"));
+                    continue;
+                }
+            };
         if record.url.is_empty() || seen_urls.contains(&record.url) {
             continue;
         }
@@ -242,14 +272,20 @@ pub fn resolve(lookup: &Lookup, host: &dyn ProviderHost) -> Result<AdapterResult
                 _ => false,
             };
             if !matches {
-                issues.push(common::issue(&AdapterError::Protocol("VidCore tmdb mismatch"), "sources"));
+                issues.push(common::issue(
+                    &AdapterError::Protocol("VidCore tmdb mismatch"),
+                    "sources",
+                ));
                 continue;
             }
         }
         let stream_url = match public_url(&record.url) {
             Ok(url) => url,
             Err(_) => {
-                issues.push(common::issue(&AdapterError::Protocol("VidCore source destination"), "sources"));
+                issues.push(common::issue(
+                    &AdapterError::Protocol("VidCore source destination"),
+                    "sources",
+                ));
                 continue;
             }
         };
@@ -269,7 +305,11 @@ pub fn resolve(lookup: &Lookup, host: &dyn ProviderHost) -> Result<AdapterResult
         let no_ref = record.no_referrer == Some(true);
         let public_resources = Some(PublicResourceContext {
             origin: ORIGIN.into(),
-            referer: if no_ref { String::new() } else { format!("{ORIGIN}/") },
+            referer: if no_ref {
+                String::new()
+            } else {
+                format!("{ORIGIN}/")
+            },
         });
 
         let mut headers = record.headers;
@@ -346,7 +386,9 @@ pub fn resolve(lookup: &Lookup, host: &dyn ProviderHost) -> Result<AdapterResult
     let mut master_probe_indices = Vec::new();
     let mut master_probe_requests = Vec::new();
     for (idx, candidate) in candidates.iter().enumerate() {
-        if (candidate.server == "Supreme" || candidate.server == "Prime") && candidate.url.contains("/sd/") {
+        if (candidate.server == "Supreme" || candidate.server == "Prime")
+            && candidate.url.contains("/sd/")
+        {
             let parsed = url::Url::parse(&candidate.url).ok().and_then(|mut u| {
                 let pos = u.path().find("/sd/")?;
                 let new_path = format!("{}/master.m3u8", &u.path()[..pos]);
@@ -365,8 +407,10 @@ pub fn resolve(lookup: &Lookup, host: &dyn ProviderHost) -> Result<AdapterResult
     if !master_probe_requests.is_empty() {
         let probe_res = batch(host, master_probe_requests);
         if let Ok(probe_responses) = probe_res {
-            for ((idx, new_url), resp_res) in master_probe_indices.into_iter().zip(probe_responses) {
-                let is_valid_master = resp_res.is_ok_and(|resp| resp.status == 200 && resp.body.starts_with(b"#EXTM3U"));
+            for ((idx, new_url), resp_res) in master_probe_indices.into_iter().zip(probe_responses)
+            {
+                let is_valid_master = resp_res
+                    .is_ok_and(|resp| resp.status == 200 && resp.body.starts_with(b"#EXTM3U"));
                 if is_valid_master {
                     candidates[idx].url = new_url;
                     candidates[idx].format = StreamFormat::Hls;
@@ -407,7 +451,8 @@ fn parse_embed(body: &[u8]) -> Result<(String, Vec<String>), AdapterError> {
         .as_ref()
         .map_err(|_| AdapterError::Protocol("regex init"))?;
 
-    let html = std::str::from_utf8(body).map_err(|_| AdapterError::Protocol("VidCore html encoding"))?;
+    let html =
+        std::str::from_utf8(body).map_err(|_| AdapterError::Protocol("VidCore html encoding"))?;
     let token = token_pat
         .captures(html)
         .and_then(|c| c.get(1))
@@ -439,7 +484,10 @@ mod tests {
         let payload = br#"{"url":"https://media.example.com/movie.m3u8","tracks":[{"file":"https://subtitles.example.com/en.vtt","label":"English"},{"file":"https://subtitles.example.com/other.vtt","label":"Unmapped language"},{"file":"http://127.0.0.1/private.vtt","label":"English"},{"file":"https://subtitles.example.com/unknown.srt","label":"English"}]}"#;
         let record: SourceRecord = serde_json::from_slice(payload).unwrap();
         let stream_url = public_url(&record.url).unwrap();
-        assert_eq!(stream_url.origin().ascii_serialization(), "https://media.example.com");
+        assert_eq!(
+            stream_url.origin().ascii_serialization(),
+            "https://media.example.com"
+        );
 
         let mut tracks = Vec::new();
         if let Some(source_tracks) = record.tracks {

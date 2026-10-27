@@ -1,17 +1,17 @@
 use std::time::SystemTime;
 
 use axum::{
+    Json, Router,
     extract::{Path, Query, State},
     http::StatusCode,
     routing::{get, post, put},
-    Json, Router,
 };
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use stream_core::{
-    accounts::{is_safe_identifier, Preferences, Profile, ProfileInput, ProgressUpdate, Target},
+    accounts::{Preferences, Profile, ProfileInput, ProgressUpdate, Target, is_safe_identifier},
     catalog::{MediaType, Title, TitleIdentity},
 };
 use stream_storage::accounts::ListKind;
@@ -219,12 +219,17 @@ fn parse_media_type(s: &str) -> Result<MediaType, AppError> {
     match s {
         "movie" => Ok(MediaType::Movie),
         "tv" => Ok(MediaType::Tv),
-        _ => Err(AppError::BadRequest("invalid media type, expected movie or tv".into())),
+        _ => Err(AppError::BadRequest(
+            "invalid media type, expected movie or tv".into(),
+        )),
     }
 }
 
 async fn list_profiles(State(state): State<AppState>) -> Result<Json<serde_json::Value>, AppError> {
-    let profiles = state.accounts.list_profiles(&state.household_account_id).await?;
+    let profiles = state
+        .accounts
+        .list_profiles(&state.household_account_id)
+        .await?;
     Ok(Json(json!({ "profiles": profiles })))
 }
 
@@ -264,7 +269,10 @@ async fn get_profile(
     if !is_safe_identifier(&id) {
         return Err(AppError::BadRequest("invalid profile identifier".into()));
     }
-    let profile = state.accounts.get_profile(&state.household_account_id, &id).await?;
+    let profile = state
+        .accounts
+        .get_profile(&state.household_account_id, &id)
+        .await?;
     Ok(Json(profile))
 }
 
@@ -291,7 +299,10 @@ async fn delete_profile(
     if !is_safe_identifier(&id) {
         return Err(AppError::BadRequest("invalid profile identifier".into()));
     }
-    state.accounts.delete_profile(&state.household_account_id, &id).await?;
+    state
+        .accounts
+        .delete_profile(&state.household_account_id, &id)
+        .await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -319,7 +330,10 @@ async fn record_profile_activity(
         return Err(AppError::BadRequest("invalid profile identifier".into()));
     }
     let now: DateTime<Utc> = SystemTime::now().into();
-    state.accounts.record_activity(&state.household_account_id, &id, now).await?;
+    state
+        .accounts
+        .record_activity(&state.household_account_id, &id, now)
+        .await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -369,7 +383,12 @@ async fn delete_library_title(
 
     state
         .accounts
-        .remove_title(&state.household_account_id, &id, ListKind::Library, identity)
+        .remove_title(
+            &state.household_account_id,
+            &id,
+            ListKind::Library,
+            identity,
+        )
         .await?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -420,7 +439,12 @@ async fn delete_favorites_title(
 
     state
         .accounts
-        .remove_title(&state.household_account_id, &id, ListKind::Favorites, identity)
+        .remove_title(
+            &state.household_account_id,
+            &id,
+            ListKind::Favorites,
+            identity,
+        )
         .await?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -435,7 +459,11 @@ async fn list_recommendation_hidden(
     }
     let titles = state
         .accounts
-        .list_titles(&state.household_account_id, &id, ListKind::RecommendationHidden)
+        .list_titles(
+            &state.household_account_id,
+            &id,
+            ListKind::RecommendationHidden,
+        )
         .await?;
     let mut payload = json!({ "titles": titles });
     normalize_artwork_url(&mut payload);
@@ -455,7 +483,12 @@ async fn put_recommendation_hidden_title(
 
     state
         .accounts
-        .put_title(&state.household_account_id, &id, ListKind::RecommendationHidden, title)
+        .put_title(
+            &state.household_account_id,
+            &id,
+            ListKind::RecommendationHidden,
+            title,
+        )
         .await?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -472,7 +505,12 @@ async fn delete_recommendation_hidden_title(
 
     state
         .accounts
-        .remove_title(&state.household_account_id, &id, ListKind::RecommendationHidden, identity)
+        .remove_title(
+            &state.household_account_id,
+            &id,
+            ListKind::RecommendationHidden,
+            identity,
+        )
         .await?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -487,7 +525,11 @@ async fn list_recommendation_watched(
     }
     let titles = state
         .accounts
-        .list_titles(&state.household_account_id, &id, ListKind::RecommendationWatched)
+        .list_titles(
+            &state.household_account_id,
+            &id,
+            ListKind::RecommendationWatched,
+        )
         .await?;
     let mut payload = json!({ "titles": titles });
     normalize_artwork_url(&mut payload);
@@ -507,7 +549,12 @@ async fn put_recommendation_watched_title(
 
     state
         .accounts
-        .put_title(&state.household_account_id, &id, ListKind::RecommendationWatched, title)
+        .put_title(
+            &state.household_account_id,
+            &id,
+            ListKind::RecommendationWatched,
+            title,
+        )
         .await?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -524,7 +571,12 @@ async fn delete_recommendation_watched_title(
 
     state
         .accounts
-        .remove_title(&state.household_account_id, &id, ListKind::RecommendationWatched, identity)
+        .remove_title(
+            &state.household_account_id,
+            &id,
+            ListKind::RecommendationWatched,
+            identity,
+        )
         .await?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -539,7 +591,11 @@ async fn list_recommendation_ignored(
     }
     let titles = state
         .accounts
-        .list_titles(&state.household_account_id, &id, ListKind::RecommendationIgnored)
+        .list_titles(
+            &state.household_account_id,
+            &id,
+            ListKind::RecommendationIgnored,
+        )
         .await?;
     let mut payload = json!({ "titles": titles });
     normalize_artwork_url(&mut payload);
@@ -559,7 +615,12 @@ async fn put_recommendation_ignored_title(
 
     state
         .accounts
-        .put_title(&state.household_account_id, &id, ListKind::RecommendationIgnored, title)
+        .put_title(
+            &state.household_account_id,
+            &id,
+            ListKind::RecommendationIgnored,
+            title,
+        )
         .await?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -576,7 +637,12 @@ async fn delete_recommendation_ignored_title(
 
     state
         .accounts
-        .remove_title(&state.household_account_id, &id, ListKind::RecommendationIgnored, identity)
+        .remove_title(
+            &state.household_account_id,
+            &id,
+            ListKind::RecommendationIgnored,
+            identity,
+        )
         .await?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -593,7 +659,8 @@ async fn get_recommendation_feedback(
         .accounts
         .recommendation_feedback(&state.household_account_id, &id)
         .await?;
-    let mut payload = serde_json::to_value(feedback).map_err(|e| AppError::Internal(e.to_string()))?;
+    let mut payload =
+        serde_json::to_value(feedback).map_err(|e| AppError::Internal(e.to_string()))?;
     normalize_artwork_url(&mut payload);
     Ok(Json(payload))
 }
@@ -664,7 +731,10 @@ async fn get_home(
     for record in records {
         let mut shelf_data = record.data;
         normalize_artwork_url(&mut shelf_data);
-        let shelf_id = shelf_data.get("id").and_then(|v| v.as_str()).unwrap_or_default();
+        let shelf_id = shelf_data
+            .get("id")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default();
         if hidden_topics.contains(shelf_id) {
             continue;
         }
@@ -676,7 +746,10 @@ async fn get_home(
         if shelf_filter.is_some_and(|target_shelf| shelf_id != target_shelf) {
             continue;
         }
-        let heading = shelf_data.get("heading").and_then(|v| v.as_str()).unwrap_or_default();
+        let heading = shelf_data
+            .get("heading")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default();
         let raw_titles = shelf_data
             .get("titles")
             .and_then(|v| v.as_array())
@@ -688,10 +761,14 @@ async fn get_home(
             let t_type = t.get("type").and_then(|v| v.as_str()).unwrap_or_default();
             let t_id = t.get("id").and_then(|v| v.as_i64()).unwrap_or(0);
             let t_key = format!("{t_type}:{t_id}");
-            if (media_filter != "all" && t_type != media_filter) || excluded_titles.contains(&t_key) {
+            if (media_filter != "all" && t_type != media_filter) || excluded_titles.contains(&t_key)
+            {
                 continue;
             }
-            if t.get("poster").and_then(|v| v.as_str()).is_some_and(|p| p.is_empty()) {
+            if t.get("poster")
+                .and_then(|v| v.as_str())
+                .is_some_and(|p| p.is_empty())
+            {
                 continue;
             }
             filtered_titles.push(t);
@@ -719,7 +796,11 @@ async fn get_home(
     for byte in &hash {
         let _ = write!(digest, "{byte:02x}");
     }
-    let page_version = if digest.len() >= 16 { &digest[..16] } else { &digest };
+    let page_version = if digest.len() >= 16 {
+        &digest[..16]
+    } else {
+        &digest
+    };
 
     Ok(Json(json!({
         "sections": sections,
@@ -748,14 +829,20 @@ async fn get_recommendations(
     for record in records {
         let mut shelf_data = record.data;
         normalize_artwork_url(&mut shelf_data);
-        let shelf_id = shelf_data.get("id").and_then(|v| v.as_str()).unwrap_or_default();
+        let shelf_id = shelf_data
+            .get("id")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default();
         if hidden_topics.contains(shelf_id)
             || shelf_id.starts_with("onboarding-")
             || shelf_id.starts_with("favorites-")
         {
             continue;
         }
-        let heading = shelf_data.get("heading").and_then(|v| v.as_str()).unwrap_or_default();
+        let heading = shelf_data
+            .get("heading")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default();
         let raw_titles = shelf_data
             .get("titles")
             .and_then(|v| v.as_array())
@@ -767,10 +854,14 @@ async fn get_recommendations(
             let t_type = t.get("type").and_then(|v| v.as_str()).unwrap_or_default();
             let t_id = t.get("id").and_then(|v| v.as_i64()).unwrap_or(0);
             let t_key = format!("{t_type}:{t_id}");
-            if (media_filter != "all" && t_type != media_filter) || excluded_titles.contains(&t_key) {
+            if (media_filter != "all" && t_type != media_filter) || excluded_titles.contains(&t_key)
+            {
                 continue;
             }
-            if t.get("poster").and_then(|v| v.as_str()).is_some_and(|p| p.is_empty()) {
+            if t.get("poster")
+                .and_then(|v| v.as_str())
+                .is_some_and(|p| p.is_empty())
+            {
                 continue;
             }
             filtered_titles.push(t);
@@ -802,9 +893,14 @@ async fn get_history(
     }
     let offset = params.offset.unwrap_or(0);
     if !(0..=20_000).contains(&offset) {
-        return Err(AppError::BadRequest("offset must be between 0 and 20000".into()));
+        return Err(AppError::BadRequest(
+            "offset must be between 0 and 20000".into(),
+        ));
     }
-    let records = state.accounts.history(&state.household_account_id, &id, offset).await?;
+    let records = state
+        .accounts
+        .history(&state.household_account_id, &id, offset)
+        .await?;
     Ok(Json(json!({
         "records": records,
         "offset": offset,
@@ -824,10 +920,14 @@ async fn get_resume(
     let identity = TitleIdentity::new(mt, params.id)?;
     let target = Target::new(identity, params.season, params.episode)?;
 
-    match state.accounts.get_progress(&state.household_account_id, &id, target).await? {
-        Some(progress) => Ok(Json(serde_json::to_value(progress).map_err(|e| {
-            AppError::Internal(e.to_string())
-        })?)),
+    match state
+        .accounts
+        .get_progress(&state.household_account_id, &id, target)
+        .await?
+    {
+        Some(progress) => Ok(Json(
+            serde_json::to_value(progress).map_err(|e| AppError::Internal(e.to_string()))?,
+        )),
         None => Err(AppError::NotFound("no resume progress found".into())),
     }
 }
@@ -847,9 +947,9 @@ async fn update_progress(
         .update_progress_at(&state.household_account_id, &id, update, now)
         .await?;
 
-    Ok(Json(serde_json::to_value(progress).map_err(|e| {
-        AppError::Internal(e.to_string())
-    })?))
+    Ok(Json(
+        serde_json::to_value(progress).map_err(|e| AppError::Internal(e.to_string()))?,
+    ))
 }
 
 async fn update_global_progress(
@@ -860,7 +960,10 @@ async fn update_global_progress(
     let profile_id = match payload.profile_id {
         Some(pid) if is_safe_identifier(&pid) => pid,
         _ => {
-            let profiles = state.accounts.list_profiles(&state.household_account_id).await?;
+            let profiles = state
+                .accounts
+                .list_profiles(&state.household_account_id)
+                .await?;
             let first = profiles
                 .into_iter()
                 .next()
@@ -872,12 +975,17 @@ async fn update_global_progress(
     let now: DateTime<Utc> = SystemTime::now().into();
     let progress = state
         .accounts
-        .update_progress_at(&state.household_account_id, &profile_id, payload.update, now)
+        .update_progress_at(
+            &state.household_account_id,
+            &profile_id,
+            payload.update,
+            now,
+        )
         .await?;
 
-    Ok(Json(serde_json::to_value(progress).map_err(|e| {
-        AppError::Internal(e.to_string())
-    })?))
+    Ok(Json(
+        serde_json::to_value(progress).map_err(|e| AppError::Internal(e.to_string()))?,
+    ))
 }
 
 async fn load_or_create_title(state: &AppState, identity: TitleIdentity) -> Title {

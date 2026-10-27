@@ -1,6 +1,6 @@
-use std::time::SystemTime;
 use chrono::{DateTime, Duration, Utc};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
+use std::time::SystemTime;
 use stream_storage::catalog::{CatalogStore, CatalogWrite};
 
 pub async fn seed_if_empty(catalog: &CatalogStore) -> Result<(), Box<dyn std::error::Error>> {
@@ -10,7 +10,9 @@ pub async fn seed_if_empty(catalog: &CatalogStore) -> Result<(), Box<dyn std::er
         return Ok(());
     }
 
-    tracing::info!("catalog is empty, seeding onboarding shelves, popular titles, and curated shelves");
+    tracing::info!(
+        "catalog is empty, seeding onboarding shelves, popular titles, and curated shelves"
+    );
 
     let infinity_war = json!({
         "type": "movie",
@@ -186,7 +188,11 @@ pub async fn seed_if_empty(catalog: &CatalogStore) -> Result<(), Box<dyn std::er
 
     // 1. Seed Onboarding Shelves
     let onboarding_specs: Vec<(&str, &str, Value)> = vec![
-        ("onboarding-action", "Action & adventure", infinity_war.clone()),
+        (
+            "onboarding-action",
+            "Action & adventure",
+            infinity_war.clone(),
+        ),
         ("onboarding-comedy", "Comedy", barbie.clone()),
         ("onboarding-drama", "Drama", shawshank.clone()),
         ("onboarding-crime", "Crime & mystery", the_batman.clone()),

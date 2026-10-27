@@ -6,9 +6,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let db_path = std::env::args()
         .nth(1)
         .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            dirs_or_home()
-        });
+        .unwrap_or_else(dirs_or_home);
 
     println!("Seeding catalog database at: {}", db_path.display());
     let catalog = CatalogStore::open(&db_path).await?;

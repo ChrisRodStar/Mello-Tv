@@ -1,11 +1,11 @@
 //! Provider package installation, verification, and state tracking.
 
-use std::{fs::File, path::PathBuf, sync::Arc};
+use crate::{UpdateError, VerifiedProvider};
 use rusqlite::Connection;
+use std::{fs::File, path::PathBuf, sync::Arc};
 use stream_core::providers::ProviderId;
 use stream_provider_runtime::{ProviderHandle, ProviderRuntime};
 use tokio::sync::Mutex;
-use crate::{UpdateError, VerifiedProvider};
 
 pub struct ProviderInstaller {
     db_path: PathBuf,
@@ -38,7 +38,8 @@ impl ProviderInstaller {
             let _guard = operations.lock().await;
             let db_path_clone = db_path.clone();
             tokio::task::spawn_blocking(move || -> Result<(), UpdateError> {
-                let conn = Connection::open(&db_path_clone).map_err(|e| UpdateError::Storage(e.into()))?;
+                let conn =
+                    Connection::open(&db_path_clone).map_err(|e| UpdateError::Storage(e.into()))?;
                 conn.execute_batch(
                     "CREATE TABLE IF NOT EXISTS installed_providers (
                         provider_id TEXT PRIMARY KEY,
@@ -47,7 +48,8 @@ impl ProviderInstaller {
                         artifact_digest TEXT NOT NULL,
                         installed_at INTEGER NOT NULL
                     );",
-                ).map_err(|e| UpdateError::Storage(e.into()))?;
+                )
+                .map_err(|e| UpdateError::Storage(e.into()))?;
                 Ok(())
             })
             .await
@@ -128,7 +130,8 @@ impl ProviderInstaller {
             conn.execute(
                 "DELETE FROM installed_providers WHERE provider_id = ?1",
                 rusqlite::params![pid],
-            ).map_err(|e| UpdateError::Storage(e.into()))?;
+            )
+            .map_err(|e| UpdateError::Storage(e.into()))?;
             Ok(())
         })
         .await

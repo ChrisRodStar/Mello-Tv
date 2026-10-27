@@ -179,10 +179,23 @@ pub struct FetchResponse {
     pub metrics: FetchMetrics,
 }
 
-pub type ResponseBody=std::pin::Pin<Box<dyn futures_util::Stream<Item=Result<Bytes,TransportError>>+Send+Sync>>;
+pub type ResponseBody = std::pin::Pin<
+    Box<dyn futures_util::Stream<Item = Result<Bytes, TransportError>> + Send + Sync>,
+>;
 /// Streaming reads retain admission/connection permits until EOF or drop.
-pub struct StreamingResponse {pub url:Url,pub status:StatusCode,pub headers:HeaderMap,pub body:ResponseBody}
-impl fmt::Debug for StreamingResponse {fn fmt(&self,f:&mut fmt::Formatter<'_>)->fmt::Result{f.debug_struct("StreamingResponse").field("status",&self.status).finish_non_exhaustive()}}
+pub struct StreamingResponse {
+    pub url: Url,
+    pub status: StatusCode,
+    pub headers: HeaderMap,
+    pub body: ResponseBody,
+}
+impl fmt::Debug for StreamingResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("StreamingResponse")
+            .field("status", &self.status)
+            .finish_non_exhaustive()
+    }
+}
 impl fmt::Debug for FetchResponse {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
@@ -289,52 +302,146 @@ impl HttpClient {
 
     /// Bounded GET/HEAD streaming for large signed update targets. The same
     /// proxy, DNS, origin, redirect and credential policy applies to every hop.
-    pub async fn fetch_stream(&self,request:FetchRequest,cancellation:&CancellationToken)->Result<StreamingResponse,TransportError>{
-        let deadline=Instant::now()+self.config.request_timeout;
-        let cancel=cancellation.child_token();
-        let operation=async {
-            if !matches!(request.method,Method::GET|Method::HEAD)||!request.body.is_empty()||request.sample
-                ||request.allowed_origins.as_ref().is_some_and(|origins|origins.len()>32){return Err(TransportError::InvalidContext);}
-            let limit=if request.max_response_bytes==0{self.config.max_response_bytes}else{request.max_response_bytes};
-            if limit>self.config.max_response_bytes{return Err(TransportError::InvalidContext);}
-            let admitted=self.admitted.clone().try_acquire_owned().map_err(|_|TransportError::Capacity)?;
-            let active=self.active.clone().acquire_owned().await.map_err(|_|TransportError::Capacity)?;
-            let mut url=self.destination(&request.url)?;
+    pub async fn fetch_stream(
+        &self,
+        request: FetchRequest,
+        cancellation: &CancellationToken,
+    ) -> Result<StreamingResponse, TransportError> {
+        let deadline = Instant::now() + self.config.request_timeout;
+        let cancel = cancellation.child_token();
+        let operation = async {
+            if !matches!(request.method, Method::GET | Method::HEAD)
+                || !request.body.is_empty()
+                || request.sample
+                || request
+                    .allowed_origins
+                    .as_ref()
+                    .is_some_and(|origins| origins.len() > 32)
+            {
+                return Err(TransportError::InvalidContext);
+            }
+            let limit = if request.max_response_bytes == 0 {
+                self.config.max_response_bytes
+            } else {
+                request.max_response_bytes
+            };
+            if limit > self.config.max_response_bytes {
+                return Err(TransportError::InvalidContext);
+            }
+            let admitted = self
+                .admitted
+                .clone()
+                .try_acquire_owned()
+                .map_err(|_| TransportError::Capacity)?;
+            let active = self
+                .active
+                .clone()
+                .acquire_owned()
+                .await
+                .map_err(|_| TransportError::Capacity)?;
+            let mut url = self.destination(&request.url)?;
             for redirects in 0..=self.config.max_redirects {
-                if self.proxy_host.as_deref().is_some_and(|host|url.host_str()==Some(host))
-                    ||request.allowed_origins.as_ref().is_some_and(|origins|!origins.iter().any(|origin|origin.as_str()==url.origin().ascii_serialization())) {return Err(TransportError::DestinationDenied);}
-                self.admit_origin(&url)?;
-                if matches!(self.config.egress,EgressMode::HttpProxy(_)) && let Some(url::Host::Domain(host))=url.host(){GuardedResolver::destination(host).await?;}
-                let headers=request_headers(&request.context,&url,&request.headers)?;
-                let response=self.client.request(request.method.clone(),url.clone()).headers(headers).send().await.map_err(request_error)?;
-                if response.headers().iter().map(|(name,value)|name.as_str().len()+value.len()).sum::<usize>()>16384{return Err(TransportError::HeaderLimit);}
-                if matches!(response.status().as_u16(),301|302|303|307|308){
-                    if request.method!=Method::GET||redirects>=self.config.max_redirects||response.headers().get_all("location").iter().count()!=1{return Err(TransportError::RedirectDenied);}
-                    let location=response.headers().get("location").and_then(|value|value.to_str().ok()).ok_or(TransportError::RedirectDenied)?;
-                    url=self.redirect(&url,location)?;continue;
+                if self
+                    .proxy_host
+                    .as_deref()
+                    .is_some_and(|host| url.host_str() == Some(host))
+                    || request.allowed_origins.as_ref().is_some_and(|origins| {
+                        !origins
+                            .iter()
+                            .any(|origin| origin.as_str() == url.origin().ascii_serialization())
+                    })
+                {
+                    return Err(TransportError::DestinationDenied);
                 }
-                if request.method!=Method::HEAD && response.content_length().is_some_and(|bytes|bytes>limit as u64){return Err(TransportError::ResponseLimit);}
-                let status=response.status();let headers=response.headers().clone();
-                let stream=response.bytes_stream();
-                let state=(stream,admitted,active,cancel.clone(),0usize,false);
-                let body=futures_util::stream::unfold(state,move|(mut stream,admitted,active,cancel,mut bytes,done)|async move {
-                    if done{return None;}
-                    let next=tokio::select!{biased;
-                        _=cancel.cancelled()=>Some(Err(TransportError::Cancelled)),
-                        next=tokio::time::timeout_at(deadline,stream.next())=>match next {Ok(Some(value))=>Some(value.map_err(request_error)),Ok(None)=>None,Err(_)=>Some(Err(TransportError::Timeout))},
-                    };
-                    let mut done=false;
-                    let next=match next? {
-                        Ok(chunk)=>match bytes.checked_add(chunk.len()){Some(total) if total<=limit=>{bytes=total;Ok(chunk)},_=>{done=true;Err(TransportError::ResponseLimit)}},
-                        Err(error)=>{done=true;Err(error)},
-                    };
-                    Some((next,(stream,admitted,active,cancel,bytes,done)))
+                self.admit_origin(&url)?;
+                if matches!(self.config.egress, EgressMode::HttpProxy(_))
+                    && let Some(url::Host::Domain(host)) = url.host()
+                {
+                    GuardedResolver::destination(host).await?;
+                }
+                let headers = request_headers(&request.context, &url, &request.headers)?;
+                let response = self
+                    .client
+                    .request(request.method.clone(), url.clone())
+                    .headers(headers)
+                    .send()
+                    .await
+                    .map_err(request_error)?;
+                if response
+                    .headers()
+                    .iter()
+                    .map(|(name, value)| name.as_str().len() + value.len())
+                    .sum::<usize>()
+                    > 16384
+                {
+                    return Err(TransportError::HeaderLimit);
+                }
+                if matches!(response.status().as_u16(), 301 | 302 | 303 | 307 | 308) {
+                    if request.method != Method::GET
+                        || redirects >= self.config.max_redirects
+                        || response.headers().get_all("location").iter().count() != 1
+                    {
+                        return Err(TransportError::RedirectDenied);
+                    }
+                    let location = response
+                        .headers()
+                        .get("location")
+                        .and_then(|value| value.to_str().ok())
+                        .ok_or(TransportError::RedirectDenied)?;
+                    url = self.redirect(&url, location)?;
+                    continue;
+                }
+                if request.method != Method::HEAD
+                    && response
+                        .content_length()
+                        .is_some_and(|bytes| bytes > limit as u64)
+                {
+                    return Err(TransportError::ResponseLimit);
+                }
+                let status = response.status();
+                let headers = response.headers().clone();
+                let stream = response.bytes_stream();
+                let state = (stream, admitted, active, cancel.clone(), 0usize, false);
+                let body = futures_util::stream::unfold(
+                    state,
+                    move |(mut stream, admitted, active, cancel, mut bytes, done)| async move {
+                        if done {
+                            return None;
+                        }
+                        let next = tokio::select! {biased;
+                            _=cancel.cancelled()=>Some(Err(TransportError::Cancelled)),
+                            next=tokio::time::timeout_at(deadline,stream.next())=>match next {Ok(Some(value))=>Some(value.map_err(request_error)),Ok(None)=>None,Err(_)=>Some(Err(TransportError::Timeout))},
+                        };
+                        let mut done = false;
+                        let next = match next? {
+                            Ok(chunk) => match bytes.checked_add(chunk.len()) {
+                                Some(total) if total <= limit => {
+                                    bytes = total;
+                                    Ok(chunk)
+                                }
+                                _ => {
+                                    done = true;
+                                    Err(TransportError::ResponseLimit)
+                                }
+                            },
+                            Err(error) => {
+                                done = true;
+                                Err(error)
+                            }
+                        };
+                        Some((next, (stream, admitted, active, cancel, bytes, done)))
+                    },
+                );
+                return Ok(StreamingResponse {
+                    url,
+                    status,
+                    headers,
+                    body: Box::pin(body),
                 });
-                return Ok(StreamingResponse{url,status,headers,body:Box::pin(body)});
             }
             Err(TransportError::RedirectDenied)
         };
-        tokio::select!{biased;_=cancel.cancelled()=>Err(TransportError::Cancelled),result=tokio::time::timeout_at(deadline,operation)=>result.map_err(|_|TransportError::Timeout)?,}
+        tokio::select! {biased;_=cancel.cancelled()=>Err(TransportError::Cancelled),result=tokio::time::timeout_at(deadline,operation)=>result.map_err(|_|TransportError::Timeout)?,}
     }
     async fn execute(
         &self,

@@ -156,9 +156,8 @@ pub fn detect_magicdns_fallback() -> Option<String> {
                     let domain = domain.trim().trim_end_matches('.');
                     if domain.ends_with(".ts.net") {
                         let server_name = detect_server_name();
-                        let clean_prefix = server_name
-                            .to_lowercase()
-                            .replace([' ', '’', '\''], "-");
+                        let clean_prefix =
+                            server_name.to_lowercase().replace([' ', '’', '\''], "-");
                         return Some(format!("{clean_prefix}.{domain}"));
                     }
                 }
@@ -413,10 +412,7 @@ pub fn spawn_discovery_services(server_id: String, http_port: u16) {
     });
 }
 
-async fn run_udp_discovery_responder(
-    server_id: String,
-    http_port: u16,
-) -> std::io::Result<()> {
+async fn run_udp_discovery_responder(server_id: String, http_port: u16) -> std::io::Result<()> {
     let bind_addr = SocketAddr::from(([0, 0, 0, 0], DISCOVERY_UDP_PORT));
     let socket = UdpSocket::bind(bind_addr).await?;
     let _ = socket.set_broadcast(true);
@@ -462,13 +458,11 @@ async fn run_udp_discovery_responder(
                         "http://{}.{}.{}.",
                         peer_octets[0], peer_octets[1], peer_octets[2]
                     );
-                    announcement.endpoints.sort_by_key(|ep| {
-                        if ep.starts_with(&prefix) {
-                            0
-                        } else {
-                            1
-                        }
-                    });
+                    announcement.endpoints.sort_by_key(
+                        |ep| {
+                            if ep.starts_with(&prefix) { 0 } else { 1 }
+                        },
+                    );
                 }
             }
             IpAddr::V6(peer_v6) => {
@@ -568,10 +562,7 @@ mod tests {
         assert!(ips.contains(&"fd7a:115c:a1e0::252a:1802".to_string()));
 
         let fqdn = extract_magicdns_fqdn(&sample);
-        assert_eq!(
-            fqdn.as_deref(),
-            Some("chriss-mac-mini.tail113fae.ts.net")
-        );
+        assert_eq!(fqdn.as_deref(), Some("chriss-mac-mini.tail113fae.ts.net"));
     }
 
     #[test]

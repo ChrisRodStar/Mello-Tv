@@ -5,8 +5,8 @@
 pub mod vidcore;
 pub mod videasy;
 pub mod vidfast;
-pub mod vidsrc;
 pub mod vidlink;
+pub mod vidsrc;
 
 use aes::cipher::{
     BlockModeDecrypt, BlockModeEncrypt, KeyIvInit, StreamCipher, StreamCipherSeek,

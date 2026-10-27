@@ -1,8 +1,4 @@
-use std::{
-    path::PathBuf,
-    process::ExitCode,
-    sync::Arc,
-};
+use std::{path::PathBuf, process::ExitCode, sync::Arc};
 
 use stream_core::ports::MediaEngine;
 use stream_media::DiscoveryCoordinator;
@@ -74,10 +70,16 @@ impl ServerConfig {
                     println!();
                     println!("Options:");
                     println!("  -p, --port <PORT>          Port to listen on [default: 8080]");
-                    println!("  -d, --db-path <PATH>       Database directory path [default: data]");
+                    println!(
+                        "  -d, --db-path <PATH>       Database directory path [default: data]"
+                    );
                     println!("      --static-dir <PATH>    Static web assets directory");
-                    println!("      --host <HOST>          Host address to bind to [default: 0.0.0.0]");
-                    println!("      --proxy <URL>          HTTP/SOCKS5 proxy URL for media network calls");
+                    println!(
+                        "      --host <HOST>          Host address to bind to [default: 0.0.0.0]"
+                    );
+                    println!(
+                        "      --proxy <URL>          HTTP/SOCKS5 proxy URL for media network calls"
+                    );
                     println!("  -h, --help                 Print help");
                     std::process::exit(0);
                 }
@@ -85,7 +87,9 @@ impl ServerConfig {
                     if let Some(val) = args.next() {
                         port = val.parse::<u16>()?;
                     } else {
-                        return Err(ConfigError::InvalidArgument("missing value for --port".into()));
+                        return Err(ConfigError::InvalidArgument(
+                            "missing value for --port".into(),
+                        ));
                     }
                 }
                 arg if arg.starts_with("--port=") => {
@@ -96,7 +100,9 @@ impl ServerConfig {
                     if let Some(val) = args.next() {
                         db_path = PathBuf::from(val);
                     } else {
-                        return Err(ConfigError::InvalidArgument("missing value for --db-path".into()));
+                        return Err(ConfigError::InvalidArgument(
+                            "missing value for --db-path".into(),
+                        ));
                     }
                 }
                 arg if arg.starts_with("--db-path=") => {
@@ -107,7 +113,9 @@ impl ServerConfig {
                     if let Some(val) = args.next() {
                         host = val;
                     } else {
-                        return Err(ConfigError::InvalidArgument("missing value for --host".into()));
+                        return Err(ConfigError::InvalidArgument(
+                            "missing value for --host".into(),
+                        ));
                     }
                 }
                 arg if arg.starts_with("--host=") => {
@@ -117,7 +125,9 @@ impl ServerConfig {
                     if let Some(val) = args.next() {
                         proxy = Some(val);
                     } else {
-                        return Err(ConfigError::InvalidArgument("missing value for --proxy".into()));
+                        return Err(ConfigError::InvalidArgument(
+                            "missing value for --proxy".into(),
+                        ));
                     }
                 }
                 arg if arg.starts_with("--proxy=") => {
@@ -127,14 +137,18 @@ impl ServerConfig {
                     if let Some(val) = args.next() {
                         static_dir = Some(PathBuf::from(val));
                     } else {
-                        return Err(ConfigError::InvalidArgument("missing value for --static-dir".into()));
+                        return Err(ConfigError::InvalidArgument(
+                            "missing value for --static-dir".into(),
+                        ));
                     }
                 }
                 arg if arg.starts_with("--static-dir=") => {
                     static_dir = Some(PathBuf::from(arg.trim_start_matches("--static-dir=")));
                 }
                 other => {
-                    return Err(ConfigError::InvalidArgument(format!("unknown option: {other}")));
+                    return Err(ConfigError::InvalidArgument(format!(
+                        "unknown option: {other}"
+                    )));
                 }
             }
         }
@@ -262,13 +276,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
 
-    let state = AppState::new(
-        Arc::new(catalog),
-        Arc::new(accounts),
-        media,
-        household_id,
-    )
-    .with_port(config.port);
+    let state = AppState::new(Arc::new(catalog), Arc::new(accounts), media, household_id)
+        .with_port(config.port);
 
     stream_server::discovery::spawn_discovery_services(
         state.household_account_id.clone(),

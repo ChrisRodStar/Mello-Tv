@@ -3,15 +3,15 @@
 use std::{sync::Arc, time::SystemTime};
 
 use chrono::{DateTime, Duration, Utc};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use stream_server::{
     routes,
     state::{AppState, NoopMediaEngine},
 };
 use stream_storage::{
+    AccountStore,
     catalog::{CatalogStore, CatalogWrite},
     db::Database,
-    AccountStore,
 };
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
@@ -20,7 +20,8 @@ fn now() -> DateTime<Utc> {
     SystemTime::now().into()
 }
 
-async fn spawn_test_server() -> Result<(String, Arc<AccountStore>, Arc<CatalogStore>, String), Box<dyn std::error::Error>> {
+async fn spawn_test_server()
+-> Result<(String, Arc<AccountStore>, Arc<CatalogStore>, String), Box<dyn std::error::Error>> {
     let catalog_db = Database::in_memory(64).await?;
     let catalog = Arc::new(CatalogStore::from_database(catalog_db).await?);
 
@@ -30,7 +31,12 @@ async fn spawn_test_server() -> Result<(String, Arc<AccountStore>, Arc<CatalogSt
     let household_id = accounts.select_household(None).await?;
 
     let media = Arc::new(NoopMediaEngine);
-    let state = AppState::new(catalog.clone(), accounts.clone(), media, household_id.clone());
+    let state = AppState::new(
+        catalog.clone(),
+        accounts.clone(),
+        media,
+        household_id.clone(),
+    );
 
     let router = routes::build_router(state);
 
@@ -80,7 +86,10 @@ async fn profiles_crud_and_preferences_parity() -> TestResult {
     assert_eq!(profiles[0]["id"], profile_id);
 
     // 3. Get Profile by ID
-    let res = client.get(format!("{base}/api/v1/profiles/{profile_id}")).send().await?;
+    let res = client
+        .get(format!("{base}/api/v1/profiles/{profile_id}"))
+        .send()
+        .await?;
     assert_eq!(res.status(), reqwest::StatusCode::OK);
     let fetched: Value = res.json().await?;
     assert_eq!(fetched["id"], profile_id);
@@ -167,7 +176,10 @@ async fn custom_lists_and_recommendation_feedback_parity() -> TestResult {
         .await?;
     assert_eq!(res.status(), reqwest::StatusCode::NO_CONTENT);
 
-    let res = client.get(format!("{base}/api/v1/profiles/{pid}/favorites")).send().await?;
+    let res = client
+        .get(format!("{base}/api/v1/profiles/{pid}/favorites"))
+        .send()
+        .await?;
     assert_eq!(res.status(), reqwest::StatusCode::OK);
     let fav_reply: Value = res.json().await?;
     assert_eq!(fav_reply["titles"].as_array().unwrap().len(), 1);
@@ -180,20 +192,30 @@ async fn custom_lists_and_recommendation_feedback_parity() -> TestResult {
         .await?;
     assert_eq!(res.status(), reqwest::StatusCode::NO_CONTENT);
 
-    let res = client.get(format!("{base}/api/v1/profiles/{pid}/library")).send().await?;
+    let res = client
+        .get(format!("{base}/api/v1/profiles/{pid}/library"))
+        .send()
+        .await?;
     assert_eq!(res.status(), reqwest::StatusCode::OK);
     let lib_reply: Value = res.json().await?;
     assert_eq!(lib_reply["titles"].as_array().unwrap().len(), 1);
 
     // Test Recommendation Hidden, Watched, Ignored
-    for choice in ["recommendation-hidden", "recommendation-watched", "recommendation-ignored"] {
+    for choice in [
+        "recommendation-hidden",
+        "recommendation-watched",
+        "recommendation-ignored",
+    ] {
         let res = client
             .put(format!("{base}/api/v1/profiles/{pid}/{choice}/movie/101"))
             .send()
             .await?;
         assert_eq!(res.status(), reqwest::StatusCode::NO_CONTENT);
 
-        let res = client.get(format!("{base}/api/v1/profiles/{pid}/{choice}")).send().await?;
+        let res = client
+            .get(format!("{base}/api/v1/profiles/{pid}/{choice}"))
+            .send()
+            .await?;
         assert_eq!(res.status(), reqwest::StatusCode::OK);
         let reply: Value = res.json().await?;
         assert_eq!(reply["titles"].as_array().unwrap().len(), 1);
@@ -201,29 +223,49 @@ async fn custom_lists_and_recommendation_feedback_parity() -> TestResult {
 
     // Test Recommendation Topics
     let res = client
-        .put(format!("{base}/api/v1/profiles/{pid}/recommendation-topics/topic-action"))
+        .put(format!(
+            "{base}/api/v1/profiles/{pid}/recommendation-topics/topic-action"
+        ))
         .send()
         .await?;
     assert_eq!(res.status(), reqwest::StatusCode::NO_CONTENT);
 
-    let res = client.get(format!("{base}/api/v1/profiles/{pid}/recommendation-topics")).send().await?;
+    let res = client
+        .get(format!(
+            "{base}/api/v1/profiles/{pid}/recommendation-topics"
+        ))
+        .send()
+        .await?;
     assert_eq!(res.status(), reqwest::StatusCode::OK);
     let topics_reply: Value = res.json().await?;
-    assert_eq!(topics_reply["topics"].as_array().unwrap(), &vec![json!("topic-action")]);
+    assert_eq!(
+        topics_reply["topics"].as_array().unwrap(),
+        &vec![json!("topic-action")]
+    );
 
     // Test Recommendation Feedback
-    let res = client.get(format!("{base}/api/v1/profiles/{pid}/recommendation-feedback")).send().await?;
+    let res = client
+        .get(format!(
+            "{base}/api/v1/profiles/{pid}/recommendation-feedback"
+        ))
+        .send()
+        .await?;
     assert_eq!(res.status(), reqwest::StatusCode::OK);
     let feedback: Value = res.json().await?;
     assert_eq!(feedback["favorites"].as_array().unwrap().len(), 1);
     assert_eq!(feedback["hidden"].as_array().unwrap().len(), 1);
     assert_eq!(feedback["watched"].as_array().unwrap().len(), 1);
     assert_eq!(feedback["ignored"].as_array().unwrap().len(), 1);
-    assert_eq!(feedback["topics"].as_array().unwrap(), &vec![json!("topic-action")]);
+    assert_eq!(
+        feedback["topics"].as_array().unwrap(),
+        &vec![json!("topic-action")]
+    );
 
     // Delete topic
     let res = client
-        .delete(format!("{base}/api/v1/profiles/{pid}/recommendation-topics/topic-action"))
+        .delete(format!(
+            "{base}/api/v1/profiles/{pid}/recommendation-topics/topic-action"
+        ))
         .send()
         .await?;
     assert_eq!(res.status(), reqwest::StatusCode::NO_CONTENT);
@@ -281,7 +323,9 @@ async fn home_and_recommendations_parity() -> TestResult {
 
     // GET home
     let res = client
-        .get(format!("{base}/api/v1/profiles/{pid}/home?type=all&topic=all"))
+        .get(format!(
+            "{base}/api/v1/profiles/{pid}/home?type=all&topic=all"
+        ))
         .send()
         .await?;
     assert_eq!(res.status(), reqwest::StatusCode::OK);
@@ -293,7 +337,9 @@ async fn home_and_recommendations_parity() -> TestResult {
 
     // GET recommendations
     let res = client
-        .get(format!("{base}/api/v1/profiles/{pid}/recommendations?type=movie"))
+        .get(format!(
+            "{base}/api/v1/profiles/{pid}/recommendations?type=movie"
+        ))
         .send()
         .await?;
     assert_eq!(res.status(), reqwest::StatusCode::OK);
@@ -455,7 +501,9 @@ async fn playback_lifecycle_and_progress_parity() -> TestResult {
 
     // 5. Resume Coordinates
     let res = client
-        .get(format!("{base}/api/v1/profiles/{pid}/resume?type=movie&id=501"))
+        .get(format!(
+            "{base}/api/v1/profiles/{pid}/resume?type=movie&id=501"
+        ))
         .send()
         .await?;
     assert_eq!(res.status(), reqwest::StatusCode::OK);
@@ -464,7 +512,9 @@ async fn playback_lifecycle_and_progress_parity() -> TestResult {
 
     // Resume non-existent -> 404
     let res = client
-        .get(format!("{base}/api/v1/profiles/{pid}/resume?type=movie&id=99999"))
+        .get(format!(
+            "{base}/api/v1/profiles/{pid}/resume?type=movie&id=99999"
+        ))
         .send()
         .await?;
     assert_eq!(res.status(), reqwest::StatusCode::NOT_FOUND);
@@ -482,7 +532,9 @@ async fn playback_lifecycle_and_progress_parity() -> TestResult {
 
     // 7. Lease Renewal (renew)
     let res = client
-        .post(format!("{base}/api/v1/profiles/{pid}/playback/{pbid}/renew"))
+        .post(format!(
+            "{base}/api/v1/profiles/{pid}/playback/{pbid}/renew"
+        ))
         .header("Idempotency-Key", "renew_key_01")
         .json(&json!({ "expected_revision": 1 }))
         .send()
@@ -495,7 +547,9 @@ async fn playback_lifecycle_and_progress_parity() -> TestResult {
 
     // Revision conflict (expected 1 when revision is now 2) -> 409
     let res = client
-        .post(format!("{base}/api/v1/profiles/{pid}/playback/{pbid}/renew"))
+        .post(format!(
+            "{base}/api/v1/profiles/{pid}/playback/{pbid}/renew"
+        ))
         .header("Idempotency-Key", "renew_key_02")
         .json(&json!({ "expected_revision": 1 }))
         .send()
@@ -504,7 +558,9 @@ async fn playback_lifecycle_and_progress_parity() -> TestResult {
 
     // 8. Failover (backup)
     let res = client
-        .post(format!("{base}/api/v1/profiles/{pid}/playback/{pbid}/backup"))
+        .post(format!(
+            "{base}/api/v1/profiles/{pid}/playback/{pbid}/backup"
+        ))
         .header("Idempotency-Key", "backup_key_01")
         .json(&json!({ "expected_revision": 2 }))
         .send()
@@ -517,7 +573,9 @@ async fn playback_lifecycle_and_progress_parity() -> TestResult {
 
     // 9. Source Refresh (refresh)
     let res = client
-        .post(format!("{base}/api/v1/profiles/{pid}/playback/{pbid}/refresh"))
+        .post(format!(
+            "{base}/api/v1/profiles/{pid}/playback/{pbid}/refresh"
+        ))
         .header("Idempotency-Key", "refresh_key_01")
         .json(&json!({ "expected_revision": 3 }))
         .send()

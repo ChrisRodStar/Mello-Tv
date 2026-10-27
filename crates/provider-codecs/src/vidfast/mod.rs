@@ -167,8 +167,7 @@ mod tests {
     use super::*;
 
     const FIXTURE_DIGEST: &str = "ec8e48186134e2d088456999c8931601825a1d9e05f3913c3e7b76e94553fad1";
-    const FIXTURE: &[u8] =
-        include_bytes!("../../testdata/providers/vidfast/player.txt");
+    const FIXTURE: &[u8] = include_bytes!("../../testdata/providers/vidfast/player.txt");
 
     #[test]
     fn original_go_static_player_fixture_is_verified_before_extracting_material()

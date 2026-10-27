@@ -1,11 +1,11 @@
 use std::time::SystemTime;
 
 use axum::{
+    Json, Router,
     extract::{Path, Query, State},
-    http::{header, HeaderMap, HeaderValue, StatusCode},
+    http::{HeaderMap, HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
     routing::{get, put},
-    Json, Router,
 };
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
@@ -132,7 +132,10 @@ pub fn routes() -> Router<AppState> {
             "/api/catalog/titles/{media_type}/{id}/cross-ids",
             put(put_cross_ids),
         )
-        .route("/api/titles/{media_type}/{id}/cross-ids", put(put_cross_ids))
+        .route(
+            "/api/titles/{media_type}/{id}/cross-ids",
+            put(put_cross_ids),
+        )
         .route(
             "/api/v1/titles/{media_type}/{id}/cross-ids",
             put(put_cross_ids),
@@ -271,8 +274,7 @@ async fn categories(
     let now: DateTime<Utc> = SystemTime::now().into();
     let limit = params.limit.unwrap_or(1000).clamp(1, 20_000);
     let records = state.catalog.list("shelf", limit, now).await?;
-    let mut val =
-        serde_json::to_value(&records).map_err(|e| AppError::Internal(e.to_string()))?;
+    let mut val = serde_json::to_value(&records).map_err(|e| AppError::Internal(e.to_string()))?;
     normalize_artwork_url(&mut val);
     Ok(Json(json!({ "records": val })))
 }

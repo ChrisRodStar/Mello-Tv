@@ -34,15 +34,23 @@ test('cancellation stops pending metadata reads', async () => {
 
 test('authentication and invalid response errors are not hidden by metadata retries', async () => {
   let calls = 0;
-  await expect(
-    awaitMetadata(
+  const originalError = new APIError(401, 'unauthorized');
+  let caught: unknown;
+  try {
+    await awaitMetadata(
       async () => {
         calls++;
-        throw new APIError(401, 'unauthorized');
+        throw originalError;
       },
       () => true,
       new AbortController().signal,
-    ),
-  ).rejects.toThrow('Please sign in again.');
+    );
+  } catch (error) {
+    caught = error;
+  }
+  expect(caught).toBe(originalError);
+  expect(caught).toBeInstanceOf(APIError);
+  expect((caught as APIError).status).toBe(401);
+  expect((caught as APIError).code).toBe('unauthorized');
   expect(calls).toBe(1);
 });

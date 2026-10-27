@@ -316,7 +316,9 @@ impl HostState {
         let count = requests.len();
         self.reserve_response_metadata(count)?;
         let mut pending = FuturesUnordered::new();
-        for (index, ((request, timeout_ms), allocation)) in requests.into_iter().zip(allocations).enumerate() {
+        for (index, ((request, timeout_ms), allocation)) in
+            requests.into_iter().zip(allocations).enumerate()
+        {
             let transport = self.transport.clone();
             let req_deadline = if timeout_ms > 0 {
                 Instant::now() + Duration::from_millis(timeout_ms as u64)

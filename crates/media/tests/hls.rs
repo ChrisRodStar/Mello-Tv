@@ -507,9 +507,15 @@ fn errors_and_sample_debug_do_not_reveal_signed_urls() -> TestResult {
 #[test]
 fn hls_parser_edge_cases_empty_and_unclosed_quotes() -> TestResult {
     // Empty body
-    assert!(matches!(parse_playlist(b"", &base()?), Err(HlsError::InvalidHeader)));
+    assert!(matches!(
+        parse_playlist(b"", &base()?),
+        Err(HlsError::InvalidHeader)
+    ));
     // Header only (no media or master variants)
-    assert!(matches!(parse_playlist(b"#EXTM3U\n", &base()?), Err(HlsError::Empty)));
+    assert!(matches!(
+        parse_playlist(b"#EXTM3U\n", &base()?),
+        Err(HlsError::Empty)
+    ));
     // Target duration but 0 segments
     assert!(matches!(
         parse_playlist(b"#EXTM3U\n#EXT-X-TARGETDURATION:10\n", &base()?),

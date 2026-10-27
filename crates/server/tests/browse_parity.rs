@@ -3,15 +3,15 @@
 use std::{sync::Arc, time::SystemTime};
 
 use chrono::{DateTime, Duration, Utc};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use stream_server::{
     routes,
     state::{AppState, NoopMediaEngine},
 };
 use stream_storage::{
+    AccountStore,
     catalog::{CatalogStore, CatalogWrite},
     db::Database,
-    AccountStore,
 };
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;

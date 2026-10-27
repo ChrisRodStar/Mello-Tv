@@ -55,7 +55,11 @@ impl LiveHost {
             let futures = urls.iter().map(|url| {
                 let client = client.clone();
                 async move {
-                    let _ = client.head(*url).timeout(Duration::from_secs(2)).send().await;
+                    let _ = client
+                        .head(*url)
+                        .timeout(Duration::from_secs(2))
+                        .send()
+                        .await;
                 }
             });
             futures_util::future::join_all(futures).await;
@@ -122,9 +126,8 @@ async fn execute_request(client: &reqwest::Client, req: Request) -> Result<Respo
 impl ProviderHost for LiveHost {
     fn fetch(&self, request: Request) -> Result<Response, HostError> {
         let client = self.client.clone();
-        self.rt.block_on(async move {
-            execute_request(&client, request).await
-        })
+        self.rt
+            .block_on(async move { execute_request(&client, request).await })
     }
 
     fn fetch_batch(
@@ -135,9 +138,7 @@ impl ProviderHost for LiveHost {
         Ok(self.rt.block_on(async move {
             let futures = requests.into_iter().map(|req| {
                 let client = client.clone();
-                async move {
-                    execute_request(&client, req).await
-                }
+                async move { execute_request(&client, req).await }
             });
             futures_util::future::join_all(futures).await
         }))
@@ -277,7 +278,11 @@ fn main() {
 
                     for (idx, stream) in candidates.iter().take(3).enumerate() {
                         let sample_url = if stream.url.len() > 65 {
-                            format!("{}...{}", &stream.url[..40], &stream.url[stream.url.len() - 20..])
+                            format!(
+                                "{}...{}",
+                                &stream.url[..40],
+                                &stream.url[stream.url.len() - 20..]
+                            )
                         } else {
                             stream.url.clone()
                         };

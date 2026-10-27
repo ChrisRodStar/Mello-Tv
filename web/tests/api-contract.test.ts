@@ -46,7 +46,7 @@ async function browser<T>(work: () => Promise<T>) {
     Object.defineProperty(globalThis, 'window', { configurable: true, value: before });
   }
 }
-test('setup retries retain one key, exact specials/cross IDs and cookie auth', () =>
+test('setup retries retain one key, exact specials/cross IDs and cookie-free auth', () =>
   browser(async () => {
     const original = globalThis.fetch;
     const calls: { path: string; options: RequestInit }[] = [];
@@ -68,7 +68,7 @@ test('setup retries retain one key, exact specials/cross IDs and cookie auth', (
         mal_id: 42,
       });
       expect(payload.context_key).toBeUndefined();
-      expect(calls[0]!.options.credentials).toBe('same-origin');
+      expect(calls[0]!.options.credentials).toBe('omit');
       expect(new Headers(calls[0]!.options.headers).get('Idempotency-Key')).toBe(
         new Headers(calls[1]!.options.headers).get('Idempotency-Key'),
       );

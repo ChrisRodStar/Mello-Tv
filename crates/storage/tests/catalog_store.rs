@@ -540,7 +540,11 @@ async fn invalid_cross_ids_writes_are_rejected() -> TestResult {
     assert!(matches!(
         store
             .put(
-                write("cross_ids", "movie:550", json!({"imdb_id": "not_an_imdb_id", "mal_id": 10})),
+                write(
+                    "cross_ids",
+                    "movie:550",
+                    json!({"imdb_id": "not_an_imdb_id", "mal_id": 10})
+                ),
                 instant
             )
             .await,
@@ -550,7 +554,11 @@ async fn invalid_cross_ids_writes_are_rejected() -> TestResult {
     assert!(matches!(
         store
             .put(
-                write("cross_ids", "movie:550", json!({"imdb_id": "tt1234567", "mal_id": -5})),
+                write(
+                    "cross_ids",
+                    "movie:550",
+                    json!({"imdb_id": "tt1234567", "mal_id": -5})
+                ),
                 instant
             )
             .await,

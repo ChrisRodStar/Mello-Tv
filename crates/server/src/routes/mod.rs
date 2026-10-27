@@ -2,9 +2,9 @@ pub mod browse;
 pub mod profiles;
 pub mod stream;
 
-use std::path::PathBuf;
 use crate::state::AppState;
 use axum::Router;
+use std::path::PathBuf;
 
 pub fn build_router(state: AppState) -> Router {
     build_router_with_static(state, None)
