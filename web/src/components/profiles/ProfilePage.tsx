@@ -281,6 +281,12 @@ export function ProfilePage({
           </span>
           <Icon name="right" />
         </a>
+        <div className="profile-tmdb-attribution">
+          <a href="https://www.themoviedb.org/" target="_blank" rel="noopener noreferrer" aria-label="The Movie Database">
+            <img src="/attribution/tmdb-logo.svg" alt="TMDB" />
+          </a>
+          <small>This product uses the TMDB API but is not endorsed or certified by TMDB.</small>
+        </div>
 
       </section>
 

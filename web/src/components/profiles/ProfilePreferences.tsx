@@ -24,7 +24,7 @@ export function ProfilePreferences({
   onCancel?: () => void;
 }) {
   const setup = usePreferenceSetup(profile, onSave);
-  const artwork = useGenreArtwork();
+  const artwork = useGenreArtwork(profile.id);
   const heading = useRef<HTMLHeadingElement>(null);
   useEffect(() => {
     heading.current?.focus();

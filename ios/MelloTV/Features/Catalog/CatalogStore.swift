@@ -60,6 +60,8 @@ final class CatalogStore {
             do {
                 let response: CatalogResponse
                 if let profileID {
+                    try await api.waitForCatalogReady(profileID: profileID)
+                    guard !Task.isCancelled else { return }
                     response = try await api.recommendationPage(category: category.mediaTypeFilter, profileID: profileID, topic: "all")
                 } else {
                     response = try await api.home()

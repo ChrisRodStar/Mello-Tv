@@ -200,6 +200,34 @@ impl CatalogStore {
             .await
     }
 
+    pub async fn delete(&self, kind: &str, key: &str) -> Result<(), StorageError> {
+        if kind.is_empty() || kind.len() > 64 || key.is_empty() || key.len() > 200 {
+            return Err(StorageError::InvalidInput(
+                "invalid catalog record kind/key",
+            ));
+        }
+        let kind = kind.to_owned();
+        let key = key.to_owned();
+        self.database
+            .call(move |connection| {
+                let transaction =
+                    connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+                let removed = transaction.execute(
+                    "DELETE FROM records WHERE kind=?1 AND key=?2",
+                    params![kind, key],
+                )?;
+                if removed > 0 {
+                    let next = revision(&transaction)?
+                        .checked_add(1)
+                        .ok_or(StorageError::Capacity)?;
+                    transaction.execute("UPDATE revision SET value=?1", [next])?;
+                }
+                transaction.commit()?;
+                Ok(())
+            })
+            .await
+    }
+
     pub async fn put(&self, write: CatalogWrite, now: DateTime<Utc>) -> Result<i64, StorageError> {
         self.put_batch(vec![write], now).await
     }

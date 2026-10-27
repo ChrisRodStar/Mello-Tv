@@ -60,29 +60,31 @@ export function usePreferenceSetup(
     } catch {
       /* Keep onboarding usable with storage disabled. */
     }
-    if (step !== 'titles') return () => pending.current?.abort();
+  }, [step, genres, format, likedTitles, profile.id]);
+  useEffect(() => () => pending.current?.abort(), []);
+  useEffect(() => {
+    if (step !== 'titles') return;
     const controller = new AbortController();
-    let retry: ReturnType<typeof setTimeout> | undefined;
-    async function refresh(attempt: number) {
+    async function refresh() {
       try {
         const choices = await loadChoices(
-          AbortSignal.any([controller.signal, AbortSignal.timeout(15000)]),
+          AbortSignal.any([controller.signal, AbortSignal.timeout(120000)]),
           { genres, format },
+          profile.id,
         );
         if (controller.signal.aborted) return;
-        if (choices.length) setTitles(choices);
-        if (choices.length >= 24 || attempt >= 24) return;
-      } catch {
-        if (controller.signal.aborted || attempt >= 24) return;
+        setTitles(choices);
+        if (!choices.length) setError('No saved title choices are available yet. Try again shortly.');
+      } catch (cause) {
+        if (!controller.signal.aborted)
+          setError(cause instanceof Error ? cause.message : 'Couldn’t load saved title choices. Try again.');
       }
-      retry = setTimeout(() => void refresh(attempt + 1), 5000);
     }
-    void refresh(0);
+    void refresh();
     return () => {
       controller.abort();
-      clearTimeout(retry);
     };
-  }, [step, genres, format, likedTitles, profile.id]);
+  }, [step, genres, format, profile.id]);
   async function next() {
     if (locked.current || genres.length < 3) return;
     locked.current = true;
@@ -92,17 +94,19 @@ export function usePreferenceSetup(
     setError('');
     try {
       const choices = await loadChoices(
-        AbortSignal.any([controller.signal, AbortSignal.timeout(15000)]),
+        AbortSignal.any([controller.signal, AbortSignal.timeout(120000)]),
         { genres, format },
+        profile.id,
       );
       if (controller.signal.aborted) return;
       setTitles(choices);
       setStep('titles');
-    } catch {
-      if (!controller.signal.aborted) setError('Couldn’t load saved title choices. Try again.');
+    } catch (cause) {
+      if (!controller.signal.aborted)
+        setError(cause instanceof Error ? cause.message : 'Couldn’t load saved title choices. Try again.');
     } finally {
       locked.current = false;
-      if (!controller.signal.aborted) setBusy(false);
+      setBusy(false);
     }
   }
   async function generate(skip = false) {
@@ -118,8 +122,8 @@ export function usePreferenceSetup(
           sessionStorage.removeItem(draftKey(profile.id));
         } catch {}
       }
-    } catch {
-      setError('Couldn’t save your preferences. Try again.');
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Couldn’t save your preferences. Try again.');
       setStep('titles');
     } finally {
       locked.current = false;

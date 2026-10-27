@@ -101,7 +101,7 @@ struct MelloTVAPI: Sendable {
 
     private func catalog(category: MediaType?, profileID: String?) async throws -> CatalogResponse {
         if let profileID { return try await recommendationPage(category: category, profileID: profileID) }
-        let browse: BrowseReply = try await request("browse")
+        let browse = try await browseReply()
         let sections = browse.records.map(\.data).filter {
             !$0.id.hasPrefix("onboarding-") && !$0.id.hasPrefix("favorites-")
         }.compactMap { shelf -> CatalogSection? in
@@ -109,6 +109,24 @@ struct MelloTVAPI: Sendable {
             return titles.isEmpty ? nil : CatalogSection(id: shelf.id, heading: shelf.heading, titles: titles)
         }
         return CatalogResponse(configured: true, titles: sections.flatMap(\.titles), sections: sections, featured: [])
+    }
+
+    private func browseReply() async throws -> BrowseReply {
+        let delays: [Duration] = [.zero, .seconds(2), .seconds(4), .seconds(7), .seconds(10), .seconds(12), .seconds(12)]
+        for delay in delays {
+            if delay > .zero { try await Task.sleep(for: delay) }
+            try Task.checkCancellation()
+            let reply: BrowseReply = try await request("browse")
+            switch reply.status {
+            case nil, .ready: return reply
+            case .pending: continue
+            case .unavailable:
+                throw APIError.serverMessage(reply.reason ?? "Catalog is unavailable. Configure TMDB in Mello TV Mac Settings, then try again.")
+            case .failed:
+                throw APIError.serverMessage(reply.reason ?? "Catalog titles could not be loaded. Try again.")
+            }
+        }
+        throw APIError.serverMessage("Catalog titles are still being prepared. Try again shortly.")
     }
 
     func recommendationCategory(id: String, category: MediaType?, profileID: String) async throws -> CatalogSection? {
@@ -185,21 +203,41 @@ struct MelloTVAPI: Sendable {
         return normalized == "scifi" ? "sciencefiction" : normalized
     }
 
-    func search(_ query: String, page: Int = 1) async throws -> SearchResponse {
-        let offset = max(0, page - 1) * 50
-        let reply: SearchReply = try await request("search", query: [
-            URLQueryItem(name: "q", value: query), URLQueryItem(name: "offset", value: String(offset))
-        ])
-        var titles = reply.records.map { $0.data.view }
-        if page == 1 {
-            do {
-                let discovery: SavedRecord<[WireTitle]> = try await request("search-results", query: [URLQueryItem(name: "q", value: query)])
-                titles += discovery.data.map(\.view)
-            } catch APIError.serverStatus(404) { }
+    func search(_ query: String, page: Int = 1, pageSize: Int = 20) async throws -> SearchResponse {
+        let offset = max(0, page - 1) * max(1, pageSize)
+        let delays: [Duration] = [.zero, .seconds(2), .seconds(4), .seconds(7), .seconds(10), .seconds(12), .seconds(12)]
+        for delay in delays {
+            if delay > .zero { try await Task.sleep(for: delay) }
+            try Task.checkCancellation()
+            let reply: SearchReply = try await request("search", query: [
+                URLQueryItem(name: "q", value: query), URLQueryItem(name: "offset", value: String(offset))
+            ])
+            if let status = reply.status, try catalogStatusError(status, reason: reply.reason) { continue }
+            var titles = reply.records.map { $0.data.view }
+            if page == 1 {
+                do {
+                    let discovery: SavedRecord<[WireTitle]> = try await request("search-results", query: [URLQueryItem(name: "q", value: query)])
+                    if let status = discovery.status, try catalogStatusError(status, reason: discovery.reason) { continue }
+                    titles += discovery.data.map(\.view)
+                } catch APIError.serverStatus(404) { }
+            }
+            var seen = Set<String>()
+            return SearchResponse(titles: titles.filter { seen.insert($0.id).inserted }, page: page,
+                                  totalPages: reply.records.count == reply.limit && offset < 10000 ? page + 1 : page,
+                                  limit: reply.limit)
         }
-        var seen = Set<String>()
-        return SearchResponse(titles: titles.filter { seen.insert($0.id).inserted }, page: page,
-                              totalPages: reply.records.count == reply.limit ? page + 1 : page)
+        throw APIError.serverMessage("Catalog titles are still being prepared. Try again shortly.")
+    }
+
+    private func catalogStatusError(_ status: CatalogGenerationStatus.State, reason: String?) throws -> Bool {
+        switch status {
+        case .ready: return false
+        case .pending: return true
+        case .unavailable:
+            throw APIError.serverMessage(reason ?? "Catalog is unavailable. Configure TMDB in Mello TV Mac Settings, then try again.")
+        case .failed:
+            throw APIError.serverMessage(reason ?? "Catalog titles could not be loaded. Try again.")
+        }
     }
 
     func details(for title: MediaTitle) async throws -> TitleDetails {
@@ -286,19 +324,55 @@ struct MelloTVAPI: Sendable {
     }
 
     func genreArtwork() async throws -> [String: GenreArtwork] {
-        let reply: BrowseReply = try await request("browse")
+        let reply = try await browseReply()
         var result: [String: GenreArtwork] = [:]
-        for shelf in reply.records.map(\.data) where shelf.id.hasPrefix("onboarding-") {
+        let genreIDs = Set(GenreOption.all.map(\.id))
+        for shelf in reply.records.map(\.data) {
+            let genre: String?
+            if shelf.id.hasPrefix("onboarding-") {
+                genre = String(shelf.id.dropFirst("onboarding-".count))
+            } else if shelf.id.hasPrefix("favorites-movie-") {
+                genre = String(shelf.id.dropFirst("favorites-movie-".count))
+            } else if shelf.id.hasPrefix("favorites-tv-") {
+                genre = String(shelf.id.dropFirst("favorites-tv-".count))
+            } else {
+                genre = nil
+            }
+            guard let genre, genreIDs.contains(genre) else { continue }
             if let title = shelf.titles.first {
-                result[String(shelf.id.dropFirst("onboarding-".count))] = GenreArtwork(
-                    imageUrl: artworkURL(title.backdrop ?? title.poster), title: title.title)
+                if result[genre] == nil || result[genre]?.imageUrl == nil {
+                    result[genre] = GenreArtwork(imageUrl: artworkURL(title.backdrop ?? title.poster), title: title.title)
+                }
             }
         }
         return result
     }
 
-    func onboardingTitles(preferences: ProfilePreferences) async throws -> [MediaTitle] {
-        let reply: BrowseReply = try await request("browse")
+    func catalogStatus(profileID: String) async throws -> CatalogGenerationStatus {
+        try await request("profiles/\(profileID)/catalog-status")
+    }
+
+    func waitForCatalogReady(profileID: String) async throws {
+        let delays: [Duration] = [.zero, .seconds(2), .seconds(4), .seconds(7), .seconds(10), .seconds(12), .seconds(12)]
+        for delay in delays {
+            if delay > .zero { try await Task.sleep(for: delay) }
+            try Task.checkCancellation()
+            let state = try await catalogStatus(profileID: profileID)
+            switch state.status {
+            case .ready: return
+            case .pending: continue
+            case .unavailable:
+                throw APIError.serverMessage(state.reason ?? "Catalog is unavailable. Configure TMDB in Mello TV Mac Settings, then try again.")
+            case .failed:
+                throw APIError.serverMessage(state.reason ?? "Recommendations could not be generated. Try again.")
+            }
+        }
+        throw APIError.serverMessage("Recommendations are still being prepared. Try again shortly.")
+    }
+
+    func onboardingTitles(preferences: ProfilePreferences, profileID: String) async throws -> [MediaTitle] {
+        try await waitForCatalogReady(profileID: profileID)
+        let reply = try await browseReply()
         let shelves = reply.records.map(\.data)
         var buckets: [[WireTitle]] = []
         for (index, genre) in preferences.genres.enumerated() {
@@ -326,9 +400,8 @@ struct MelloTVAPI: Sendable {
         return choices
     }
 
-    func onboardingGenerate(preferences: ProfilePreferences) async throws -> CatalogResponse {
-        // The catalog owns asynchronous recommendation generation after preferences save.
-        try await home()
+    func onboardingGenerate(profileID: String) async throws {
+        try await waitForCatalogReady(profileID: profileID)
     }
 
     // Exact resume reads avoid loading/hydrating the household's entire history
@@ -484,7 +557,8 @@ struct MelloTVAPI: Sendable {
     private func executeSingleRequest<Response: Decodable>(to candidate: URL, path: String, method: String,
                                                            bodyData: Data?, query: [URLQueryItem],
                                                            key: String?, timingID: UUID?,
-                                                           timeout: TimeInterval? = nil) async throws -> Response {
+                                                           timeout: TimeInterval? = nil,
+                                                           pendingAttempt: Int = 0) async throws -> Response {
         guard ["http", "https"].contains(candidate.scheme) else { throw APIError.invalidAddress }
         var components = URLComponents(url: candidate.appending(path: "api/v1/" + path), resolvingAgainstBaseURL: false)
         components?.queryItems = query.isEmpty ? nil : query
@@ -517,6 +591,21 @@ struct MelloTVAPI: Sendable {
         }
 
         guard let http = response as? HTTPURLResponse else { throw APIError.invalidResponse }
+        let statusPayload = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+        let isMetadataPending = http.statusCode == 202 ||
+            (statusPayload?["status"] as? String == "pending" &&
+             statusPayload?["key"] != nil && statusPayload?["records"] == nil && statusPayload?["data"] == nil)
+        if isMetadataPending {
+            guard method == "GET", pendingAttempt < 7 else {
+                throw APIError.serverMessage("Catalog data is still being prepared. Try again shortly.")
+            }
+            let delays: [Duration] = [.seconds(1), .seconds(2), .seconds(3), .seconds(5), .seconds(8), .seconds(12), .seconds(12)]
+            try await Task.sleep(for: delays[pendingAttempt])
+            try Task.checkCancellation()
+            return try await executeSingleRequest(to: candidate, path: path, method: method,
+                bodyData: bodyData, query: query, key: key, timingID: timingID, timeout: timeout,
+                pendingAttempt: pendingAttempt + 1)
+        }
         guard (200..<300).contains(http.statusCode) else {
             if http.statusCode == 404 { throw APIError.serverStatus(404) }
             let code = (try? JSONDecoder().decode(FailureReply.self, from: data))?.error ?? "unavailable"
@@ -525,6 +614,11 @@ struct MelloTVAPI: Sendable {
         if http.statusCode == 204, let empty = EmptyReply() as? Response { return empty }
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase
+        if let value = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let status = value["status"] as? String,
+           status == "unavailable" || status == "failed" {
+            throw APIError.serverMessage(value["reason"] as? String ?? "Catalog data could not be loaded. Try again.")
+        }
         guard let reply = try? decoder.decode(Response.self, from: data) else { throw APIError.invalidData }
         return reply
     }
@@ -601,13 +695,27 @@ private struct FailureReply: Decodable {
             ?? "unavailable"
     }
 }
-private struct SavedRecord<Value: Decodable>: Decodable { let data: Value }
+private struct SavedRecord<Value: Decodable>: Decodable {
+    let data: Value
+    let status: CatalogGenerationStatus.State?
+    let reason: String?
+}
 private struct HomePageReply: Decodable { let sections: [WireShelf]; let featured: [WireTitle] }
 private struct FeedbackReply: Decodable { let hidden: [WireTitle]; let watched: [WireTitle]; let ignored: [WireTitle]; let favorites: [WireTitle]; let topics: [String] }
-private struct BrowseReply: Decodable { let records: [SavedRecord<WireShelf>] }
+private struct BrowseReply: Decodable {
+    let records: [SavedRecord<WireShelf>]
+    let status: CatalogGenerationStatus.State?
+    let reason: String?
+}
 private struct ProfilesReply: Decodable { let profiles: [Profile] }
 private struct TitlesReply: Decodable { let titles: [WireTitle] }
-private struct SearchReply: Decodable { let records: [SavedRecord<WireTitle>]; let offset: Int; let limit: Int }
+private struct SearchReply: Decodable {
+    let records: [SavedRecord<WireTitle>]
+    let offset: Int
+    let limit: Int
+    let status: CatalogGenerationStatus.State?
+    let reason: String?
+}
 private struct HistoryReply: Decodable { let records: [WireProgress]; let offset: Int; let limit: Int }
 private struct WireShelf: Decodable { let id: String; let heading: String; let titles: [WireTitle] }
 private struct WireRecommendations: Decodable { let sections: [WireShelf] }

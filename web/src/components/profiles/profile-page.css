@@ -826,6 +826,26 @@
   color: #ffdd00;
   font-size: 24px;
 }
+
+.profile-tmdb-attribution {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 0 4px;
+  color: var(--text-muted, #92929a);
+}
+
+.profile-tmdb-attribution img {
+  display: block;
+  width: 56px;
+  height: auto;
+}
+
+.profile-tmdb-attribution small {
+  max-width: 34rem;
+  font-size: 0.72rem;
+  line-height: 1.45;
+}
 .profile-app-settings > a:hover,
 .profile-app-settings > button:hover {
   background: var(--raised-hover);

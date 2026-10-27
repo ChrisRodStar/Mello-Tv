@@ -30,3 +30,12 @@ Server data and logs live under `~/Library/Application Support/Mello TV` and `~/
 ## Settings
 
 Settings stays in the native content pane, with General, Server, Updates, and About sections. General saves a Dock-only, menu-bar-only, or combined presentation preference and applies it immediately. The menu bar and application menu both expose Settings; the application shortcut is Command-comma. Launch at login is shared between General and the menu-bar command. Server contains process controls and shortcuts to logs and data. Updates reports installed app/provider versions without claiming an availability check.
+
+
+## Catalog setup
+
+Open **Settings → Server → Catalog · TMDB**, then paste your own TMDB API key (v3) or API Read Access Token from [TMDB account settings](https://www.themoviedb.org/settings/api). **Save & Restart Server** validates the credential against TMDB, saves it in this Mac’s Keychain, and restarts the local server. Active streams are interrupted by the restart. The credential is never written to UserDefaults, the app bundle, logs, or Git. Remove deletes only the saved credential; profiles and cached metadata remain.
+
+A new install starts with no catalog entries. Creating a profile starts fetching real onboarding title choices. Saving the completed profile’s genres and favorite titles starts its personalized recommendations. Missing title and season details are fetched on demand; cached metadata remains available during upstream outages. There is no bundled demo catalog. Companion iOS and web clients use the credential configured on their server, rather than storing a second credential on each viewing device.
+
+For a server launched directly from a terminal or service manager, supply `TMDB_API_KEY` or `TMDB_READ_ACCESS_TOKEN` through its private runtime environment. Keep those values outside Git. The Mac’s saved Keychain credential takes precedence over an inherited runtime credential.

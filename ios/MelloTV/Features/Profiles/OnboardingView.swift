@@ -356,12 +356,12 @@ struct OnboardingView: View {
         operationTask = Task { @MainActor in
             defer { isLoading = false; operationTask = nil }
             do {
-                let titles = try await api.onboardingTitles(preferences: preferences)
+                let titles = try await api.onboardingTitles(preferences: preferences, profileID: profile.id)
                 try Task.checkCancellation()
                 candidateTitles = titles
                 currentStep = .titles
             } catch {
-                if !Task.isCancelled { errorMessage = "Couldn’t load titles. Try again when you’re connected." }
+                if !Task.isCancelled { errorMessage = error.localizedDescription }
             }
         }
     }
@@ -376,13 +376,12 @@ struct OnboardingView: View {
         operationTask = Task { @MainActor in
             defer { isLoading = false; operationTask = nil }
             do {
-                _ = try await api.onboardingGenerate(preferences: preferences)
-                try Task.checkCancellation()
                 try await profileStore.completeOnboarding(with: preferences)
+                try Task.checkCancellation()
                 onCompleted?()
             } catch {
                 if !Task.isCancelled {
-                    errorMessage = "Couldn’t save your preferences. Your selections are kept. Try again."
+                    errorMessage = error.localizedDescription
                     currentStep = .titles
                 }
             }

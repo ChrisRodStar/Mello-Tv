@@ -136,6 +136,20 @@ final class ServerController {
         let process = Process()
         process.executableURL = serverBinary
         process.arguments = args
+        var environment = ProcessInfo.processInfo.environment
+        do {
+            if let credential = try CatalogCredentialStore.read() {
+                environment.removeValue(forKey: "TMDB_API_KEY")
+                environment.removeValue(forKey: "TMDB_READ_ACCESS_TOKEN")
+                environment.removeValue(forKey: "TMDB_ACCESS_TOKEN")
+                let name = CatalogCredentialStore.isAPIKey(credential) ? "TMDB_API_KEY" : "TMDB_READ_ACCESS_TOKEN"
+                environment[name] = credential
+            }
+        } catch {
+            // Never log the credential or request URL.
+            NSLog("Mello TV: catalog Keychain credential unavailable; configure it in Settings > Server.")
+        }
+        process.environment = environment
         
         if let handle = try? FileHandle(forWritingTo: logFileURL) {
             handle.seekToEndOfFile()

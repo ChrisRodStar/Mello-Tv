@@ -54,15 +54,58 @@ export async function enrichTitle(type: Title['type'], id: number, signal: Abort
     return known;
   }
 }
-export const browseSchema = z.object({ records: z.array(recordWire(shelfWire)) });
+export const browseSchema = z.object({
+  records: z.array(recordWire(shelfWire)),
+  status: z.enum(['pending', 'ready', 'unavailable', 'failed']).optional(),
+  reason: z.string().nullish(),
+});
+const catalogStatusWire = z.object({
+  status: z.enum(['pending', 'ready', 'unavailable', 'failed']),
+  updated_at: z.string().nullable().optional(),
+  reason: z.string().nullable().optional(),
+});
+export async function waitForCatalogReady(profileID: string, signal: AbortSignal) {
+  const delays = [0, 1500, 3000, 5000, 8000, 12000, 12000, 12000];
+  for (const delay of delays) {
+    signal.throwIfAborted();
+    if (delay) await new Promise<void>((resolve, reject) => {
+      const finish = () => { signal.removeEventListener('abort', abort); resolve(); };
+      const abort = () => { clearTimeout(timer); signal.removeEventListener('abort', abort); reject(signal.reason); };
+      const timer = setTimeout(finish, delay);
+      signal.addEventListener('abort', abort, { once: true });
+    });
+    const { status, reason } = await apiJSON(
+      `${profilePath(profileID)}/catalog-status`, catalogStatusWire, { signal },
+    );
+    if (status === 'ready') return;
+    if (status === 'failed' || status === 'unavailable')
+      throw new Error(reason || (status === 'unavailable' ? 'Catalog is unavailable. Try again later.' : 'Recommendations could not be generated. Try again.'));
+  }
+  throw new Error('Recommendations are still being prepared. Try again shortly.');
+}
 export async function loadBrowse(signal: AbortSignal) {
-  return apiJSON('/api/v1/browse', browseSchema, { signal });
+  const delays = [0, 1500, 3000, 5000, 8000, 12000, 12000];
+  for (const delay of delays) {
+    signal.throwIfAborted();
+    if (delay) await new Promise<void>((resolve, reject) => {
+      const finish = () => { signal.removeEventListener('abort', abort); resolve(); };
+      const abort = () => { clearTimeout(timer); signal.removeEventListener('abort', abort); reject(signal.reason); };
+      const timer = setTimeout(finish, delay);
+      signal.addEventListener('abort', abort, { once: true });
+    });
+    const result = await apiJSON('/api/v1/browse', browseSchema, { signal });
+    if (!result.status || result.status === 'ready') return result;
+    if (result.status === 'failed' || result.status === 'unavailable')
+      throw new Error(result.reason || (result.status === 'unavailable' ? 'Catalog is unavailable. Configure TMDB in Mello TV Mac Settings, then try again.' : 'Catalog titles could not be loaded. Try again.'));
+  }
+  throw new Error('Catalog titles are still being prepared. Try again shortly.');
 }
 export async function loadCatalog(
   profileID: string,
   category: Category,
   signal: AbortSignal,
 ): Promise<Catalog> {
+  await waitForCatalogReady(profileID, signal);
   const browse = await loadBrowse(signal);
   let personalized: z.infer<typeof recommendationsWire> | undefined;
   try {
@@ -155,7 +198,9 @@ export async function loadEpisodes(
 export async function loadChoices(
   signal: AbortSignal,
   preferences: Pick<ProfilePreferences, 'genres' | 'format'>,
+  profileID?: string,
 ): Promise<Title[]> {
+  if (profileID) await waitForCatalogReady(profileID, signal);
   const { records } = await loadBrowse(signal);
   return selectFavoriteChoices(
     records.map(({ data }) => ({ id: data.id, titles: data.titles.map(viewTitle) })),

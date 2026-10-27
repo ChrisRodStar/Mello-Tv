@@ -451,6 +451,27 @@ struct ProfilePageView: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Buy Me a Coffee, Support Mello TV")
+
+            Button {
+                openURL(URL(string: "https://www.themoviedb.org/")!)
+            } label: {
+                HStack(alignment: .center, spacing: 12) {
+                    Image("TMDBLogo")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 48, height: 36)
+                        .accessibilityHidden(true)
+                    Text("This product uses the TMDB API but is not endorsed or certified by TMDB.")
+                        .font(.caption2)
+                        .foregroundStyle(MelloTVTheme.muted)
+                        .multilineTextAlignment(.leading)
+                    Spacer(minLength: 0)
+                }
+                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("TMDB attribution. This product uses the TMDB API but is not endorsed or certified by TMDB.")
         }
     }
 

@@ -345,8 +345,8 @@ async fn home_and_recommendations_parity() -> TestResult {
     assert_eq!(res.status(), reqwest::StatusCode::OK);
     let recs: Value = res.json().await?;
     let rec_sections = recs["data"]["sections"].as_array().unwrap();
-    assert_eq!(rec_sections.len(), 1);
-    assert_eq!(rec_sections[0]["id"], "shelf-trending");
+    assert!(rec_sections.is_empty());
+    assert_eq!(recs["status"], "unavailable");
 
     Ok(())
 }
