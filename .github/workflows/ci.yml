@@ -16,7 +16,7 @@ concurrency:
 jobs:
   web:
     name: Web
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
     defaults:
       run:
         working-directory: web
