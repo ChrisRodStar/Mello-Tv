@@ -55,6 +55,7 @@ pub struct StreamQuery {
 
 pub fn routes() -> Router<AppState> {
     Router::new()
+        .route("/api/v1/update-readiness", get(update_readiness))
         // Stream delivery routes
         .route("/stream/{id}/entry", get(stream_entry))
         .route("/stream/{id}/r/{rid}", get(stream_resource))
@@ -126,6 +127,20 @@ pub fn routes() -> Router<AppState> {
             "/api/v1/profiles/{profile_id}/playback/{id}/upgrade",
             post(upgrade_playback_profile),
         )
+}
+
+async fn update_readiness(State(state): State<AppState>) -> Response {
+    match state.relay.active_streams() {
+        Some(active_streams) => (
+            [(header::CACHE_CONTROL, "no-store")],
+            Json(serde_json::json!({
+                "safe_to_restart": active_streams == 0,
+                "active_streams": active_streams,
+            })),
+        )
+            .into_response(),
+        None => StatusCode::SERVICE_UNAVAILABLE.into_response(),
+    }
 }
 
 fn generate_playback_id() -> Result<String, AppError> {
@@ -742,6 +757,7 @@ async fn mutate_session(
         ));
     }
 
+    state.relay.note_playback_activity(&id);
     let ready = mutated
         .ready
         .ok_or_else(|| AppError::Internal("missing ready state after mutation".into()))?;

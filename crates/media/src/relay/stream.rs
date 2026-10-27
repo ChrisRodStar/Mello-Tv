@@ -2,7 +2,7 @@ use std::{
     collections::BTreeMap,
     fmt::Write,
     pin::Pin,
-    sync::Mutex,
+    sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 
@@ -18,6 +18,38 @@ const DEFAULT_USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7
 const MAX_SESSIONS: usize = 256;
 const MAX_RESOURCES_PER_SESSION: usize = 16_384;
 const MAX_MANIFEST_BYTES: usize = 4 * 1024 * 1024;
+// Players buffer ahead and request segments in bursts; retain activity between requests.
+const PLAYBACK_IDLE_GRACE: Duration = Duration::from_secs(180);
+
+type PlaybackActivity = Arc<Mutex<BTreeMap<String, ActivityState>>>;
+
+struct ActivityState {
+    last_observed: Instant,
+    in_flight: usize,
+}
+
+impl ActivityState {
+    fn is_active(&self, now: Instant) -> bool {
+        self.in_flight > 0
+            || now.saturating_duration_since(self.last_observed) < PLAYBACK_IDLE_GRACE
+    }
+}
+
+struct ActivityGuard {
+    activity: PlaybackActivity,
+    session_id: String,
+}
+
+impl Drop for ActivityGuard {
+    fn drop(&mut self) {
+        if let Ok(mut activity) = self.activity.lock()
+            && let Some(session) = activity.get_mut(&self.session_id)
+        {
+            session.in_flight = session.in_flight.saturating_sub(1);
+            session.last_observed = Instant::now();
+        }
+    }
+}
 
 #[derive(Debug, Error)]
 pub enum RelayError {
@@ -63,6 +95,7 @@ struct SessionState {
 pub struct MediaRelay {
     sessions: Mutex<BTreeMap<String, SessionState>>,
     client: reqwest::Client,
+    activity: PlaybackActivity,
 }
 
 impl Default for MediaRelay {
@@ -87,7 +120,54 @@ impl MediaRelay {
         Self {
             sessions: Mutex::new(BTreeMap::new()),
             client,
+            activity: Arc::new(Mutex::new(BTreeMap::new())),
         }
+    }
+
+    /// Recent playback activity, including response bodies still being delivered.
+    /// None means activity could not be inspected; callers must defer a restart.
+    pub fn active_streams(&self) -> Option<usize> {
+        let now = Instant::now();
+        let mut activity = self.activity.lock().ok()?;
+        activity.retain(|_, session| session.is_active(now));
+        Some(activity.len())
+    }
+
+    pub fn note_playback_activity(&self, session_id: &str) {
+        if let Ok(mut activity) = self.activity.lock() {
+            let now = Instant::now();
+            activity.retain(|_, session| session.is_active(now));
+            activity
+                .entry(session_id.to_owned())
+                .and_modify(|session| {
+                    session.last_observed = now;
+                })
+                .or_insert(ActivityState {
+                    last_observed: now,
+                    in_flight: 0,
+                });
+        }
+    }
+
+    fn begin_delivery(&self, session_id: &str) -> Result<ActivityGuard, RelayError> {
+        let mut activity = self
+            .activity
+            .lock()
+            .map_err(|_| RelayError::SessionNotFound)?;
+        let now = Instant::now();
+        activity.retain(|_, session| session.is_active(now));
+        let session = activity
+            .entry(session_id.to_owned())
+            .or_insert(ActivityState {
+                last_observed: now,
+                in_flight: 0,
+            });
+        session.last_observed = now;
+        session.in_flight += 1;
+        Ok(ActivityGuard {
+            activity: self.activity.clone(),
+            session_id: session_id.to_owned(),
+        })
     }
 
     pub fn generate_token() -> String {
@@ -288,6 +368,13 @@ impl MediaRelay {
         if let Ok(mut map) = self.sessions.lock() {
             map.remove(session_id);
         }
+        if let Ok(mut activity) = self.activity.lock()
+            && activity
+                .get(session_id)
+                .is_some_and(|session| session.in_flight == 0)
+        {
+            activity.remove(session_id);
+        }
     }
 
     pub async fn fetch_entry(
@@ -351,6 +438,7 @@ impl MediaRelay {
         context: &FetchContext,
         range_header: Option<&str>,
     ) -> Result<RelayResponse, RelayError> {
+        let activity = self.begin_delivery(session_id)?;
         let mut req = self.client.get(upstream_url);
         req = req.header("User-Agent", DEFAULT_USER_AGENT);
         req = req.header("Accept", "*/*");
@@ -461,7 +549,11 @@ impl MediaRelay {
         let sniffed_content_type =
             sniff_media_content_type(&first_chunk, &final_url, &content_type_header);
         let combined = futures_util::stream::once(async move { Ok(first_chunk) })
-            .chain(byte_stream.map(|item| item.map_err(std::io::Error::other)));
+            .chain(byte_stream.map(|item| item.map_err(std::io::Error::other)))
+            .map(move |item| {
+                let _keep_delivery_active = &activity;
+                item
+            });
 
         Ok(RelayResponse::Binary {
             status,
@@ -505,4 +597,113 @@ fn sniff_media_content_type(first_chunk: &[u8], url: &Url, declared: &str) -> St
         return "text/vtt; charset=utf-8".into();
     }
     declared.to_owned()
+}
+
+#[cfg(test)]
+mod activity_tests {
+    use super::*;
+
+    #[test]
+    fn activity_expires_without_counting_retained_sessions_forever() {
+        let now = Instant::now();
+        let idle = ActivityState {
+            last_observed: now,
+            in_flight: 0,
+        };
+        assert!(idle.is_active(now + PLAYBACK_IDLE_GRACE - Duration::from_secs(1)));
+        assert!(!idle.is_active(now + PLAYBACK_IDLE_GRACE));
+        let delivering = ActivityState {
+            last_observed: now,
+            in_flight: 1,
+        };
+        assert!(delivering.is_active(now + PLAYBACK_IDLE_GRACE * 2));
+    }
+
+    #[test]
+    fn response_body_lifetime_and_cancellation_keep_restart_deferred() -> Result<(), RelayError> {
+        let relay = MediaRelay::new();
+        assert_eq!(relay.active_streams(), Some(0));
+        let body = relay.begin_delivery("playing")?;
+        if let Ok(mut activity) = relay.activity.lock() {
+            for session in activity.values_mut() {
+                session.last_observed = Instant::now() - PLAYBACK_IDLE_GRACE * 2;
+            }
+        }
+        assert_eq!(relay.active_streams(), Some(1));
+        relay.revoke_session("playing");
+        assert_eq!(relay.active_streams(), Some(1));
+        drop(body);
+        assert_eq!(relay.active_streams(), Some(1));
+        if let Ok(mut activity) = relay.activity.lock() {
+            for session in activity.values_mut() {
+                assert_eq!(session.in_flight, 0);
+                session.last_observed = Instant::now() - PLAYBACK_IDLE_GRACE;
+            }
+        }
+        assert_eq!(relay.active_streams(), Some(0));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn relay_response_holds_activity_until_its_body_is_dropped()
+    -> Result<(), Box<dyn std::error::Error>> {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let address = listener.local_addr()?;
+        let (close, closed) = tokio::sync::oneshot::channel();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await?;
+            let mut request = Vec::new();
+            let mut byte = [0u8; 1];
+            while !request.ends_with(b"\r\n\r\n") {
+                socket.read_exact(&mut byte).await?;
+                request.push(byte[0]);
+            }
+            socket
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Length: 1000\r\nContent-Type: video/mp2t\r\n\r\n",
+                )
+                .await?;
+            socket.write_all(&[0x47; 188]).await?;
+            let _ = closed.await;
+            Ok::<_, std::io::Error>(())
+        });
+        let relay = MediaRelay::new();
+        let response = relay
+            .proxy_url(
+                "playing",
+                "token",
+                &format!("http://{address}/segment.ts"),
+                &FetchContext::default(),
+                None,
+            )
+            .await?;
+        let RelayResponse::Binary { stream, .. } = response else {
+            return Err("expected binary response".into());
+        };
+        if let Ok(mut activity) = relay.activity.lock() {
+            for session in activity.values_mut() {
+                session.last_observed = Instant::now() - PLAYBACK_IDLE_GRACE * 2;
+            }
+        }
+        assert_eq!(relay.active_streams(), Some(1));
+        drop(stream);
+        // Cancellation starts the grace period, and a later explicit revoke clears it.
+        assert_eq!(relay.active_streams(), Some(1));
+        relay.revoke_session("playing");
+        assert_eq!(relay.active_streams(), Some(0));
+        let _ = close.send(());
+        server.await??;
+        Ok(())
+    }
+
+    #[test]
+    fn progress_keeps_buffered_playback_active_until_revoke() {
+        let relay = MediaRelay::new();
+        relay.note_playback_activity("playing");
+        relay.note_playback_activity("playing");
+        assert_eq!(relay.active_streams(), Some(1));
+        relay.revoke_session("playing");
+        assert_eq!(relay.active_streams(), Some(0));
+    }
 }

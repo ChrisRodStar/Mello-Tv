@@ -1507,10 +1507,12 @@ async fn update_progress(
     }
     update.validate()?;
     let now: DateTime<Utc> = SystemTime::now().into();
+    let playback_id = update.playback_id.clone();
     let progress = state
         .accounts
         .update_progress_at(&state.household_account_id, &id, update, now)
         .await?;
+    state.relay.note_playback_activity(&playback_id);
 
     Ok(Json(
         serde_json::to_value(progress).map_err(|e| AppError::Internal(e.to_string()))?,
@@ -1538,6 +1540,7 @@ async fn update_global_progress(
     };
 
     let now: DateTime<Utc> = SystemTime::now().into();
+    let playback_id = payload.update.playback_id.clone();
     let progress = state
         .accounts
         .update_progress_at(
@@ -1547,6 +1550,7 @@ async fn update_global_progress(
             now,
         )
         .await?;
+    state.relay.note_playback_activity(&playback_id);
 
     Ok(Json(
         serde_json::to_value(progress).map_err(|e| AppError::Internal(e.to_string()))?,
