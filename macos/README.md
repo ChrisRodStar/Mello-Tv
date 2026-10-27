@@ -21,7 +21,7 @@ Both windows embed SwiftUI inside a plain AppKit content controller with hosting
 
 ## Build and install
 
-Run `./macos/package-macos.sh` from the repository root. It builds the web assets and Rust server, compiles the native `MelloTV` executable, and creates `dist/macos/Mello TV.app` and a DMG.
+Release builds are assembled and signed locally, using tooling outside Git tracking. The DMG contains `Mello TV.app` and an Applications shortcut for drag-and-drop installation. Signing keys and notarization credentials remain in the maintainer’s Keychain.
 
 The bundle uses `MelloTV` for the native executable and `MelloTVServer` for its bundled server. The internal Rust package remains `stream-server`. The shared iOS Icon Composer document is compiled for macOS during packaging.
 

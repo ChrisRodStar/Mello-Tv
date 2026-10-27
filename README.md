@@ -52,11 +52,7 @@ git clone https://github.com/ChrisRodStar/stream.git && cd stream
 cargo run -p stream-server    # http://localhost:8080
 ```
 
-Want the native macOS menu bar app (`.app` & `.dmg`)?
-
-```bash
-./macos/package-macos.sh
-```
+Native macOS releases are distributed as a DMG containing the app and an Applications shortcut. Build, signing, and packaging commands are maintained locally outside Git tracking.
 
 For full setup guides, iOS companion installation, and remote Tailscale streaming → **[Documentation](https://mellowatch.com/docs)**
 
