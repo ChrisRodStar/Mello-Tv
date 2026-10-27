@@ -28,6 +28,27 @@ use stream_storage::{
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
 
+fn assert_recommendations_record(response: &Value, profile_id: &str, state: &str) {
+    assert_eq!(response["kind"], "recommendations");
+    assert_eq!(response["key"], profile_id);
+    assert_eq!(response["state"], state);
+    assert!(
+        response["revision"]
+            .as_u64()
+            .is_some_and(|revision| revision > 0)
+    );
+    assert!(response["updated_at"].as_str().is_some());
+    assert!(response["expires_at"].as_str().is_some());
+    assert!(
+        response["data"]["fingerprint"]
+            .as_str()
+            .is_some_and(|fingerprint| !fingerprint.is_empty())
+    );
+    assert!(response["data"]["pool"].is_array());
+    assert!(!response["data"]["pool"].as_array().unwrap().is_empty());
+    assert!(response["data"]["sections"].is_array());
+}
+
 #[derive(Clone)]
 struct MockState {
     calls: Arc<AtomicUsize>,
@@ -382,6 +403,7 @@ async fn cold_install_onboarding_profile_recommendations_and_restart_cache() -> 
         .json()
         .await?;
     assert_eq!(recs["status"], "ready");
+    assert_recommendations_record(&recs, &first, "fresh");
     assert!(
         !recs["data"]["sections"].as_array().unwrap().is_empty(),
         "series history must aggregate by show before recommendation validation"
@@ -569,6 +591,7 @@ async fn cold_install_onboarding_profile_recommendations_and_restart_cache() -> 
         .await?;
     assert_eq!(offline_recs["status"], "ready");
     assert_eq!(offline_recs["stale"], true);
+    assert_recommendations_record(&offline_recs, &first, "stale");
     assert!(
         !offline_recs["data"]["sections"]
             .as_array()

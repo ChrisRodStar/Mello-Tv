@@ -1293,7 +1293,7 @@ async fn get_recommendations(
     let media_filter = params.media_type.as_deref().unwrap_or("all");
     if !profile.preferences.completed {
         return Ok(Json(
-            json!({"status":"unavailable","reason":"Complete profile preferences to generate recommendations.","data":{"sections":[]}}),
+            json!({"status":"unavailable","reason":"Complete profile preferences to generate recommendations.","data":{"sections":[],"pool":[]}}),
         ));
     }
     let (excluded_titles, hidden_topics) = state
@@ -1317,12 +1317,10 @@ async fn get_recommendations(
         }
         _ => None,
     };
-    let mut sections = Vec::new();
-    let mut stale = false;
     let status;
     let mut reason: Option<String> = None;
     if let Some(record) = matching {
-        stale = record.expires_at <= now;
+        let stale = record.expires_at <= now || record.state == "stale";
         if stale {
             status = "ready";
             let configured = state
@@ -1348,84 +1346,105 @@ async fn get_recommendations(
                 "ready"
             };
         }
-        if let Some(values) = record
-            .data
-            .get("sections")
-            .and_then(|value| value.as_array())
-        {
-            for section in values {
-                let shelf_id = section
+
+        // Preserve the persisted CatalogRecord envelope and fingerprint. Filter its
+        // data in place so both web and iOS can decode their SavedRecord DTOs.
+        let mut response =
+            serde_json::to_value(&record).map_err(|e| AppError::Internal(e.to_string()))?;
+        let include_title = |title: &serde_json::Value| {
+            let media_ok = media_filter == "all"
+                || title.get("type").and_then(|value| value.as_str()) == Some(media_filter);
+            let key = format!(
+                "{}:{}",
+                title
+                    .get("type")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or_default(),
+                title
                     .get("id")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or_default();
-                if hidden_topics.contains(shelf_id) {
-                    continue;
-                }
-                let mut section = section.clone();
-                if let Some(titles) = section.get("titles").and_then(|value| value.as_array()) {
-                    let filtered: Vec<_> = titles
-                        .iter()
-                        .filter(|title| {
-                            let media_ok = media_filter == "all"
-                                || title.get("type").and_then(|v| v.as_str()) == Some(media_filter);
-                            let key = format!(
-                                "{}:{}",
-                                title
-                                    .get("type")
-                                    .and_then(|v| v.as_str())
-                                    .unwrap_or_default(),
-                                title.get("id").and_then(|v| v.as_i64()).unwrap_or(0)
-                            );
-                            media_ok && !excluded_titles.contains(&key)
-                        })
-                        .cloned()
-                        .collect();
-                    if let Some(object) = section.as_object_mut() {
-                        object.insert("titles".to_owned(), json!(filtered));
-                    }
-                }
-                if section
-                    .get("titles")
-                    .and_then(|value| value.as_array())
-                    .is_some_and(|values| !values.is_empty())
-                {
-                    sections.push(section);
-                }
+                    .and_then(|value| value.as_i64())
+                    .unwrap_or(0)
+            );
+            media_ok && !excluded_titles.contains(&key)
+        };
+        let pool = response["data"]["pool"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(&include_title)
+            .collect::<Vec<_>>();
+        let raw_sections = response["data"]["sections"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        let mut sections = Vec::new();
+        for mut section in raw_sections {
+            let shelf_id = section
+                .get("id")
+                .and_then(|value| value.as_str())
+                .unwrap_or_default();
+            if hidden_topics.contains(shelf_id) {
+                continue;
             }
+            let titles = section
+                .get("titles")
+                .and_then(|value| value.as_array())
+                .cloned()
+                .unwrap_or_default()
+                .into_iter()
+                .filter(&include_title)
+                .collect::<Vec<_>>();
+            if titles.is_empty() {
+                continue;
+            }
+            if let Some(object) = section.as_object_mut() {
+                object.insert("titles".to_owned(), json!(titles));
+            }
+            sections.push(section);
         }
-    } else {
-        let generation = state.catalog_generation(&id);
-        let cooldown_active = matches!(
-            generation.status,
-            CatalogGenerationStatus::Failed | CatalogGenerationStatus::Unavailable
-        ) && generation.updated_at.is_some_and(|updated| {
-            SystemTime::now()
-                .duration_since(updated.into())
-                .is_ok_and(|age| age < std::time::Duration::from_secs(30))
-        });
-        if cooldown_active {
-            status = match generation.status {
+        response["data"]["pool"] = json!(pool);
+        response["data"]["sections"] = json!(sections);
+        response["status"] = json!(status);
+        response["stale"] = json!(stale);
+        if let Some(reason) = reason {
+            response["reason"] = json!(reason);
+        }
+        normalize_artwork_url(&mut response);
+        return Ok(Json(response));
+    }
+
+    let generation = state.catalog_generation(&id);
+    let cooldown_active = matches!(
+        generation.status,
+        CatalogGenerationStatus::Failed | CatalogGenerationStatus::Unavailable
+    ) && generation.updated_at.is_some_and(|updated| {
+        SystemTime::now()
+            .duration_since(updated.into())
+            .is_ok_and(|age| age < std::time::Duration::from_secs(30))
+    });
+    let (status, reason) = if cooldown_active {
+        (
+            match generation.status {
                 CatalogGenerationStatus::Unavailable => "unavailable",
                 _ => "failed",
-            };
-            reason = generation.reason;
-        } else if state
-            .catalog_worker
-            .as_ref()
-            .is_some_and(|worker| worker.available())
-        {
-            queue_profile_recommendations(state.clone(), id.clone(), false, false).await;
-            status = "pending";
-        } else {
-            status = "unavailable";
-            reason = Some(CATALOG_CONFIG_GUIDANCE.to_owned());
-        }
-    }
-    let mut payload = json!({ "status": status, "stale": stale, "data": { "sections": sections } });
+            },
+            generation.reason,
+        )
+    } else if state
+        .catalog_worker
+        .as_ref()
+        .is_some_and(|worker| worker.available())
+    {
+        queue_profile_recommendations(state.clone(), id.clone(), false, false).await;
+        ("pending", None)
+    } else {
+        ("unavailable", Some(CATALOG_CONFIG_GUIDANCE.to_owned()))
+    };
+    let mut payload = json!({"status":status,"stale":false,"data":{"sections":[],"pool":[]}});
     if let Some(reason) = reason {
         payload["reason"] = json!(reason);
     }
-    normalize_artwork_url(&mut payload);
     Ok(Json(payload))
 }
 
