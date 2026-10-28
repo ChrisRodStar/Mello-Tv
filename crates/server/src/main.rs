@@ -15,7 +15,6 @@ pub struct ServerConfig {
     pub host: String,
     pub port: u16,
     pub db_path: PathBuf,
-    pub proxy: Option<String>,
     pub static_dir: Option<PathBuf>,
 }
 
@@ -44,12 +43,6 @@ impl ServerConfig {
             .map(PathBuf::from)
             .unwrap_or_else(|_| PathBuf::from("data"));
 
-        let mut proxy = std::env::var("STREAM_PROXY")
-            .or_else(|_| std::env::var("HTTP_PROXY"))
-            .or_else(|_| std::env::var("HTTPS_PROXY"))
-            .ok()
-            .filter(|p| !p.trim().is_empty());
-
         let mut static_dir = std::env::var("STREAM_STATIC_DIR")
             .or_else(|_| std::env::var("STATIC_DIR"))
             .ok()
@@ -77,9 +70,6 @@ impl ServerConfig {
                     println!("      --static-dir <PATH>    Static web assets directory");
                     println!(
                         "      --host <HOST>          Host address to bind to [default: 0.0.0.0]"
-                    );
-                    println!(
-                        "      --proxy <URL>          HTTP/SOCKS5 proxy URL for media network calls"
                     );
                     println!("  -h, --help                 Print help");
                     std::process::exit(0);
@@ -122,18 +112,6 @@ impl ServerConfig {
                 arg if arg.starts_with("--host=") => {
                     host = arg.trim_start_matches("--host=").to_string();
                 }
-                "--proxy" => {
-                    if let Some(val) = args.next() {
-                        proxy = Some(val);
-                    } else {
-                        return Err(ConfigError::InvalidArgument(
-                            "missing value for --proxy".into(),
-                        ));
-                    }
-                }
-                arg if arg.starts_with("--proxy=") => {
-                    proxy = Some(arg.trim_start_matches("--proxy=").to_string());
-                }
                 "--static-dir" => {
                     if let Some(val) = args.next() {
                         static_dir = Some(PathBuf::from(val));
@@ -158,7 +136,6 @@ impl ServerConfig {
             host,
             port,
             db_path,
-            proxy,
             static_dir,
         })
     }
@@ -237,7 +214,6 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         host = %config.host,
         port = config.port,
         db_path = %config.db_path.display(),
-        proxy = ?config.proxy,
         "loaded server configuration"
     );
 

@@ -1,9 +1,11 @@
 use std::{
     collections::BTreeSet,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, UdpSocket as StdUdpSocket},
-    process::Stdio,
     sync::Arc,
 };
+
+#[cfg(target_os = "macos")]
+use std::process::Stdio;
 
 use serde::Serialize;
 use tokio::net::UdpSocket;
@@ -407,6 +409,7 @@ pub fn spawn_discovery_services(server_id: String, http_port: u16) {
         }
     });
 
+    #[cfg(target_os = "macos")]
     tokio::spawn(async move {
         run_bonjour_registration(server_id, http_port).await;
     });
@@ -484,44 +487,42 @@ async fn run_udp_discovery_responder(server_id: String, http_port: u16) -> std::
     }
 }
 
+#[cfg(target_os = "macos")]
 async fn run_bonjour_registration(server_id: String, http_port: u16) {
     let server_name = detect_server_name();
-    #[cfg(target_os = "macos")]
+    let mut child = match tokio::process::Command::new("/usr/bin/dns-sd")
+        .args([
+            "-R",
+            &server_name,
+            BONJOUR_SERVICE_TYPE,
+            "local",
+            &http_port.to_string(),
+            "service=mello-tv",
+            "version=api.v1",
+            &format!("server_id={server_id}"),
+            "path=/api/v1/status",
+        ])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .kill_on_drop(true)
+        .spawn()
     {
-        let mut child = match tokio::process::Command::new("/usr/bin/dns-sd")
-            .args([
-                "-R",
-                &server_name,
-                BONJOUR_SERVICE_TYPE,
-                "local",
-                &http_port.to_string(),
-                "service=mello-tv",
-                "version=api.v1",
-                &format!("server_id={server_id}"),
-                "path=/api/v1/status",
-            ])
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .kill_on_drop(true)
-            .spawn()
-        {
-            Ok(c) => {
-                tracing::info!(
-                    service_type = BONJOUR_SERVICE_TYPE,
-                    %server_name,
-                    http_port,
-                    "registered Bonjour mDNS service via dns-sd"
-                );
-                c
-            }
-            Err(e) => {
-                tracing::debug!(error = %e, "failed to spawn dns-sd for Bonjour registration");
-                return;
-            }
-        };
-        let _ = child.wait().await;
-    }
+        Ok(c) => {
+            tracing::info!(
+                service_type = BONJOUR_SERVICE_TYPE,
+                %server_name,
+                http_port,
+                "registered Bonjour mDNS service via dns-sd"
+            );
+            c
+        }
+        Err(e) => {
+            tracing::debug!(error = %e, "failed to spawn dns-sd for Bonjour registration");
+            return;
+        }
+    };
+    let _ = child.wait().await;
 }
 
 #[cfg(test)]

@@ -258,7 +258,7 @@ impl MediaEngine for NoopMediaEngine {
 }
 
 pub const CATALOG_CONFIG_GUIDANCE: &str =
-    "Add a TMDB key in Mello TV Settings > Server to generate catalog metadata.";
+    "Catalog access is unavailable. Try again or configure a personal TMDB key on your server.";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "lowercase")]

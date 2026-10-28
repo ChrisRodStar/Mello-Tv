@@ -34,11 +34,17 @@ Settings stays in the native content pane, with General, Server, Updates, and Ab
 
 ## Catalog setup
 
-Open **Settings → Server → Catalog · TMDB**, then paste your own TMDB API key (v3) or API Read Access Token from [TMDB account settings](https://www.themoviedb.org/settings/api). **Save & Restart Server** validates the credential against TMDB, saves it in this Mac’s Keychain, and restarts the local server. Active streams are interrupted by the restart. The credential is never written to UserDefaults, the app bundle, logs, or Git. Remove deletes only the saved credential; profiles and cached metadata remain.
+Catalog access is included through the Rust server's shared application key.
+No TMDB account or key setup is required. To use a personal override, open
+**Settings → Server → Catalog · TMDB** and paste a TMDB API key or API Read
+Access Token. **Save & Restart Server** validates and saves it in this Mac's
+Keychain, then restarts the server. **Remove Override** deletes that personal
+credential and restores the default configuration. Server restarts interrupt
+active streams; profiles and cached metadata remain.
 
 A new install starts with no catalog entries. Creating a profile starts fetching real onboarding title choices. Saving the completed profile’s genres and favorite titles starts its personalized recommendations. Missing title and season details are fetched on demand; cached metadata remains available during upstream outages. There is no bundled demo catalog. Companion iOS and web clients use the credential configured on their server, rather than storing a second credential on each viewing device.
 
-For a server launched directly from a terminal or service manager, supply `TMDB_API_KEY` or `TMDB_READ_ACCESS_TOKEN` through its private runtime environment. Keep those values outside Git. The Mac’s saved Keychain credential takes precedence over an inherited runtime credential.
+For a server launched directly from a terminal or service manager, `TMDB_API_KEY` or `TMDB_READ_ACCESS_TOKEN` can optionally override the shared default. Personal credentials stay outside Git. The Mac’s saved Keychain credential takes precedence over an inherited runtime credential. The shared application key is distributed with the backend and can be extracted; it is not treated as a secret.
 
 ## Software updates
 

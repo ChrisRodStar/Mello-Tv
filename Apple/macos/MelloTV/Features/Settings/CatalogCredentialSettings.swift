@@ -13,10 +13,10 @@ struct CatalogCredentialSettings: View {
         VStack(alignment: .leading, spacing: 12) {
             Label("Catalog · TMDB", systemImage: "film.stack")
                 .font(.headline)
-            Text(hasCredential ? "A TMDB credential is saved in Keychain." : "Add your own TMDB API key or API Read Access Token to fetch titles during profile setup.")
+            Text(hasCredential ? "Your personal TMDB credential is saved in Keychain." : "Catalog access is included. You can optionally use your own TMDB API key or API Read Access Token.")
                 .font(.callout)
                 .foregroundStyle(MelloTVTheme.textSecondary)
-            SecureField(hasCredential ? "Replacement API key or Read Access Token" : "API key or Read Access Token", text: $input)
+            SecureField(hasCredential ? "Replacement API key or Read Access Token" : "Optional API key or Read Access Token", text: $input)
                 .textFieldStyle(.roundedBorder)
                 .disabled(isSaving)
                 .onSubmit { save() }
@@ -24,7 +24,7 @@ struct CatalogCredentialSettings: View {
                 Button(isSaving ? "Checking TMDB…" : "Save & Restart Server", action: save)
                     .disabled(isSaving || input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 if hasCredential {
-                    Button("Remove", role: .destructive, action: remove)
+                    Button("Remove Override", role: .destructive, action: remove)
                         .disabled(isSaving)
                 }
                 Spacer()
@@ -79,7 +79,7 @@ struct CatalogCredentialSettings: View {
             hasCredential = false
             input = ""
             isError = false
-            message = "Credential removed. Restarting the server."
+            message = "Personal credential removed. Restarting with the default configuration."
             onRestart()
         } catch { showError(error) }
     }

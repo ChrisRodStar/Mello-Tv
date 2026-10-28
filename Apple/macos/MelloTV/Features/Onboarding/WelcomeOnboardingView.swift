@@ -235,7 +235,7 @@ struct WelcomeOnboardingView: View {
                     .strokeBorder(MelloTVTheme.border, lineWidth: 1)
             }
 
-            Text("First add your TMDB API key in Settings → Server. Then open the web client or iOS companion app to create a profile and build your catalog.")
+            Text("Open the web client or iOS companion app to create a profile and build your catalog. Catalog access is included, with an optional personal key in Settings → Server.")
                 .font(.system(size: 11))
                 .foregroundStyle(MelloTVTheme.muted)
                 .multilineTextAlignment(.center)

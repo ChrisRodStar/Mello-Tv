@@ -1,7 +1,7 @@
 import Foundation
 import Security
 
-/// The catalog credential belongs to this Mac, never to the app bundle or UserDefaults.
+/// Personal overrides stay in this Mac's Keychain. The server owns the shared default.
 enum CatalogCredentialStore {
     private static let service = "com.tinymellow.mellotv.catalog"
     private static let account = "tmdb"
