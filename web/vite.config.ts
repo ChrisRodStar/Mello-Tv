@@ -2,8 +2,9 @@ import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
 
-// Development only. Production serves dist through the Go API and routes
-// /stream directly to the relay. These variables are never bundled into clients.
+// Development only. The Rust server serves the production web client, API,
+// and streams on the same origin. Overrides are never bundled into clients.
+const serverOrigin = process.env.MELLO_SERVER_ORIGIN ?? 'http://127.0.0.1:8080';
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   server: {
@@ -12,11 +13,11 @@ export default defineConfig({
     strictPort: true,
     proxy: {
       '/api': {
-        target: process.env.FAMILY_STREAM_API_ORIGIN ?? 'http://127.0.0.1:8090',
+        target: serverOrigin,
         changeOrigin: false,
       },
       '/stream': {
-        target: process.env.FAMILY_STREAM_STREAM_ORIGIN ?? 'http://127.0.0.1:8095',
+        target: serverOrigin,
         changeOrigin: false,
         configure(proxy) {
           // Vite's default proxy-error handler prints res.req.url; redact before

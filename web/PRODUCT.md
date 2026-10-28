@@ -1,6 +1,4 @@
-# Stream TV
-
-<!-- impeccable:product-schema 1 -->
+# Mello TV
 
 ## Platform
 
@@ -12,11 +10,11 @@ Household members browsing movies and television. Profiles share one private hou
 
 ## Product Purpose
 
-A simple, private catalog for finding and watching movies and TV, with personal lists, recommendations, and viewing progress for each profile. Household accounts authenticate access; the API enforces profile ownership.
+A simple, private catalog for finding and watching movies and TV, with personal lists, recommendations, and viewing progress for each profile. Profiles organize household data; access is restricted through the host network or private remote access.
 
 ## Operating Context
 
-The app is intended to run on a Raspberry Pi 5 or another always-on computer behind Tailscale. Local development uses a Vite frontend and API; production serves the built frontend from the API. SQLite holds profile and viewing data.
+The Rust backend runs in the native Mac server app or a Docker container on an always-on computer. Local development uses a Vite frontend and API; production serves the built frontend from the API. SQLite holds profile and viewing data.
 
 ## Capabilities and Constraints
 
@@ -24,12 +22,12 @@ The app is intended to run on a Raspberry Pi 5 or another always-on computer beh
 - Create and manage up to six profiles. New profiles select genres and favorites through the public API; favorite selection can be skipped when the catalog is still warming.
 - Profiles have Continue Watching, My List, and Watch History. Playback progress is measured per movie or episode and saved to SQLite for resume.
 - Recommendations combine onboarding choices and meaningful recent viewing. Snapshots persist across API restarts; ranking uses weighted genre, favorite and measured-viewing signals without an AI dependency.
-- Playback uses a custom fullscreen player with native HLS or hls.js, keyboard controls, and a mobile landscape layout. The Go API orchestrates native Go providers and a separate Rust relay; clients receive authorized same-origin stream URLs.
-- Household setup, password login, HttpOnly sessions and logout are implemented. Production remains private behind Tailscale.
+- Playback uses a custom fullscreen player with native HLS or hls.js, keyboard controls, and a mobile landscape layout. The Rust server orchestrates provider discovery and media delivery; clients receive authorized same-origin stream URLs.
+- The app opens into household profiles without a password login. Keep the server on a trusted network or behind private remote access.
 
 ## Brand Commitments
 
-- Keep the product a focused browsing app, not a promotional landing page. Display the Stream TV brand mark in the side navigation rail without filler slogans, coming-soon notices, roadmap text, or placeholder actions.
+- Keep the product a focused browsing app, not a promotional landing page. Display the Mello TV brand mark in the side navigation rail without filler slogans, coming-soon notices, roadmap text, or placeholder actions.
 - Use a side rail on larger screens and bottom navigation on phones. Make controls large and keyboard focus clear, including for television-sized displays.
 - Search has its own view, without a redundant heading or decorative search icon. Show real results and useful loading, error, and empty states; omit unavailable metadata.
 - Keep title details centered and compact, with artwork fading into the content background. Season selectors show season names only.

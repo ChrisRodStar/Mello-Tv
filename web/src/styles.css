@@ -1,6 +1,5 @@
 @import "tailwindcss";
 @import "./components/common/service-unavailable.css";
-@import "./components/auth/auth.css";
 @import "./components/navigation/navigation.css";
 @import "./components/catalog/featured-carousel.css";
 @import "./components/catalog/catalog.css";

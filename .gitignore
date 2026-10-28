@@ -16,6 +16,8 @@ secrets/
 *.sqlite-wal
 *.sqlite-shm
 *.db
+*.db-wal
+*.db-shm
 .local/
 
 # Web & Node / Bun
@@ -27,7 +29,7 @@ build/
 # Rust
 **/target/
 
-# Go
+# Compiled binaries
 *.exe
 *.test
 bin/
@@ -41,6 +43,8 @@ bin/
 # Logs & Temp
 *.log
 tmp/
+__pycache__/
+*.pyc
 
 # Local deployment tooling
 /deploy/

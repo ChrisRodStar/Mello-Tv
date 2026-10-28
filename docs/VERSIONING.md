@@ -1,21 +1,21 @@
 # Versioning
 
-The current product release is **0.1.0-alpha.2**, a pre-release under [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html).
+The product uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html),
+including pre-release labels such as `0.1.0-alpha.3`.
 
-## Release version and Apple bundle numbers
+The release identity is stored in the root `Cargo.toml`, `web/package.json`, and
+Apple `MelloTVReleaseVersion` settings. Keep these aligned during a release.
 
-The complete release string is kept separately from Apple’s numeric bundle fields:
+Apple bundle fields remain numeric:
 
-| Purpose | Current value | Setting |
-| --- | --- | --- |
-| Product release | `0.1.0-alpha.2` | Rust workspace/package versions, web package, release labels, and `MelloTVReleaseVersion` |
-| Apple marketing version | `0.1.0` | `CFBundleShortVersionString` / Xcode `MARKETING_VERSION` |
-| Apple build number | `2` | `CFBundleVersion` / Xcode `CURRENT_PROJECT_VERSION` |
+- `CFBundleShortVersionString` / `MARKETING_VERSION`: the numeric
+  `MAJOR.MINOR.PATCH` core, without a pre-release suffix.
+- `CFBundleVersion` / `CURRENT_PROJECT_VERSION`: an increasing build number.
 
-This is intentional. Apple requires `CFBundleShortVersionString` to contain three period-separated numeric components, and `CFBundleVersion` to use numeric components. The SemVer pre-release suffix therefore remains in `MelloTVReleaseVersion`; it is not omitted from the product release identity.
+Advance the full release label for each release and increase the Apple build
+number. Update the marketing version when the numeric product version changes.
+See [macOS packaging](../Apple/macos/README.md#build-and-install) for the local
+release workflow.
 
-References: [Apple `CFBundleShortVersionString`](https://developer.apple.com/documentation/bundleresources/information-property-list/cfbundleshortversionstring), [Apple `CFBundleVersion`](https://developer.apple.com/documentation/bundleresources/information-property-list/cfbundleversion), and [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html).
-
-## Updating a pre-release
-
-For the next alpha, advance the full release string to `0.1.0-alpha.3`, keep the Apple marketing version at `0.1.0`, and increment the Apple build number to `3`. Increment the build number for each subsequent alpha build (`alpha.4` uses build `4`, and so on). When the numeric product version changes, update the marketing version to its numeric `MAJOR.MINOR.PATCH` core and continue increasing the Apple build number.
+References: [Apple marketing version](https://developer.apple.com/documentation/bundleresources/information-property-list/cfbundleshortversionstring)
+and [Apple build number](https://developer.apple.com/documentation/bundleresources/information-property-list/cfbundleversion).
