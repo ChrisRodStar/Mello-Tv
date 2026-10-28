@@ -11,9 +11,13 @@
 
 </div>
 
-I built Mello TV because free movie sites suck. You click play and spend ten minutes fighting off fake download buttons, sketchy popups, and random redirects just to watch an episode of something in bed.
+### I built Mello TV because free movie sites suck.
 
-Mello TV finds the videos and plays them right in the app. Run it on your Mac or with Docker, then watch on your iPhone or in your browser.
+You sit down to watch one episode before bed. Ten minutes later, you've closed six tabs, dodged three fake download buttons, and somehow won an iPhone you never asked for. The episode still hasn't started.
+
+I wanted to watch a show, not fight the website.
+
+So I built Mello TV. It finds the videos and plays them right in the app. Run it on your Mac or with Docker, open it on your iPhone or in your browser, and pick something to watch.
 
 ## Get started
 
