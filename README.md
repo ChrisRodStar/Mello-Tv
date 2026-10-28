@@ -33,6 +33,9 @@ Mello TV makes your Mac do all the dirty work in the background. It finds the so
 
 ### Quick Start
 
+**Docker (Windows, Linux, or macOS):** see [Docker setup](docs/DOCKER.md) to run
+the backend and web client together with persistent data.
+
 1. **Install the Mac host** — Grab the DMG from [Releases](https://github.com/ChrisRodStar/Mello-Tv/releases) and drag **Mello TV** into your Applications folder.
 2. **Add TMDB** — Grab a free API key at [themoviedb.org](https://www.themoviedb.org). In Mello TV, go to **Settings → Server → Catalog** and paste it in. It saves securely to your Mac Keychain and loads all your posters, descriptions, and seasons.
 3. **Start watching** — Head to `http://localhost:8080` in your browser, or sideload the iOS IPA onto your iPhone. If you're on the same Wi-Fi, it finds the server immediately.
