@@ -68,6 +68,7 @@ def main():
                 assert expected_error in result.stderr.decode(), "Unexpected startup failure"
             compose("up", "-d", "--no-build", "--wait", "--wait-timeout", "90")
             assert request("/health/readyz")["status"] == "ready"
+            assert request("/api/v1/status")["catalog_configured"], "Shared catalog default is unavailable"
             html = request("/")
             assert b'<div id="root"' in html, "Missing web client"
             assets = re.findall(rb'(?:src|href)="(/assets/[^\"]+)"', html)
@@ -83,7 +84,10 @@ def main():
                 cwd=root, env=environment, capture_output=True, timeout=15,
             )
             assert write.returncode != 0 and b"Read-only file system" in write.stderr, "Root filesystem is writable"
-            profile = request("/api/v1/profiles", {"name": "Docker test", "color": "#446e88"})
+            profile = request("/api/v1/profiles", {
+                "name": "Docker test", "color": "#446e88",
+                "preferences": {"completed": False, "format": "both", "genres": ["action"]},
+            })
             profile_id = profile["id"]
             original_key = key_digest()
             compose("down")

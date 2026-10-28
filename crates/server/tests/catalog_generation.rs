@@ -836,7 +836,7 @@ async fn unconfigured_profile_is_explicit_and_never_fetches() -> TestResult {
         status["reason"]
             .as_str()
             .unwrap()
-            .contains("Mello TV Settings > Server")
+            .contains("personal TMDB key")
     );
     let recs: Value = client
         .get(format!(

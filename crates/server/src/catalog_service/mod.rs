@@ -53,7 +53,11 @@ pub enum GenerationStatus {
     Unavailable,
 }
 
-/// Explicit per-user TMDB credentials and optional mock URL. Debug output is redacted.
+// Application credential shared by Mello TV installations. Personal credentials
+// take precedence; this distributed default is not a secret.
+const DEFAULT_TMDB_API_KEY: &str = "0baf405940e1d8b7d196e5aa5301a371";
+
+/// TMDB credentials and optional mock URL. Debug output is redacted.
 pub struct CatalogWorkerConfig {
     bearer_token: Option<String>,
     api_key: Option<String>,
@@ -61,6 +65,16 @@ pub struct CatalogWorkerConfig {
 }
 
 impl CatalogWorkerConfig {
+    fn for_application(bearer_token: Option<String>, api_key: Option<String>) -> Self {
+        let bearer_token = bearer_token.filter(|value| !value.trim().is_empty());
+        let api_key = api_key.filter(|value| !value.trim().is_empty());
+        if bearer_token.is_none() && api_key.is_none() {
+            Self::new(None, Some(DEFAULT_TMDB_API_KEY.to_owned()))
+        } else {
+            Self::new(bearer_token, api_key)
+        }
+    }
+
     pub fn new(bearer_token: Option<String>, api_key: Option<String>) -> Self {
         Self {
             bearer_token,
@@ -113,12 +127,12 @@ impl CatalogWorker {
     pub fn from_env(store: Arc<CatalogStore>) -> Result<Self, CatalogServiceError> {
         let token = env::var("TMDB_READ_ACCESS_TOKEN")
             .ok()
-            .or_else(|| env::var("TMDB_ACCESS_TOKEN").ok())
-            .filter(|v| !v.trim().is_empty());
+            .filter(|v| !v.trim().is_empty())
+            .or_else(|| env::var("TMDB_ACCESS_TOKEN").ok());
         let api_key = env::var("TMDB_API_KEY")
             .ok()
             .filter(|v| !v.trim().is_empty());
-        Self::with_config(store, CatalogWorkerConfig::new(token, api_key))
+        Self::with_config(store, CatalogWorkerConfig::for_application(token, api_key))
     }
 
     pub fn with_config(
@@ -1605,6 +1619,81 @@ mod tests {
     use super::*;
 
     type TestResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
+
+    #[tokio::test]
+    async fn application_default_and_personal_credentials_reach_tmdb_correctly() -> TestResult {
+        use axum::{Json, Router, extract::Query, http::HeaderMap, routing::get};
+        use std::collections::HashMap;
+
+        for (token, key, expected_key, expected_token, rejected) in [
+            (None, None, Some(DEFAULT_TMDB_API_KEY), None, false),
+            (Some(" "), Some(""), Some(DEFAULT_TMDB_API_KEY), None, false),
+            (
+                None,
+                Some("personal-key"),
+                Some("personal-key"),
+                None,
+                false,
+            ),
+            (
+                Some("personal-token"),
+                None,
+                None,
+                Some("Bearer personal-token"),
+                false,
+            ),
+            (None, Some("rejected-key"), Some("rejected-key"), None, true),
+        ] {
+            let handler = move |Query(query): Query<HashMap<String, String>>,
+                                headers: HeaderMap| async move {
+                assert!(
+                    query.get("api_key").map(String::as_str) == expected_key,
+                    "Unexpected TMDB API key selection"
+                );
+                assert!(
+                    headers
+                        .get("authorization")
+                        .and_then(|value| value.to_str().ok())
+                        == expected_token,
+                    "Unexpected TMDB token selection"
+                );
+                let status = if rejected {
+                    StatusCode::UNAUTHORIZED
+                } else {
+                    StatusCode::OK
+                };
+                (
+                    status,
+                    Json(
+                        json!({"results": [{"media_type": "movie", "id": 603, "title": "The Matrix"}]}),
+                    ),
+                )
+            };
+            let router = Router::new().route("/search/multi", get(handler));
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+            let base_url = format!("http://{}", listener.local_addr()?);
+            let server = tokio::spawn(async move { axum::serve(listener, router).await });
+            let database = stream_storage::db::Database::in_memory(64).await?;
+            let store = Arc::new(CatalogStore::from_database(database).await?);
+            let config = CatalogWorkerConfig::for_application(
+                token.map(str::to_owned),
+                key.map(str::to_owned),
+            )
+            .with_base_url(base_url);
+            let worker = CatalogWorker::with_config(store, config)?;
+            let result = worker.search("The Matrix", 0).await;
+            server.abort();
+            if rejected {
+                assert!(matches!(
+                    result,
+                    Err(CatalogServiceError::CredentialRejected)
+                ));
+            } else {
+                assert!(result?.value.is_some());
+            }
+        }
+        Ok(())
+    }
 
     #[test]
     fn normalizes_tmdb_media_identity_artwork_and_details() {

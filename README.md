@@ -36,14 +36,13 @@ Mello TV runs on your Mac or in Docker. It finds the sources, strips out the gar
 #### Mac app
 
 1. **Install the Mac host** — Grab the DMG from [Releases](https://github.com/ChrisRodStar/Mello-Tv/releases) and drag **Mello TV** into your Applications folder.
-2. **Add TMDB** — Grab a free API key at [themoviedb.org](https://www.themoviedb.org). In Mello TV, go to **Settings → Server → Catalog** and paste it in. It saves securely to your Mac Keychain and loads all your posters, descriptions, and seasons.
+2. **Create a profile** — Open the web player or iOS app. Catalog access is included; no TMDB account or key setup is needed.
 3. **Start watching** — Head to `http://localhost:8080` in your browser, or sideload the iOS IPA onto your iPhone. If you're on the same Wi-Fi, it finds the server immediately.
 
 #### Docker — Windows, Linux, or macOS
 
 Install and start Docker. From a copy of this repository, use this
-`compose.yaml`, replacing `PASTE_YOUR_TMDB_API_KEY` with your own
-[TMDB API key](https://www.themoviedb.org/settings/api):
+`compose.yaml`. Catalog access is included:
 
 ```yaml
 services:
@@ -52,8 +51,6 @@ services:
     build: .
     ports:
       - "8080:8080"
-    environment:
-      TMDB_API_KEY: "PASTE_YOUR_TMDB_API_KEY"
     volumes:
       - mello-data:/data
     restart: unless-stopped
@@ -82,8 +79,9 @@ docker compose up -d --build --wait
 
 Open **http://localhost:8080**, or `http://SERVER-IP:8080` from another device.
 The first run builds the image locally. Your profiles, history, and catalog
-stay in the `mello-data` volume across container updates. Keep your configured
-Compose file private because it contains your key.
+stay in the `mello-data` volume across container updates. You can optionally
+supply a personal key through `TMDB_API_KEY` or `TMDB_READ_ACCESS_TOKEN` in
+the Compose service’s `environment` block.
 
 See [Docker management and verification](docs/DOCKER.md) for updates, storage,
 and networking details.

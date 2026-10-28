@@ -147,7 +147,7 @@ final class ServerController {
             }
         } catch {
             // Never log the credential or request URL.
-            NSLog("Mello TV: catalog Keychain credential unavailable; configure it in Settings > Server.")
+            NSLog("Mello TV: personal catalog credential unavailable; using the server's default configuration.")
         }
         process.environment = environment
         

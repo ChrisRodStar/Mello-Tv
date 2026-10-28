@@ -9,11 +9,14 @@ and `docker compose version` before continuing.
 
 ## Start
 
-Use the Compose example in the [README](../README.md#docker--windows-linux-or-macos).
-Set `TMDB_API_KEY` directly in its `environment` block and run it from the
-repository root. No separate environment file is required. For a TMDB read
-access token, use `TMDB_READ_ACCESS_TOKEN` instead of `TMDB_API_KEY`. Keep your
-configured Compose file private.
+Use the Compose example in the [README](../README.md#docker--windows-linux-or-macos)
+and run it from the repository root. Catalog access uses Mello TV's shared
+application key automatically. No TMDB signup or credential setup is required.
+
+To use your own credential, optionally add `TMDB_API_KEY` or
+`TMDB_READ_ACCESS_TOKEN` to the service's `environment` block. Personal
+credentials take precedence over the shared default. Keep any Compose file
+containing your personal credential private.
 
 ```sh
 docker compose up -d --build --wait
