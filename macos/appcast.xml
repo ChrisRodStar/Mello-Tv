@@ -1,9 +1,31 @@
-<?xml version="1.0" encoding="utf-8"?>
-<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
-  <channel>
-    <title>Mello TV Updates</title>
-    <link>https://github.com/ChrisRodStar/Mello-Tv/releases</link>
-    <description>Updates for Mello TV on macOS.</description>
-    <language>en</language>
-  </channel>
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
+    <channel>
+        <title>Mello TV Updates</title>
+        <link>https://github.com/ChrisRodStar/Mello-Tv/releases</link>
+        <description>Updates for Mello TV on macOS.</description>
+        <language>en</language>
+        <item>
+            <title>Mello TV 0.1.0-alpha.3</title>
+            <pubDate>Tue, 27 Oct 2026 13:33:23 -0400</pubDate>
+            <sparkle:version>3</sparkle:version>
+            <sparkle:shortVersionString>0.1.0-alpha.3</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="markdown"><![CDATA[Mello TV 0.1.0-alpha.3 introduces in-app updates for macOS and corrects the Mac catalog status display.
+
+- Signed updates: check from the Mello TV menu or Settings → Updates, with options for background checking and automatic updates.
+- Playback-aware installation: updates wait for active streaming to finish before restarting the Mac app and bundled server. A three-minute grace period bridges gaps between media requests; unavailable readiness checks postpone installation.
+- Catalog status: a working TMDB catalog now shows Available instead of Needs care.
+
+Install the signed, notarized Apple Silicon macOS DMG by dragging Mello TV into Applications. Existing public Mac builds need this one manual installation to gain in-app updates. Keep your existing application data; profiles, viewing history, cached metadata, and Keychain credentials are preserved.
+
+This is a Mac/server release. The iOS app is unchanged: continue using the alpha.2 IPA, which remains compatible and does not need reinstalling. [Download the unchanged iOS alpha.2 IPA](https://github.com/ChrisRodStar/Mello-Tv/releases/download/v0.1.0-alpha.2/Mello-TV-0.1.0-alpha.2-iOS.ipa).
+
+Supported packaged platforms remain Apple Silicon Macs (macOS 13+) and the existing iOS client. Windows and Linux releases are not yet available. Provider availability and playback quality still depend on the source/title. Run an appropriate VPN on the server Mac.
+
+]]></description>
+            <enclosure url="https://github.com/ChrisRodStar/Mello-Tv/releases/download/v0.1.0-alpha.3/Mello-TV-0.1.0-alpha.3-macOS.dmg" length="9690805" type="application/octet-stream" sparkle:edSignature="8XILNPo8DObTK960lCKs1PF2EuZTkOSGq4tteTV6RabE9rK/sPPAINwe6+7XlrZ/FiobisiBtGvnZpU2R3Z5CA=="/>
+        </item>
+    </channel>
 </rss>
