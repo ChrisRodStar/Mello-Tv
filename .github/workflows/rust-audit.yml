@@ -1,0 +1,47 @@
+name: Rust dependency audit
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - Cargo.lock
+      - '**/Cargo.lock'
+      - Cargo.toml
+      - 'crates/**/Cargo.toml'
+      - .github/workflows/rust-audit.yml
+  pull_request:
+    branches: [main]
+    paths:
+      - Cargo.lock
+      - '**/Cargo.lock'
+      - Cargo.toml
+      - 'crates/**/Cargo.toml'
+      - .github/workflows/rust-audit.yml
+  schedule:
+    - cron: '0 9 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rust-audit-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  audit:
+    name: Rust dependencies (macOS)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8
+        with:
+          toolchain: '1.99.1'
+      - uses: Swatinem/rust-cache@e9d7b9f1e587218970671bac74e5511ed9506e6a # v2
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --version 0.22.2 --locked
+      - name: Check dependencies against RustSec advisories
+        run: |
+          while IFS= read -r lockfile; do
+            cargo audit --file "$lockfile"
+          done < <(git ls-files Cargo.lock '**/Cargo.lock')
