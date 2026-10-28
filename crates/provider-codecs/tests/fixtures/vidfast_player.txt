@@ -1,5 +1,0 @@
-// Synthetic literal protocol fragments only; this file is never executed.
-const firstRoot = "/zirlaku/u/synthetic_protocol_root_0123456789abcdef";
-const firstHeaders = '{"X-Csrf-Token":"synthetic_csrf_token_0123456789"}';
-const repeatedRoot = "/zirlaku/u/synthetic_protocol_root_0123456789abcdef";
-const repeatedHeaders = '{"X-Csrf-Token":"synthetic_csrf_token_0123456789"}';

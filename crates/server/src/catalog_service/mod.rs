@@ -1604,6 +1604,8 @@ fn typed<T>(record: CatalogRecord<Value>, data: T) -> CatalogRecord<T> {
 mod tests {
     use super::*;
 
+    type TestResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
+
     #[test]
     fn normalizes_tmdb_media_identity_artwork_and_details() {
         let raw = json!({"media_type":"tv","id":60625,"name":"Rick and Morty","first_air_date":"2013-12-02","overview":"A real overview","vote_average":8.7,"poster_path":"/poster.jpg","backdrop_path":"/backdrop.jpg","genres":[{"name":"Sci-Fi & Fantasy"}],"seasons":[{"season_number":1,"name":"Season 1","episode_count":11}],"external_ids":{"imdb_id":"tt2861424"}});
@@ -1704,7 +1706,6 @@ mod tests {
             ("family", "movie", Some("10751")),
             ("family", "tv", Some("10751")),
         ];
-        let mut paths = Vec::new();
         for (genre, media, expected_id) in cases {
             let path = worker.discover_path(genre, media).await;
             assert!(path.is_ok());
@@ -1746,27 +1747,17 @@ mod tests {
                     Some("ja")
                 );
             }
-            paths.push((genre, media, query));
         }
-        assert!(
-            paths
-                .iter()
-                .all(|(genre, media, query)| *genre != "animation"
-                    || (query.get("with_original_language").map(String::as_str) == Some("ja")
-                        && (*media == "movie" || *media == "tv")))
-        );
         let _ = keyword_server.await;
         let _ = store.close().await;
     }
 
     #[test]
-    fn stale_search_snapshot_is_available_as_last_known_good() {
+    fn stale_search_snapshot_is_available_as_last_known_good() -> TestResult {
         let now: DateTime<Utc> = std::time::SystemTime::now().into();
-        let Some(title) =
+        let title =
             normalize_title(&json!({"media_type":"movie","id":123,"title":"Cached result"}))
-        else {
-            return;
-        };
+                .ok_or("stale search fixture did not normalize")?;
         let record = CatalogRecord {
             kind: "search".into(),
             key: "cached".into(),
@@ -1776,12 +1767,11 @@ mod tests {
             revision: 4,
             state: "stale".into(),
         };
-        let result = stale_search_lookup(Some(record), Vec::new(), now);
-        assert!(result.is_some());
-        if let Some(result) = result {
-            assert_eq!(result.availability, Availability::Stale);
-            assert_eq!(result.value.as_ref().map(Vec::len), Some(1));
-        }
+        let result = stale_search_lookup(Some(record), Vec::new(), now)
+            .ok_or("stale search snapshot was unavailable")?;
+        assert_eq!(result.availability, Availability::Stale);
+        assert_eq!(result.value.as_ref().map(Vec::len), Some(1));
+        Ok(())
     }
 
     #[test]
@@ -1866,7 +1856,7 @@ mod tests {
     }
 
     #[test]
-    fn weighted_recommendations_put_similar_to_favorite_ahead_of_genre_only_pick() {
+    fn weighted_recommendations_put_similar_to_favorite_ahead_of_genre_only_pick() -> TestResult {
         let movie = |id, title: &str| {
             TitleIdentity::new(stream_core::MediaType::Movie, id)
                 .ok()
@@ -1888,9 +1878,8 @@ mod tests {
         };
         let favorite_similar = movie(10, "Favorite adjacent");
         let genre_only = movie(11, "Genre adjacent");
-        let (Some(favorite_similar), Some(genre_only)) = (favorite_similar, genre_only) else {
-            return;
-        };
+        let favorite_similar = favorite_similar.ok_or("favorite fixture has invalid identity")?;
+        let genre_only = genre_only.ok_or("genre fixture has invalid identity")?;
         let contributions = vec![
             (vec![favorite_similar.clone()], 5.0),
             (vec![genre_only.clone()], 2.0),
@@ -1902,6 +1891,7 @@ mod tests {
                 .is_some_and(|title| title.identity == favorite_similar.identity)
         );
         assert_ne!(favorite_similar.identity, genre_only.identity);
+        Ok(())
     }
 
     #[tokio::test]
@@ -1994,73 +1984,72 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn search_fetches_and_caches_each_tmdb_page_separately() {
+    async fn search_fetches_and_caches_each_tmdb_page_separately() -> TestResult {
         use tokio::{
-            io::{AsyncReadExt, AsyncWriteExt},
+            io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
             net::TcpListener,
         };
-        let listener = TcpListener::bind("127.0.0.1:0").await;
-        assert!(listener.is_ok());
-        let Ok(listener) = listener else {
-            return;
-        };
-        let address = listener.local_addr();
-        assert!(address.is_ok());
-        let Ok(address) = address else {
-            return;
-        };
+        let listener = TcpListener::bind("127.0.0.1:0").await?;
+        let address = listener.local_addr()?;
         let server = tokio::spawn(async move {
-            for id in [1_i64, 2_i64] {
-                if let Ok((mut socket, _)) = listener.accept().await {
-                    let mut request = [0_u8; 2048];
-                    let _ = socket.read(&mut request).await;
-                    let payload = json!({"results":[{"media_type":"movie","id":id,"title":format!("Page {id}"),"overview":"real result","vote_average":7.0,"poster_path":"/poster.jpg"}]}).to_string();
-                    let head = format!(
-                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-                        payload.len()
-                    );
-                    let _ = socket.write_all(head.as_bytes()).await;
-                    let _ = socket.write_all(payload.as_bytes()).await;
+            for expected_page in [1_i64, 2_i64] {
+                let (mut socket, _) = listener.accept().await?;
+                let mut request_line = String::new();
+                let mut reader = BufReader::new(&mut socket);
+                reader.read_line(&mut request_line).await?;
+                loop {
+                    let mut header = String::new();
+                    if reader.read_line(&mut header).await? == 0 {
+                        return Err("request ended before headers completed".into());
+                    }
+                    if header == "\r\n" || header == "\n" {
+                        break;
+                    }
                 }
+                drop(reader);
+                let target = request_line
+                    .split_whitespace()
+                    .nth(1)
+                    .ok_or("missing request target")?;
+                let url = reqwest::Url::parse(&format!("http://{address}{target}"))?;
+                assert_eq!(url.path(), "/search/multi");
+                let query: std::collections::HashMap<_, _> =
+                    url.query_pairs().into_owned().collect();
+                assert_eq!(query.get("query").map(String::as_str), Some("page"));
+                assert_eq!(query.get("page"), Some(&expected_page.to_string()));
+                let payload = json!({"results":[{"media_type":"movie","id":expected_page,"title":format!("Page {expected_page}"),"overview":"real result","vote_average":7.0,"poster_path":"/poster.jpg"}]}).to_string();
+                let head = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    payload.len()
+                );
+                socket.write_all(head.as_bytes()).await?;
+                socket.write_all(payload.as_bytes()).await?;
             }
+            Ok::<(), Box<dyn std::error::Error + Send + Sync>>(())
         });
-        let dir = tempfile::tempdir();
-        assert!(dir.is_ok());
-        let Ok(dir) = dir else {
-            return;
-        };
-        let store = CatalogStore::open(dir.path().join("catalog.sqlite")).await;
-        assert!(store.is_ok());
-        let Ok(store) = store else {
-            return;
-        };
+        let dir = tempfile::tempdir()?;
+        let store = CatalogStore::open(dir.path().join("catalog.sqlite")).await?;
         let worker = CatalogWorker::for_mock(Arc::new(store.clone()), &format!("http://{address}"));
-        let first = worker.search("page", 0).await;
-        assert!(
-            first
-                .as_ref()
-                .is_ok_and(|result| result.value.as_ref().is_some_and(|items| items
-                    .first()
-                    .is_some_and(|item| item.data.title == "Page 1")))
+        for (offset, expected_title) in [(0, "Page 1"), (20, "Page 2")] {
+            let result = worker.search("page", offset).await?;
+            assert_eq!(result.availability, Availability::Fresh);
+            let items = result.value.ok_or("page missing from search result")?;
+            assert_eq!(
+                items.first().map(|item| item.data.title.as_str()),
+                Some(expected_title)
+            );
+        }
+        tokio::time::timeout(Duration::from_secs(2), server).await???;
+        // The mock listener is now closed: this lookup must be served from the cache.
+        let cached = worker.search("page", 20).await?;
+        assert_eq!(cached.availability, Availability::Fresh);
+        let items = cached.value.ok_or("cached page missing")?;
+        assert_eq!(
+            items.first().map(|item| item.data.title.as_str()),
+            Some("Page 2")
         );
-        let second = worker.search("page", 20).await;
-        assert!(
-            second
-                .as_ref()
-                .is_ok_and(|result| result.value.as_ref().is_some_and(|items| items
-                    .first()
-                    .is_some_and(|item| item.data.title == "Page 2")))
-        );
-        let cached = worker.search("page", 20).await;
-        assert!(
-            cached
-                .as_ref()
-                .is_ok_and(|result| result.value.as_ref().is_some_and(|items| items
-                    .first()
-                    .is_some_and(|item| item.data.title == "Page 2")))
-        );
-        let _ = server.await;
-        let _ = store.close().await;
+        store.close().await?;
+        Ok(())
     }
 
     #[tokio::test]
@@ -2152,18 +2141,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn upstream_failures_serve_stale_title_season_and_search_records() {
+    async fn upstream_failures_serve_stale_title_season_and_search_records() -> TestResult {
         use tokio::{io::AsyncReadExt, io::AsyncWriteExt, net::TcpListener};
-        let listener = TcpListener::bind("127.0.0.1:0").await;
-        assert!(listener.is_ok());
-        let Ok(listener) = listener else {
-            return;
-        };
-        let address = listener.local_addr();
-        assert!(address.is_ok());
-        let Ok(address) = address else {
-            return;
-        };
+        let listener = TcpListener::bind("127.0.0.1:0").await?;
+        let address = listener.local_addr()?;
         let server = tokio::spawn(async move {
             for _ in 0..3 {
                 if let Ok((mut socket, _)) = listener.accept().await {
@@ -2173,29 +2154,19 @@ mod tests {
                 }
             }
         });
-        let dir = tempfile::tempdir();
-        assert!(dir.is_ok());
-        let Ok(dir) = dir else {
-            return;
-        };
-        let store = CatalogStore::open(dir.path().join("catalog.sqlite")).await;
-        assert!(store.is_ok());
-        let Ok(store) = store else {
-            return;
-        };
+        let dir = tempfile::tempdir()?;
+        let store = CatalogStore::open(dir.path().join("catalog.sqlite")).await?;
         let now: DateTime<Utc> = std::time::SystemTime::now().into();
-        let Some(title) = normalize_title(
+        let title = normalize_title(
             &json!({"media_type":"movie","id":303,"title":"Last Known Good","overview":"cached","vote_average":7.0}),
-        ) else {
-            return;
-        };
+        ).ok_or("cached title fixture did not normalize")?;
         let season = Season {
             show_id: 42,
             season: 1,
             name: "Season One Cached".into(),
             episodes: Vec::new(),
         };
-        let search = store
+        store
             .put(
                 CatalogWrite {
                     kind: "search".into(),
@@ -2205,36 +2176,31 @@ mod tests {
                 },
                 now - chrono::Duration::days(15),
             )
-            .await;
-        let title_write = store
+            .await?;
+        store
             .put(
                 CatalogWrite {
                     kind: "title".into(),
                     key: "movie:303".into(),
-                    data: serde_json::to_value(&title).unwrap_or(Value::Null),
+                    data: serde_json::to_value(&title)?,
                     ttl: META_TTL,
                 },
                 now - chrono::Duration::days(15),
             )
-            .await;
-        let season_write = store
+            .await?;
+        store
             .put(
                 CatalogWrite {
                     kind: "season".into(),
                     key: "tv:42:1".into(),
-                    data: serde_json::to_value(&season).unwrap_or(Value::Null),
+                    data: serde_json::to_value(&season)?,
                     ttl: META_TTL,
                 },
                 now - chrono::Duration::days(15),
             )
-            .await;
-        assert!(search.is_ok() && title_write.is_ok() && season_write.is_ok());
+            .await?;
         let worker = CatalogWorker::for_mock(Arc::new(store.clone()), &format!("http://{address}"));
-        let identity = TitleIdentity::new(stream_core::MediaType::Movie, 303);
-        assert!(identity.is_ok());
-        let Ok(identity) = identity else {
-            return;
-        };
+        let identity = TitleIdentity::new(stream_core::MediaType::Movie, 303)?;
         let title_result = worker.title(identity).await;
         assert!(title_result.as_ref().is_ok_and(|result| {
             result.availability == Availability::Stale
@@ -2260,7 +2226,8 @@ mod tests {
                         .first()
                         .is_some_and(|record| record.data.title == "Last Known Good")))
         );
-        let _ = server.await;
-        let _ = store.close().await;
+        tokio::time::timeout(Duration::from_secs(2), server).await??;
+        store.close().await?;
+        Ok(())
     }
 }

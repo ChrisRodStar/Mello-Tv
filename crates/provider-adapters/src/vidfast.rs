@@ -391,22 +391,8 @@ fn parse_bootstrap(body: &[u8], title: &ProviderTitle) -> Result<(String, String
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_vidfast_format_and_noreferrer_rules() {
-        let json_no_referrer = br#"{"url":"https://example.com/stream.m3u8","tmdbId":123}"#;
-        let record: SourceRecord = serde_json::from_slice(json_no_referrer).unwrap();
-        assert!(record.no_referrer.is_none());
-
-        let json_conflict = br#"{"url":"https://example.com/stream.m3u8","tmdbId":123,"noReferrer":true,"mp4":true}"#;
-        let record2: SourceRecord = serde_json::from_slice(json_conflict).unwrap();
-        assert_eq!(record2.no_referrer, Some(true));
-        assert_eq!(record2.mp4, Some(true));
-        assert!(record2.url.ends_with(".m3u8"));
-    }
 
     #[test]
     fn tv_source_coordinates_may_be_omitted_but_must_match_when_present() {

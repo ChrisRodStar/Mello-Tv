@@ -128,31 +128,32 @@ fn videasy_accepts_observed_alphabets_and_tmdb_overflow_semantics() -> Result<()
 }
 
 #[test]
-fn pkcs7_padding_corruption_and_boundary_checks_reject_tampering() -> Result<(), Box<dyn Error>> {
+fn cbc_rejects_deterministically_invalid_pkcs7_padding() -> Result<(), Box<dyn Error>> {
     let key = [0x5au8; 32];
     let iv = [0x2bu8; 16];
     let plaintext = b"exact-16-bytes!!";
     let ciphertext = crypto::aes_cbc_encrypt(&key, &iv, plaintext)?;
     assert_eq!(ciphertext.len(), 32); // 16 bytes plaintext + 16 bytes PKCS#7 padding block
 
-    // Flipping any bit in the final padding block must cause a PKCS#7 unpadding failure
-    for byte_offset in 16..32 {
-        let mut corrupted = ciphertext.clone();
-        corrupted[byte_offset] ^= 0x01;
-        assert_eq!(
-            crypto::aes_cbc_decrypt(&key, &iv, &corrupted),
-            Err(CryptoError::InvalidEnvelope)
-        );
-    }
+    // CBC XORs the previous ciphertext block into the next plaintext block.
+    // Change the final padding byte from 0x10 to 0x11, an invalid padding length.
+    let mut corrupted = ciphertext;
+    corrupted[15] ^= 0x01;
+    assert_eq!(
+        crypto::aes_cbc_decrypt(&key, &iv, &corrupted),
+        Err(CryptoError::InvalidEnvelope)
+    );
 
-    // 128-bit key test
+    // For a single-block ciphertext the IV controls the same plaintext byte.
+    // "sample" has ten padding bytes; change only the last from 0x0a to 0x0b.
     let key128 = [0x7eu8; 16];
     let ct128 = crypto::aes_cbc_encrypt(&key128, &iv, b"sample")?;
-    for byte_offset in 0..ct128.len() {
-        let mut corrupted = ct128.clone();
-        corrupted[byte_offset] ^= 0x80;
-        assert!(crypto::aes_cbc_decrypt(&key128, &iv, &corrupted).is_err());
-    }
+    let mut corrupted_iv = iv;
+    corrupted_iv[15] ^= 0x01;
+    assert_eq!(
+        crypto::aes_cbc_decrypt(&key128, &corrupted_iv, &ct128),
+        Err(CryptoError::InvalidEnvelope)
+    );
 
     Ok(())
 }

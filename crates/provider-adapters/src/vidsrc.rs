@@ -387,7 +387,7 @@ fn decode_sources(
         .as_ref()
         .ok_or(AdapterError::Unavailable("VidSrc stream list"))?;
     if let Some(encoded) = streams.as_str() {
-        let protection: Protection = serde_json::from_value(envelope.vs.clone())
+        let protection = Protection::deserialize(&envelope.vs)
             .map_err(|_| AdapterError::Protocol("static decryptor envelope"))?;
         if protection.w < 0 {
             return Err(AdapterError::Protocol("static module window"));
@@ -421,7 +421,7 @@ fn decode_sources(
         decrypt_streams(encoded, &module)
             .map_err(|_| AdapterError::Protocol("unrecognized static cipher"))
     } else {
-        serde_json::from_value(streams.clone())
+        Vec::<String>::deserialize(streams)
             .map_err(|_| AdapterError::Protocol("stream list schema"))
     }
 }

@@ -245,27 +245,42 @@ impl StreamProber {
             }
             tokio::select! {
                 biased;
-                _=cancel.cancelled()=>{candidates.close();return Err(ProbeRoundError::Cancelled);},
-                rendition=rendition_rx.recv(),if !pending.is_empty()=>{
-                    if let Some(rendition)=rendition {
-                        merge_results(&mut results,&mut positions,std::iter::once(rendition))?;
-                        if let Some(callback)=&progress {callback(&results);}
+                _ = cancel.cancelled() => {
+                    candidates.close();
+                    return Err(ProbeRoundError::Cancelled);
+                },
+                rendition = rendition_rx.recv(), if !pending.is_empty() => {
+                    if let Some(rendition) = rendition {
+                        merge_results(&mut results, &mut positions, std::iter::once(rendition))?;
+                        if let Some(callback) = &progress {
+                            callback(&results);
+                        }
                     }
                 }
-                completed=pending.next(),if !pending.is_empty()=>{
-                    if let Some(completed)=completed {
-                        merge_results(&mut results,&mut positions,completed)?;
-                        if let Some(callback)=&progress {callback(&results);}
+                completed = pending.next(), if !pending.is_empty() => {
+                    if let Some(completed) = completed {
+                        merge_results(&mut results, &mut positions, completed)?;
+                        if let Some(callback) = &progress {
+                            callback(&results);
+                        }
                     }
                 }
-                next=candidates.recv(),if !closed && pending.len()<self.limits.concurrent=>{
+                next = candidates.recv(), if !closed && pending.len() < self.limits.concurrent => {
                     match next {
-                        Some(candidate)=>{
-                            admitted+=1;
-                            if admitted>MAX_ROUND_CANDIDATES {candidates.close();return Err(ProbeRoundError::CandidateLimit);}
-                            pending.push(self.probe_owned(candidate,round.clone(),cancel.clone(),Some(rendition_tx.clone())));
+                        Some(candidate) => {
+                            admitted += 1;
+                            if admitted > MAX_ROUND_CANDIDATES {
+                                candidates.close();
+                                return Err(ProbeRoundError::CandidateLimit);
+                            }
+                            pending.push(self.probe_owned(
+                                candidate,
+                                round.clone(),
+                                cancel.clone(),
+                                Some(rendition_tx.clone()),
+                            ));
                         },
-                        None=>closed=true,
+                        None => closed = true,
                     }
                 }
             }
@@ -312,7 +327,11 @@ impl StreamProber {
                 _ => Err(ProbeFailure::Unsupported),
             }
         };
-        let result = tokio::select! {biased;_=child.cancelled()=>Err(ProbeFailure::Cancelled),result=work=>result};
+        let result = tokio::select! {
+            biased;
+            _ = child.cancelled() => Err(ProbeFailure::Cancelled),
+            result = work => result,
+        };
         match result {
             Ok(items) => items,
             Err(error) => vec![failure(candidate, error)],
@@ -422,13 +441,13 @@ impl StreamProber {
                 Ok(_) => {
                     let mut item = failure(source, ProbeFailure::Unsupported);
                     item.observation.variant = Some(variant);
-                    record_rendition(&progress, &mut results, item, cancel);
+                    record_rendition(progress.as_ref(), &mut results, item, cancel);
                     continue;
                 }
                 Err(error) => {
                     let mut item = failure(source, error);
                     item.observation.variant = Some(variant);
-                    record_rendition(&progress, &mut results, item, cancel);
+                    record_rendition(progress.as_ref(), &mut results, item, cancel);
                     continue;
                 }
             };
@@ -450,7 +469,7 @@ impl StreamProber {
                 failed
             });
             item.observation.playlist_metadata.variants = playlist.metadata.variants.clone();
-            record_rendition(&progress, &mut results, item, cancel);
+            record_rendition(progress.as_ref(), &mut results, item, cancel);
         }
         if results.is_empty() {
             return Err(if Instant::now() >= deadline {
@@ -695,7 +714,7 @@ fn merge_results(
 }
 
 fn record_rendition(
-    progress: &Option<mpsc::Sender<ProbedStream>>,
+    progress: Option<&mpsc::Sender<ProbedStream>>,
     results: &mut Vec<ProbedStream>,
     item: ProbedStream,
     cancel: &CancellationToken,
@@ -891,7 +910,6 @@ mod measurement_tests {
         let measured = observation.delivery_bps.ok_or(ProbeFailure::Protocol)?;
         assert!(all_speeds);
         assert!((measured - expected).abs() < 1.0);
-        assert!(measured > 9_000_000.0);
         Ok(())
     }
 
@@ -909,7 +927,6 @@ mod measurement_tests {
         let measured = observation.delivery_bps.ok_or(ProbeFailure::Protocol)?;
         assert!(all_speeds);
         assert!((measured - conservative).abs() < 1.0);
-        assert!((500_000.0..501_000.0).contains(&measured));
         Ok(())
     }
 

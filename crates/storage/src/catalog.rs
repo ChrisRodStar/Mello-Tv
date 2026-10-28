@@ -8,6 +8,7 @@ use std::path::Path;
 
 use chrono::{DateTime, Duration, Utc};
 use rusqlite::{Connection, OptionalExtension, Row, TransactionBehavior, params, types::ValueRef};
+use serde::Deserialize;
 use serde_json::Value;
 use stream_core::catalog::{CatalogRecord, CatalogSnapshot, CrossIds, SNAPSHOT_VERSION, Title};
 
@@ -176,7 +177,7 @@ impl CatalogStore {
                 let mut record = get_record(&transaction, "title", &key, now)?;
                 match get_record(&transaction, "cross_ids", &key, now) {
                     Ok(cross) => {
-                        let title = serde_json::from_value::<Title>(record.data.clone()).ok();
+                        let title = Title::deserialize(&record.data).ok();
                         let ids = serde_json::from_value::<CrossIds>(cross.data).ok();
                         if let (Some(mut title), Some(ids)) =
                             (title, ids.filter(|ids| ids.validate().is_ok()))
@@ -266,7 +267,7 @@ impl CatalogStore {
                     "catalog TTL overflows timestamp",
                 ))?;
             if write.kind == "title" {
-                let title: Title = serde_json::from_value(write.data.clone())?;
+                let title = Title::deserialize(&write.data)?;
                 title
                     .validate()
                     .map_err(|_| StorageError::InvalidInput("invalid catalog title"))?;
@@ -276,7 +277,7 @@ impl CatalogStore {
                     ));
                 }
             } else if write.kind == "cross_ids" {
-                let cross: CrossIds = serde_json::from_value(write.data.clone())?;
+                let cross = CrossIds::deserialize(&write.data)?;
                 cross
                     .validate()
                     .map_err(|_| StorageError::InvalidInput("invalid catalog cross_ids"))?;

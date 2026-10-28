@@ -479,7 +479,7 @@ impl MediaRelay {
         }
 
         let final_url = res.url().clone();
-        let headers = res.headers().clone();
+        let headers = res.headers();
         let content_type_header = headers
             .get("content-type")
             .and_then(|v| v.to_str().ok())

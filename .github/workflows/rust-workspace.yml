@@ -29,8 +29,6 @@ jobs:
       - uses: Swatinem/rust-cache@e9d7b9f1e587218970671bac74e5511ed9506e6a # v2
       - name: Check formatting
         run: cargo fmt --all --check
-      - name: Check all targets
-        run: cargo check --workspace --all-targets --locked
       - name: Check production and test code
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: Rust contracts and unit tests
