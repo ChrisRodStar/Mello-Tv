@@ -29,7 +29,7 @@
     <key>LSMinimumSystemVersion</key>
     <string>13.0</string>
     <key>SUFeedURL</key>
-    <string>https://raw.githubusercontent.com/ChrisRodStar/Mello-Tv/main/macos/appcast.xml</string>
+    <string>https://raw.githubusercontent.com/ChrisRodStar/Mello-Tv/main/Apple/macos/appcast.xml</string>
     <key>SUPublicEDKey</key>
     <string>5VLmlt9p90NdermnFaWXrbhW5ErER0f+o+wbMg55uy0=</string>
     <key>SUEnableAutomaticChecks</key>
