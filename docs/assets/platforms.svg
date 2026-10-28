@@ -4,78 +4,43 @@
       <stop offset="0%" stop-color="#0d1117"/>
       <stop offset="100%" stop-color="#161b22"/>
     </linearGradient>
-    <linearGradient id="activeGlow" x1="0%" y1="0%" x2="100%" y2="0%">
-      <stop offset="0%" stop-color="#238636" stop-opacity="0.15"/>
-      <stop offset="100%" stop-color="#2ea043" stop-opacity="0.05"/>
-    </linearGradient>
   </defs>
 
   <style>
     .title-label { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 11px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; }
     .item-name { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 14px; font-weight: 600; fill: #f0f6fc; }
     .item-desc { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 12px; font-weight: 400; fill: #8b949e; }
-    .badge-text { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 10px; font-weight: 600; letter-spacing: 0.05em; }
   </style>
 
   <!-- Main Container -->
   <rect width="800" height="170" rx="16" fill="url(#bgGrad)" stroke="#30363d" stroke-width="1.2"/>
 
-  <!-- Left Column: Supported Now -->
   <g transform="translate(32, 24)">
-    <!-- Header -->
     <circle cx="5" cy="5" r="4" fill="#3fb950"/>
     <text x="18" y="9" class="title-label" fill="#3fb950">Supported Now</text>
-
-    <!-- macOS -->
-    <g transform="translate(0, 26)">
-      <rect width="336" height="30" rx="8" fill="#21262d" stroke="#30363d" stroke-width="0.8"/>
-      <text x="12" y="19" class="item-name">macOS</text>
-      <text x="76" y="19" class="item-desc">Menu bar app (Apple Silicon)</text>
-    </g>
-
-    <!-- iOS -->
-    <g transform="translate(0, 62)">
-      <rect width="336" height="30" rx="8" fill="#21262d" stroke="#30363d" stroke-width="0.8"/>
-      <text x="12" y="19" class="item-name">iOS</text>
-      <text x="50" y="19" class="item-desc">Native SwiftUI companion app</text>
-    </g>
-
-    <!-- Web -->
-    <g transform="translate(0, 98)">
-      <rect width="336" height="30" rx="8" fill="#21262d" stroke="#30363d" stroke-width="0.8"/>
-      <text x="12" y="19" class="item-name">Web</text>
-      <text x="56" y="19" class="item-desc">Any browser on your local network</text>
-    </g>
   </g>
 
-  <!-- Divider -->
-  <line x1="400" y1="24" x2="400" y2="148" stroke="#30363d" stroke-width="1" stroke-dasharray="3 3"/>
+  <g transform="translate(32, 50)">
+    <rect width="336" height="40" rx="8" fill="#21262d" stroke="#30363d" stroke-width="0.8"/>
+    <text x="12" y="25" class="item-name">macOS</text>
+    <text x="76" y="25" class="item-desc">Menu bar app (Apple Silicon)</text>
+  </g>
 
-  <!-- Right Column: In Development -->
-  <g transform="translate(432, 24)">
-    <!-- Header -->
-    <circle cx="5" cy="5" r="4" fill="#8b949e"/>
-    <text x="18" y="9" class="title-label" fill="#8b949e">Coming Next</text>
+  <g transform="translate(432, 50)">
+    <rect width="336" height="40" rx="8" fill="#21262d" stroke="#30363d" stroke-width="0.8"/>
+    <text x="12" y="25" class="item-name">iOS</text>
+    <text x="50" y="25" class="item-desc">Native SwiftUI companion app</text>
+  </g>
 
-    <!-- Windows -->
-    <g transform="translate(0, 26)">
-      <rect width="336" height="30" rx="8" fill="#161b22" stroke="#21262d" stroke-width="0.8"/>
-      <text x="12" y="19" class="item-name" fill="#c9d1d9">Windows</text>
-      <text x="88" y="19" class="item-desc">Desktop client &amp; server</text>
-    </g>
+  <g transform="translate(32, 104)">
+    <rect width="336" height="40" rx="8" fill="#21262d" stroke="#30363d" stroke-width="0.8"/>
+    <text x="12" y="25" class="item-name">Web</text>
+    <text x="56" y="25" class="item-desc">Any browser on your local network</text>
+  </g>
 
-    <!-- Linux -->
-    <g transform="translate(0, 62)">
-      <rect width="336" height="30" rx="8" fill="#161b22" stroke="#21262d" stroke-width="0.8"/>
-      <text x="12" y="19" class="item-name" fill="#c9d1d9">Linux</text>
-      <text x="64" y="19" class="item-desc">Headless server daemon</text>
-    </g>
-
-    <!-- Docker -->
-    <g transform="translate(0, 98)">
-      <rect width="336" height="30" rx="8" fill="#161b22" stroke="#21262d" stroke-width="0.8"/>
-      <text x="12" y="19" class="item-name" fill="#c9d1d9">Docker</text>
-      <text x="76" y="19" class="item-desc">Containerized one-command run</text>
-    </g>
+  <g transform="translate(432, 104)">
+    <rect width="336" height="40" rx="8" fill="#21262d" stroke="#30363d" stroke-width="0.8"/>
+    <text x="12" y="25" class="item-name">Docker</text>
+    <text x="76" y="25" class="item-desc">Windows, Linux &amp; macOS hosts</text>
   </g>
 </svg>

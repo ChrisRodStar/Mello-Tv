@@ -9,15 +9,11 @@ and `docker compose version` before continuing.
 
 ## Start
 
-From the repository root:
-
-```sh
-cp .env.example .env
-```
-
-On Windows PowerShell, use `Copy-Item .env.example .env` instead. Edit `.env` and
-set your own `TMDB_API_KEY` or `TMDB_READ_ACCESS_TOKEN`. Keep this file private.
-Without a credential, the server starts, but cannot populate a new catalog.
+Use the Compose example in the [README](../README.md#docker--windows-linux-or-macos).
+Set `TMDB_API_KEY` directly in its `environment` block and run it from the
+repository root. No separate environment file is required. For a TMDB read
+access token, use `TMDB_READ_ACCESS_TOKEN` instead of `TMDB_API_KEY`. Keep your
+configured Compose file private.
 
 ```sh
 docker compose up -d --build --wait
@@ -31,8 +27,8 @@ registry-based updates are a separate distribution step.
 Build stages pin their base images by digest. Dependabot checks these pins
 weekly; rebuild after reviewing and merging a base-image update.
 
-If port 8080 is in use, set `MELLO_PORT=8081` in `.env`. Set
-`MELLO_BIND_ADDRESS=127.0.0.1` for access only from the hosting computer.
+If port 8080 is in use, change the port mapping to `"8081:8080"`. Use
+`"127.0.0.1:8080:8080"` for access only from the hosting computer.
 
 ## Manage
 

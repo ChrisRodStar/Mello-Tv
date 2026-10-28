@@ -4,11 +4,11 @@
 
 # Mello TV
 
-### Your own streaming stack. Self-hosted on your Mac, watched anywhere.
+### Your own streaming stack. Self-hosted on your Mac or with Docker, watched anywhere.
 
 [![Version](https://img.shields.io/badge/version-v0.1.0--alpha.3-e50914?style=for-the-badge)](https://github.com/ChrisRodStar/Mello-Tv/releases)
 [![Stars](https://img.shields.io/github/stars/ChrisRodStar/Mello-Tv?style=for-the-badge&color=gold)](https://github.com/ChrisRodStar/Mello-Tv/stargazers)
-[![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20iOS%20%7C%20Web-blue?style=for-the-badge)](#platforms)
+[![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20iOS%20%7C%20Web%20%7C%20Docker-blue?style=for-the-badge)](#platforms)
 [![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-Donate-yellow?style=for-the-badge&logo=buy-me-a-coffee)](https://buymeacoffee.com/chrissinclair)
 
 </div>
@@ -17,9 +17,9 @@
 
 I built Mello TV because free movie sites suck. You click play and spend ten minutes fighting off fake download buttons, sketchy popups, and random redirects just to watch an episode of something in bed.
 
-Mello TV makes your Mac do all the dirty work in the background. It finds the sources, strips out the garbage ads and trackers, and streams clean video straight to your iPhone or browser. You just leave it running in your menu bar, open your phone, and it auto-connects over your Wi-Fi. No typing in IP addresses, no router port forwarding, no hassle.
+Mello TV runs on your Mac or in Docker. It finds the sources, strips out the garbage ads and trackers, and streams clean video straight to your iPhone or browser. Leave the server running, then open the iPhone app or web player on your home network.
 
-> **Privacy heads-up:** Run a VPN on the Mac hosting Mello TV. This is meant for your own personal home network (or through Tailscale on the go). Keep your connection private and safe.
+> **Privacy heads-up:** Run a VPN on the computer hosting Mello TV. This is meant for your own personal home network (or through Tailscale on the go). Keep your connection private and safe.
 
 ---
 
@@ -33,12 +33,60 @@ Mello TV makes your Mac do all the dirty work in the background. It finds the so
 
 ### Quick Start
 
-**Docker (Windows, Linux, or macOS):** see [Docker setup](docs/DOCKER.md) to run
-the backend and web client together with persistent data.
+#### Mac app
 
 1. **Install the Mac host** — Grab the DMG from [Releases](https://github.com/ChrisRodStar/Mello-Tv/releases) and drag **Mello TV** into your Applications folder.
 2. **Add TMDB** — Grab a free API key at [themoviedb.org](https://www.themoviedb.org). In Mello TV, go to **Settings → Server → Catalog** and paste it in. It saves securely to your Mac Keychain and loads all your posters, descriptions, and seasons.
 3. **Start watching** — Head to `http://localhost:8080` in your browser, or sideload the iOS IPA onto your iPhone. If you're on the same Wi-Fi, it finds the server immediately.
+
+#### Docker — Windows, Linux, or macOS
+
+Install and start Docker. From a copy of this repository, use this
+`compose.yaml`, replacing `PASTE_YOUR_TMDB_API_KEY` with your own
+[TMDB API key](https://www.themoviedb.org/settings/api):
+
+```yaml
+services:
+  mello:
+    image: mello-tv:local
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      TMDB_API_KEY: "PASTE_YOUR_TMDB_API_KEY"
+    volumes:
+      - mello-data:/data
+    restart: unless-stopped
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m,mode=1777
+    logging:
+      driver: local
+      options:
+        max-size: "10m"
+        max-file: "3"
+    stop_grace_period: 30s
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+volumes:
+  mello-data:
+```
+
+```sh
+docker compose up -d --build --wait
+```
+
+Open **http://localhost:8080**, or `http://SERVER-IP:8080` from another device.
+The first run builds the image locally. Your profiles, history, and catalog
+stay in the `mello-data` volume across container updates. Keep your configured
+Compose file private because it contains your key.
+
+See [Docker management and verification](docs/DOCKER.md) for updates, storage,
+and networking details.
 
 ---
 
