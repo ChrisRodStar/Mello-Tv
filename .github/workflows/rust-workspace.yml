@@ -38,5 +38,5 @@ jobs:
       - name: Mac update readiness checks
         if: runner.os == 'macOS'
         run: |
-          swiftc macos/MelloTV/Services/Updates/UpdateReadinessProbe.swift macos/Tests/UpdateReadinessProbeTests.swift -o "$RUNNER_TEMP/update-readiness-tests"
+          swiftc Apple/macos/MelloTV/Services/Updates/UpdateReadinessProbe.swift Apple/macos/Tests/UpdateReadinessProbeTests.swift -o "$RUNNER_TEMP/update-readiness-tests"
           "$RUNNER_TEMP/update-readiness-tests"

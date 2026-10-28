@@ -7,7 +7,7 @@ Native SwiftUI and AVKit client for **Mello TV** (`v0.1.0-alpha.2`), featuring z
 ## Project Structure
 
 ```text
-ios/
+Apple/ios/
 ├── MelloTV.xcodeproj/
 ├── MelloTV/
 │   ├── App/                   # MelloTVApp entry point, AppRootView, MainTabView
@@ -48,7 +48,7 @@ Open `MelloTV.xcodeproj` in Xcode:
 ### Command Line Build
 
 ```bash
-xcodebuild -project ios/MelloTV.xcodeproj -scheme MelloTV \
+xcodebuild -project Apple/ios/MelloTV.xcodeproj -scheme MelloTV \
   -configuration Debug \
   -destination 'generic/platform=iOS' \
   -allowProvisioningUpdates \
@@ -58,5 +58,5 @@ xcodebuild -project ios/MelloTV.xcodeproj -scheme MelloTV \
 ### Offline Reliability Checks
 
 ```bash
-./ios/tools/check-playback-reliability.sh
+./Apple/ios/tools/check-playback-reliability.sh
 ```
