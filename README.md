@@ -80,8 +80,12 @@ Your profiles, watch history, and saved titles stay in the `mello-data` volume w
 
 ### Support Mello TV
 
-Like the project? Give it a star or [buy me a coffee](https://buymeacoffee.com/chrissinclair).
+If you're using this and want to help support the project, drop a star on the repo or buy me a coffee!
 
-<sub>Movie data and artwork from <a href="https://www.themoviedb.org">TMDB</a>.</sub>
+<br/>
+
+[![Buy Me A Coffee](https://img.buymeacoffee.com/button-api/?text=Buy%20me%20a%20coffee&emoji=☕&slug=chrissinclair&button_colour=FFDD00&font_colour=000000&font_family=Cookie&outline_colour=000000&coffee_colour=ffffff)](https://buymeacoffee.com/chrissinclair)
+
+<sub>For personal home use. Metadata and posters provided by <a href="https://www.themoviedb.org">TMDB</a>.</sub>
 
 </div>
