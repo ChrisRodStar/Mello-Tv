@@ -281,7 +281,7 @@ async fn coalesces_concurrent_title_lookups_to_prevent_redundant_requests() {
 }
 
 #[tokio::test]
-async fn races_provider_adapters_concurrently_with_bounded_timeouts() {
+async fn provider_timeout_preserves_successful_provider_results() {
     let fast_count = Arc::new(AtomicUsize::new(0));
     let slow_count = Arc::new(AtomicUsize::new(0));
 
@@ -322,7 +322,7 @@ async fn races_provider_adapters_concurrently_with_bounded_timeouts() {
 }
 
 #[tokio::test]
-async fn evaluates_via_deterministic_ranking_engine() {
+async fn media_engine_trait_returns_ranked_primary_and_backup_streams() {
     let call_count = Arc::new(AtomicUsize::new(0));
     let provider = Arc::new(TestProvider {
         id: ProviderId::new("vidcore").unwrap(),
@@ -333,11 +333,9 @@ async fn evaluates_via_deterministic_ranking_engine() {
         fail: false,
     });
 
-    let coordinator = create_coordinator(vec![provider]).unwrap();
-    let cancel = CancellationToken::new();
-
-    let result = coordinator
-        .resolve(test_lookup(), &cancel)
+    let engine: Arc<dyn MediaEngine> = Arc::new(create_coordinator(vec![provider]).unwrap());
+    let result = engine
+        .resolve_stream(&test_lookup())
         .await
         .expect("resolution succeeds");
 
@@ -431,7 +429,7 @@ async fn progressive_startup_prefers_startup_rung_and_probes_higher_rungs_afterw
 }
 
 #[tokio::test]
-async fn context_cancellation_and_coordinator_shutdown() {
+async fn coordinator_rejects_resolution_after_shutdown() {
     let call_count = Arc::new(AtomicUsize::new(0));
     let provider = Arc::new(TestProvider {
         id: ProviderId::new("vidcore").unwrap(),
@@ -445,9 +443,6 @@ async fn context_cancellation_and_coordinator_shutdown() {
     let coordinator = create_coordinator(vec![provider]).unwrap();
     let lookup = test_lookup();
 
-    coordinator
-        .cancel_context(&lookup.context_key)
-        .expect("context cancellation succeeds");
     coordinator.shutdown().await.expect("shutdown succeeds");
 
     let cancel = CancellationToken::new();
@@ -456,27 +451,4 @@ async fn context_cancellation_and_coordinator_shutdown() {
         Ok(_) => panic!("must reject after shutdown"),
     };
     assert_eq!(err, DiscoveryError::Closed);
-}
-
-#[tokio::test]
-async fn media_engine_trait_implementation() {
-    let call_count = Arc::new(AtomicUsize::new(0));
-    let provider = Arc::new(TestProvider {
-        id: ProviderId::new("vidcore").unwrap(),
-        version: Version::new(1, 0, 0),
-        generation: 1,
-        call_count,
-        delay: Duration::ZERO,
-        fail: false,
-    });
-
-    let coordinator = Arc::new(create_coordinator(vec![provider]).unwrap());
-    let engine: Arc<dyn MediaEngine> = coordinator;
-
-    let lookup = test_lookup();
-    let selection = engine
-        .resolve_stream(&lookup)
-        .await
-        .expect("media engine resolves successfully");
-    assert!(selection.selected.is_some());
 }

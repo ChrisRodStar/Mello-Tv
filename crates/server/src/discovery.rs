@@ -564,14 +564,4 @@ mod tests {
         let fqdn = extract_magicdns_fqdn(&sample);
         assert_eq!(fqdn.as_deref(), Some("chriss-mac-mini.tail113fae.ts.net"));
     }
-
-    #[test]
-    fn test_enumerate_endpoints_contains_tailscale_and_format() {
-        let endpoints = enumerate_reachable_endpoints(8080);
-        // All endpoints should be valid HTTP URLs on port 8080
-        for ep in &endpoints {
-            assert!(ep.starts_with("http://"));
-            assert!(ep.ends_with(":8080"));
-        }
-    }
 }

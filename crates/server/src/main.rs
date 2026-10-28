@@ -420,32 +420,14 @@ fn main() -> ExitCode {
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_config_defaults() {
-        let config = ServerConfig {
-            host: "0.0.0.0".to_string(),
-            port: 8080,
-            db_path: PathBuf::from("data"),
-            proxy: None,
-            static_dir: None,
-        };
-        assert_eq!(config.host, "0.0.0.0");
-        assert_eq!(config.port, 8080);
-        assert_eq!(config.db_path, PathBuf::from("data"));
-        assert!(config.proxy.is_none());
-        assert!(config.static_dir.is_none());
-    }
-
     #[tokio::test]
-    async fn test_dual_stack_binding() {
-        let v4 = bind_ipv4_listener(0);
-        assert!(v4.is_ok());
-        if let Ok(v4_listener) = v4 {
-            let port = v4_listener.local_addr().map(|a| a.port()).unwrap_or(0);
-            assert!(port > 0);
-        }
-
-        let v6 = bind_ipv6_listener(0);
-        assert!(v6.is_ok());
+    async fn ipv4_and_ipv6_listeners_share_a_port() -> Result<(), Box<dyn std::error::Error>> {
+        let ipv4 = bind_ipv4_listener(0)?;
+        let port = ipv4.local_addr()?.port();
+        let ipv6 = bind_ipv6_listener(port)?;
+        assert_eq!(ipv6.local_addr()?.port(), port);
+        assert!(ipv4.local_addr()?.is_ipv4());
+        assert!(ipv6.local_addr()?.is_ipv6());
+        Ok(())
     }
 }

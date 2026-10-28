@@ -691,6 +691,14 @@ async fn lazy_hydration_zero_results_and_upstream_failure_are_explicit() -> Test
         }
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
+    assert_eq!(
+        catalog
+            .title("movie:444", std::time::SystemTime::now().into())
+            .await?
+            .data["title"],
+        "Hydrated Movie",
+        "legacy metadata refresh did not finish before the polling deadline"
+    );
     assert!(
         calls.load(Ordering::SeqCst) > before_legacy_refresh,
         "365-day legacy fixture metadata must be refreshed in place"

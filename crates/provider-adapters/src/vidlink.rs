@@ -249,8 +249,8 @@ pub fn normalize_sources(
     let raw = envelope
         .stream
         .ok_or(AdapterError::Unavailable("VidLink stream"))?;
-    let stream: Stream = serde_json::from_value(raw.clone())
-        .map_err(|_| AdapterError::Protocol("VidLink stream schema"))?;
+    let stream =
+        Stream::deserialize(&raw).map_err(|_| AdapterError::Protocol("VidLink stream schema"))?;
     let qualities = stream.qualities.unwrap_or_default();
     let alternates = stream.alternates.unwrap_or_default();
     if qualities.len() + alternates.len() > 31
@@ -279,10 +279,10 @@ pub fn normalize_sources(
     let mut issues = Vec::new();
     for (prefix, items) in [("quality", qualities), ("alternate", alternates)] {
         for (identity, raw) in items {
-            match serde_json::from_value::<Source>(raw.clone()) {
+            match Source::deserialize(&raw) {
                 Ok(mut source) => {
                     if source.url.is_empty() {
-                        source.url = source.playlist.clone();
+                        source.url = std::mem::take(&mut source.playlist);
                     }
                     records.push((format!("{prefix}:{identity}"), source, raw));
                 }

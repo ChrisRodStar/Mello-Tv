@@ -313,9 +313,12 @@ impl DiscoveryCoordinator {
         };
         let flight = {
             // Serialize spawn admission with shutdown and reap completed owners.
-            let mut tasks = tokio::select! {biased;
-                _=cancel.cancelled()=>return Err(DiscoveryError::Cancelled),
-                guard=tokio::time::timeout_at(deadline,self.inner.tasks.lock())=>guard.map_err(|_|DiscoveryError::Timeout)?,
+            let mut tasks = tokio::select! {
+                biased;
+                _ = cancel.cancelled() => return Err(DiscoveryError::Cancelled),
+                guard = tokio::time::timeout_at(deadline, self.inner.tasks.lock()) => {
+                    guard.map_err(|_| DiscoveryError::Timeout)?
+                },
             };
             while tasks.try_join_next().is_some() {}
             if self.inner.closed.load(Ordering::Acquire) {
@@ -340,19 +343,33 @@ impl DiscoveryCoordinator {
                     flight: flight.clone(),
                 };
                 let lookup = lookup.clone();
-                tasks.spawn(async move{
-                    let result=tokio::select! {biased;
-                        _=owner.flight.cancellation.cancelled()=>Err(DiscoveryError::Cancelled),
-                        result=tokio::time::timeout(owner.inner.limits.round_timeout,owner.inner.run_round(&lookup,providers,&owner.flight))=>result.unwrap_or(Err(DiscoveryError::Timeout)).map(Arc::new),
-                    };
-                    match owner.flight.publication.lock(){
-                        Ok(_publication)=>{
-                            let result=if owner.flight.cancellation.is_cancelled(){Err(DiscoveryError::Cancelled)}else{result};
-                            owner.flight.finished.send_replace(Some(result));
+                let task = async move {
+                    let round = owner.inner.run_round(&lookup, providers, &owner.flight);
+                    let result = tokio::select! {
+                        biased;
+                        _ = owner.flight.cancellation.cancelled() => Err(DiscoveryError::Cancelled),
+                        result = tokio::time::timeout(owner.inner.limits.round_timeout, round) => {
+                            result.unwrap_or(Err(DiscoveryError::Timeout)).map(Arc::new)
                         },
-                        Err(_)=>{owner.flight.finished.send_replace(Some(Err(DiscoveryError::Closed)));},
                     };
-                });
+                    match owner.flight.publication.lock() {
+                        Ok(_publication) => {
+                            let result = if owner.flight.cancellation.is_cancelled() {
+                                Err(DiscoveryError::Cancelled)
+                            } else {
+                                result
+                            };
+                            owner.flight.finished.send_replace(Some(result));
+                        }
+                        Err(_) => {
+                            owner
+                                .flight
+                                .finished
+                                .send_replace(Some(Err(DiscoveryError::Closed)));
+                        }
+                    };
+                };
+                tasks.spawn(task);
                 flight
             };
             {
@@ -387,10 +404,15 @@ impl DiscoveryCoordinator {
                 {
                     return Ok(result);
                 }
-                tokio::select! {biased;
-                    _=cancel.cancelled()=>return Err(DiscoveryError::Cancelled),
-                    result=finished.changed()=>if result.is_err(){return Err(DiscoveryError::Closed);},
-                    result=initial.changed(),if !lookup.wait_for_complete=>if result.is_err(){return Err(DiscoveryError::Closed);},
+                tokio::select! {
+                    biased;
+                    _ = cancel.cancelled() => return Err(DiscoveryError::Cancelled),
+                    result = finished.changed() => {
+                        result.map_err(|_| DiscoveryError::Closed)?;
+                    },
+                    result = initial.changed(), if !lookup.wait_for_complete => {
+                        result.map_err(|_| DiscoveryError::Closed)?;
+                    },
                 }
             }
         };
@@ -528,7 +550,13 @@ impl Inner {
             }
             Ok::<_, ErrorCategory>(value)
         };
-        let result = tokio::select! {biased;_=cancel.cancelled()=>Err(ErrorCategory::Cancelled),result=tokio::time::timeout(self.limits.provider_timeout,operation)=>result.unwrap_or(Err(ErrorCategory::Timeout))};
+        let result = tokio::select! {
+            biased;
+            _ = cancel.cancelled() => Err(ErrorCategory::Cancelled),
+            result = tokio::time::timeout(self.limits.provider_timeout, operation) => {
+                result.unwrap_or(Err(ErrorCategory::Timeout))
+            },
+        };
         let duration = i64::try_from(start.elapsed().as_nanos()).unwrap_or(i64::MAX);
         // Cancellation and title-specific lack of support do not indicate an outage.
         if !matches!(

@@ -169,8 +169,6 @@ fn relative_uris_follow_the_actual_manifest_directory_without_parent_query_leaka
 fn malformed_or_incomplete_attributes_never_hide_duplicate_or_quoted_values() -> TestResult {
     for attributes in [
         "BANDWIDTH=1000,BANDWIDTH=2000",
-        "BANDWIDTH=1000,",
-        "BANDWIDTH=1000,CODECS=\"avc1,mp4a",
         "BANDWIDTH=1000,CODECS=\"avc1\"junk",
         "BANDWIDTH=1000,CODECS=avc\"1\"",
         "BANDWIDTH=1000,=empty",
@@ -180,6 +178,16 @@ fn malformed_or_incomplete_attributes_never_hide_duplicate_or_quoted_values() ->
     ] {
         let manifest = format!("#EXTM3U\n#EXT-X-STREAM-INF:{attributes}\nvariant.m3u8\n");
         assert!(parse_playlist(manifest.as_bytes(), &base()?).is_err());
+    }
+    for (attributes, error) in [
+        ("BANDWIDTH=1000,", "attribute pair"),
+        ("BANDWIDTH=1000,CODECS=\"avc1,mp4a", "attribute quote"),
+    ] {
+        let manifest = format!("#EXTM3U\n#EXT-X-STREAM-INF:{attributes}\nvariant.m3u8\n");
+        assert!(matches!(
+            parse_playlist(manifest.as_bytes(), &base()?),
+            Err(HlsError::Malformed(reason)) if reason == error
+        ));
     }
     Ok(())
 }
@@ -273,6 +281,13 @@ fn malformed_keys_and_private_identity_keys_are_rejected() -> TestResult {
 
 #[test]
 fn single_initialization_map_preserves_its_range_and_rejects_later_changes() -> TestResult {
+    assert!(matches!(
+        parse_playlist(
+            b"#EXTM3U\n#EXT-X-MAP:URI=\"\"\n#EXTINF:4,\nseg.ts\n",
+            &base()?
+        ),
+        Err(HlsError::Malformed("required attribute"))
+    ));
     let playlist = parse_playlist(b"#EXTM3U\n#EXT-X-MAP:URI=\"init.mp4\",BYTERANGE=\"400@0\"\n#EXTINF:4,\nfirst.m4s\n#EXT-X-MAP:URI=\"init.mp4\",BYTERANGE=\"400@0\"\n#EXTINF:4,\nlast.m4s\n", &base()?)?;
     let initialization = playlist.initialization.ok_or("missing initialization")?;
     assert_eq!(initialization.url, "https://example.com/init.mp4");
@@ -363,6 +378,16 @@ fn duplicate_singleton_tags_and_invalid_segment_durations_are_rejected() -> Test
 #[test]
 fn input_body_physical_lines_and_utf8_are_bounded() -> TestResult {
     assert!(matches!(
+        parse_playlist(b"", &base()?),
+        Err(HlsError::InvalidHeader)
+    ));
+    for empty in ["#EXTM3U\n", "#EXTM3U\n#EXT-X-TARGETDURATION:10\n"] {
+        assert!(matches!(
+            parse_playlist(empty.as_bytes(), &base()?),
+            Err(HlsError::Empty)
+        ));
+    }
+    assert!(matches!(
         parse_playlist(&vec![b'a'; MAX_PLAYLIST_BYTES + 1], &base()?),
         Err(HlsError::LimitExceeded("body"))
     ));
@@ -390,7 +415,6 @@ fn input_body_physical_lines_and_utf8_are_bounded() -> TestResult {
     for header in [
         "#EXTM3U_BAD\n#EXTINF:4,\nsegment.ts\n",
         "<html>Not a playlist</html>",
-        "#EXTM3U\n",
         "#EXTM3U\n#EXTM3U\n#EXTINF:4,\nsegment.ts\n",
     ] {
         assert!(parse_playlist(header.as_bytes(), &base()?).is_err());
@@ -501,49 +525,5 @@ fn errors_and_sample_debug_do_not_reveal_signed_urls() -> TestResult {
     .err()
     .ok_or("expected invalid resource")?;
     assert!(!format!("{error:?} {error}").contains("do-not-log"));
-    Ok(())
-}
-
-#[test]
-fn hls_parser_edge_cases_empty_and_unclosed_quotes() -> TestResult {
-    // Empty body
-    assert!(matches!(
-        parse_playlist(b"", &base()?),
-        Err(HlsError::InvalidHeader)
-    ));
-    // Header only (no media or master variants)
-    assert!(matches!(
-        parse_playlist(b"#EXTM3U\n", &base()?),
-        Err(HlsError::Empty)
-    ));
-    // Target duration but 0 segments
-    assert!(matches!(
-        parse_playlist(b"#EXTM3U\n#EXT-X-TARGETDURATION:10\n", &base()?),
-        Err(HlsError::Empty)
-    ));
-    // Unclosed quote in attribute
-    assert!(matches!(
-        parse_playlist(
-            b"#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000,CODECS=\"avc1.4d401f\nvariant.m3u8\n",
-            &base()?
-        ),
-        Err(HlsError::Malformed("attribute quote"))
-    ));
-    // Empty URI in attribute
-    assert!(matches!(
-        parse_playlist(
-            b"#EXTM3U\n#EXT-X-MAP:URI=\"\"\n#EXTINF:4,\nseg.ts\n",
-            &base()?
-        ),
-        Err(HlsError::Malformed("required attribute"))
-    ));
-    // Trailing comma in attributes
-    assert!(matches!(
-        parse_playlist(
-            b"#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000,\nvariant.m3u8\n",
-            &base()?
-        ),
-        Err(HlsError::Malformed("attribute pair"))
-    ));
     Ok(())
 }

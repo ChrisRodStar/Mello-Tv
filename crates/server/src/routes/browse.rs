@@ -10,6 +10,7 @@ use axum::{
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use serde_json::json;
+use stream_core::catalog::Title;
 use stream_storage::StorageError;
 
 use crate::{
@@ -397,8 +398,7 @@ async fn search(
     let mut records = Vec::<serde_json::Value>::new();
     if let Some((record, titles)) = cached_titles.filter(|_| cache_fresh) {
         for value in titles {
-            if let Ok(title) = serde_json::from_value::<stream_core::catalog::Title>(value.clone())
-            {
+            if let Ok(title) = Title::deserialize(value) {
                 records.push(json!({"kind":"title","key":title.identity.key(),"data":title,"updated_at":record.updated_at,"expires_at":record.expires_at,"revision":record.revision,"state":record.state}));
             }
         }
@@ -459,9 +459,7 @@ async fn search(
         if let Some((record, titles)) = cached_titles {
             if records.is_empty() {
                 for value in titles {
-                    if let Ok(title) =
-                        serde_json::from_value::<stream_core::catalog::Title>(value.clone())
-                    {
+                    if let Ok(title) = Title::deserialize(value) {
                         records.push(json!({"kind":"title","key":title.identity.key(),"data":title,"updated_at":record.updated_at,"expires_at":record.expires_at,"revision":record.revision,"state":"stale"}));
                     }
                 }

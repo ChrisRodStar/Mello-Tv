@@ -34,7 +34,7 @@ fn latest_protocol() -> &'static RwLock<Option<(Protocol, Instant)>> {
     PROTO.get_or_init(|| RwLock::new(None))
 }
 
-fn candidate_chunks(chunks: &[String]) -> Vec<String> {
+fn candidate_chunks(chunks: &[String]) -> Vec<&str> {
     let mut prioritized = Vec::new();
     let mut framework = Vec::new();
 
@@ -50,9 +50,9 @@ fn candidate_chunks(chunks: &[String]) -> Vec<String> {
             || lower.contains("/app/")
             || lower.contains("page-")
         {
-            framework.push(rel_path.clone());
+            framework.push(rel_path.as_str());
         } else {
-            prioritized.push(rel_path.clone());
+            prioritized.push(rel_path.as_str());
         }
     }
     prioritized.reverse();
@@ -97,12 +97,12 @@ pub fn resolve(lookup: &Lookup, host: &dyn ProviderHost) -> Result<AdapterResult
 
     let ordered_chunks = candidate_chunks(&chunks);
     let now = Instant::now();
-    let mut recognized = latest_protocol()
-        .read()
-        .ok()
-        .and_then(|g| g.clone())
-        .filter(|(_, exp)| *exp > now)
-        .map(|(p, _)| p);
+    let mut recognized = latest_protocol().read().ok().and_then(|cached| {
+        cached
+            .as_ref()
+            .filter(|(_, expires_at)| *expires_at > now)
+            .map(|(protocol, _)| protocol.clone())
+    });
 
     if recognized.is_none() {
         let cache_guard = protocol_cache().read();
@@ -462,9 +462,9 @@ fn parse_embed(body: &[u8]) -> Result<(String, Vec<String>), AdapterError> {
     let mut seen = BTreeSet::new();
     let mut chunks = Vec::new();
     for mat in chunk_pat.find_iter(html) {
-        let chunk = mat.as_str().to_owned();
-        if seen.insert(chunk.clone()) {
-            chunks.push(chunk);
+        let chunk = mat.as_str();
+        if seen.insert(chunk) {
+            chunks.push(chunk.to_owned());
         }
     }
     if chunks.is_empty() || chunks.len() > 32 {
@@ -472,47 +472,4 @@ fn parse_embed(body: &[u8]) -> Result<(String, Vec<String>), AdapterError> {
     }
 
     Ok((token, chunks))
-}
-
-#[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::collapsible_if)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_track_and_scope_parity() {
-        let payload = br#"{"url":"https://media.example.com/movie.m3u8","tracks":[{"file":"https://subtitles.example.com/en.vtt","label":"English"},{"file":"https://subtitles.example.com/other.vtt","label":"Unmapped language"},{"file":"http://127.0.0.1/private.vtt","label":"English"},{"file":"https://subtitles.example.com/unknown.srt","label":"English"}]}"#;
-        let record: SourceRecord = serde_json::from_slice(payload).unwrap();
-        let stream_url = public_url(&record.url).unwrap();
-        assert_eq!(
-            stream_url.origin().ascii_serialization(),
-            "https://media.example.com"
-        );
-
-        let mut tracks = Vec::new();
-        if let Some(source_tracks) = record.tracks {
-            for track in source_tracks {
-                if let Ok(track_url) = public_url(&track.file) {
-                    if track_url.path().to_ascii_lowercase().ends_with(".vtt") {
-                        let language = match track.label.to_ascii_lowercase().as_str() {
-                            "english" | "eng" | "en" => "en",
-                            "japanese" | "ja" | "jpn" => "ja",
-                            _ => "",
-                        };
-                        tracks.push(stream_core::providers::Track {
-                            kind: "subtitles".into(),
-                            language: language.into(),
-                            name: track.label,
-                            url: track_url.to_string(),
-                            ..Default::default()
-                        });
-                    }
-                }
-            }
-        }
-        assert_eq!(tracks.len(), 2);
-        assert_eq!(tracks[0].kind, "subtitles");
-        assert_eq!(tracks[0].language, "en");
-        assert_eq!(tracks[1].language, "");
-    }
 }

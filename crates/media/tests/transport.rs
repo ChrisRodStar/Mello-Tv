@@ -203,7 +203,7 @@ async fn socks5_handshake_uses_literal_target_ip() -> TestResult {
 }
 
 #[tokio::test]
-async fn failed_explicit_proxy_returns_error_with_no_direct_fallback() -> TestResult {
+async fn failed_explicit_proxy_returns_an_error_without_leaking_credentials() -> TestResult {
     let listener = TcpListener::bind("127.0.0.1:0").await?;
     let address = listener.local_addr()?;
     drop(listener);

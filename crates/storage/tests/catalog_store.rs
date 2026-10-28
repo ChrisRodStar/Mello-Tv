@@ -404,6 +404,15 @@ async fn substring_search_is_literal_case_insensitive_and_paginates_by_key() -> 
 async fn concurrent_raw_exports_never_observe_torn_batch_revisions() -> TestResult {
     let store = memory_store().await?;
     let instant = now()?;
+    store
+        .put_batch(
+            vec![
+                write("shelf", "a", json!({"generation":-1})),
+                write("shelf", "b", json!({"generation":-1})),
+            ],
+            instant,
+        )
+        .await?;
     let writer = async {
         for generation in 0..20 {
             store
@@ -421,11 +430,10 @@ async fn concurrent_raw_exports_never_observe_torn_batch_revisions() -> TestResu
     let reader = async {
         for _ in 0..20 {
             let snapshot = store.export_raw(instant).await?;
-            if snapshot.records.len() == 2 {
-                assert_eq!(snapshot.records[0].revision, snapshot.records[1].revision);
-                assert_eq!(snapshot.records[0].data, snapshot.records[1].data);
-                assert_eq!(snapshot.records[0].revision, snapshot.revision);
-            }
+            assert_eq!(snapshot.records.len(), 2);
+            assert_eq!(snapshot.records[0].revision, snapshot.records[1].revision);
+            assert_eq!(snapshot.records[0].data, snapshot.records[1].data);
+            assert_eq!(snapshot.records[0].revision, snapshot.revision);
         }
         Ok::<_, StorageError>(())
     };
