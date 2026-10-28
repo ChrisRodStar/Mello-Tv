@@ -10,6 +10,15 @@ services:
     volumes:
       - mello-data:/data
     restart: unless-stopped
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m,mode=1777
+    logging:
+      driver: local
+      options:
+        max-size: "10m"
+        max-file: "3"
     stop_grace_period: 30s
     security_opt:
       - no-new-privileges:true

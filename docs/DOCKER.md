@@ -28,6 +28,9 @@ The first build downloads dependencies and compiles Rust; later builds reuse
 the build cache. The current Compose file builds locally. A published image and
 registry-based updates are a separate distribution step.
 
+Build stages pin their base images by digest. Dependabot checks these pins
+weekly; rebuild after reviewing and merging a base-image update.
+
 If port 8080 is in use, set `MELLO_PORT=8081` in `.env`. Set
 `MELLO_BIND_ADDRESS=127.0.0.1` for access only from the hosting computer.
 
@@ -57,6 +60,12 @@ entire data volume, including this key, while the server is stopped. Do not
 mount the running Mac app's data into Docker. Migrating an existing database
 requires its matching encryption key; startup refuses an existing accounts
 database with a missing or malformed key.
+
+The container has a read-only root filesystem, a writable `/data` volume, and
+a temporary `/tmp`. It drops Linux capabilities, prevents privilege escalation,
+and uses an init process to reap child processes. Logs rotate at 10 MB with
+three files retained. Memory and CPU limits should follow measured workload
+requirements rather than arbitrary defaults.
 
 ## Networking and platform scope
 
@@ -89,3 +98,8 @@ survive. It also checks that missing or malformed encryption keys block unsafe
 startup. It removes only its own test containers and volume afterward. It does
 not require TMDB credentials or establish provider/device playback acceptance.
 Set `MELLO_SMOKE_PORT` if its default port 18080 is occupied.
+The Docker workflow is configured to build and run this check on native AMD64
+and ARM64 Linux runners.
+
+The packaging follows [Docker's build guidance](https://docs.docker.com/build/building/best-practices/)
+and [Compose runtime configuration](https://docs.docker.com/reference/compose-file/services/).

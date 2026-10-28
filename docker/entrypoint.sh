@@ -14,7 +14,7 @@ if [ ! -e "$key" ]; then
     fi
     temporary_key=$(mktemp "$data_dir/.api-encryption.XXXXXX")
     trap 'rm -f "$temporary_key"' EXIT HUP INT TERM
-    openssl rand 32 > "$temporary_key"
+    head -c 32 /dev/urandom > "$temporary_key"
     # Publish atomically without replacing a key created by another startup.
     ln "$temporary_key" "$key" || test -f "$key"
     rm -f "$temporary_key"

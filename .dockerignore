@@ -7,7 +7,15 @@
 !crates/
 !crates/**
 !web/
-!web/**
+!web/package.json
+!web/bun.lock
+!web/index.html
+!web/tsconfig.json
+!web/vite.config.ts
+!web/src/
+!web/src/**
+!web/public/
+!web/public/**
 !docker/
 !docker/entrypoint.sh
 **/target

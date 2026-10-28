@@ -77,6 +77,12 @@ def main():
                 assert content and content != html, "Missing bundled asset"
             assert request("/settings") == html, "SPA fallback failed"
             assert compose("exec", "-T", "mello", "id", "-u", capture=True).strip() == b"10001"
+            compose("exec", "-T", "mello", "sh", "-c", "touch /tmp/mello-smoke && rm /tmp/mello-smoke")
+            write = subprocess.run(
+                command + ["exec", "-T", "--user", "0", "mello", "touch", "/app/mello-smoke"],
+                cwd=root, env=environment, capture_output=True, timeout=15,
+            )
+            assert write.returncode != 0 and b"Read-only file system" in write.stderr, "Root filesystem is writable"
             profile = request("/api/v1/profiles", {"name": "Docker test", "color": "#446e88"})
             profile_id = profile["id"]
             original_key = key_digest()
@@ -85,7 +91,7 @@ def main():
             saved = request("/api/v1/profiles/" + profile_id)
             assert saved["name"] == "Docker test", "Profile did not survive recreation"
             assert key_digest() == original_key, "Encryption key changed"
-            print("PASS: health, web/assets, SPA, non-root user, profile/key persistence, key guards")
+            print("PASS: health, web/assets, SPA, non-root/read-only runtime, profile/key persistence, key guards")
         finally:
             # The random project owns only this test's disposable volume.
             compose("down", "--volumes")
