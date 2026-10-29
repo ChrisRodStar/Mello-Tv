@@ -104,6 +104,7 @@ final class MelloTVAppDelegate: NSObject, NSApplicationDelegate {
     @objc private func showOverview() { mainWindow.present(destination: .overview) }
     @objc private func showProviders() { mainWindow.present(destination: .providers) }
     @objc private func showNetwork() { mainWindow.present(destination: .network) }
+    @objc private func showUsers() { mainWindow.present(destination: .users) }
     @objc private func showSupport() { NSWorkspace.shared.open(AppLinks.buyMeACoffeeURL) }
     @objc private func showWelcome() { welcomeWindow.present() }
     @objc private func showSettings() { mainWindow.present(destination: .settings) }
@@ -140,9 +141,10 @@ final class MelloTVAppDelegate: NSObject, NSApplicationDelegate {
         add("Overview", action: #selector(showOverview), key: "1", to: viewMenu)
         add("Providers", action: #selector(showProviders), key: "2", to: viewMenu)
         add("Network", action: #selector(showNetwork), key: "3", to: viewMenu)
-        add("Support", action: #selector(showSupport), key: "4", to: viewMenu)
-        add("Welcome guide", action: #selector(showWelcome), key: "5", to: viewMenu)
-        add("Settings", action: #selector(showSettings), key: "6", to: viewMenu)
+        add("Users", action: #selector(showUsers), key: "4", to: viewMenu)
+        add("Support", action: #selector(showSupport), key: "5", to: viewMenu)
+        add("Welcome guide", action: #selector(showWelcome), key: "6", to: viewMenu)
+        add("Settings", action: #selector(showSettings), key: "7", to: viewMenu)
         viewMenu.addItem(.separator())
         let sidebar = add("Toggle Sidebar", action: #selector(toggleSidebar), key: "s", to: viewMenu)
         sidebar.keyEquivalentModifierMask = .command
