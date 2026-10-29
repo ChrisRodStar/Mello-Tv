@@ -6,7 +6,6 @@ struct OverviewView: View {
     @ObservedObject var process: ServerProcessState
     let actions: AppActions
     @Binding var destination: DesktopDestination
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var online: Bool { process.isRunning && model.isReachable }
     private var providers: [ServerSnapshot.ProviderStatus] { model.snapshot?.media.providers ?? [] }
@@ -17,32 +16,30 @@ struct OverviewView: View {
 
     var body: some View {
         GeometryReader { viewport in
-            let short = viewport.size.height < 590
-            let inset: CGFloat = short ? 24 : 32
-            let showPortrait = viewport.size.width >= 620
-            VStack(alignment: .leading, spacing: 0) {
+            let compact = viewport.size.height < 600
+            let inset: CGFloat = compact ? 24 : 30
+            VStack(alignment: .leading, spacing: compact ? 20 : 26) {
                 pageHeader
-                HStack(spacing: 12) {
-                    statusComposition(short: short)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    if showPortrait {
-                        ServerPortraitView(isOnline: online, needsAttention: !ready && online)
-                            .frame(width: min(240, viewport.size.width * 0.32))
-                            .padding(.trailing, 4)
-                    }
+
+                HStack(spacing: compact ? 28 : 36) {
+                    cinemaStage(compact: compact)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .layoutPriority(1)
+                    serverDetails(compact: compact)
+                        .frame(width: min(310, viewport.size.width * 0.36))
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .padding(.vertical, short ? 20 : 28)
 
-                systemRail(short: short)
                 OverviewProviderStrip(providers: providers, isReachable: online) {
                     destination = .providers
                 }
-                .padding(.top, short ? 20 : 28)
+                .padding(.top, compact ? 18 : 22)
+                .overlay(alignment: .top) {
+                    Rectangle().fill(MelloTVTheme.border.opacity(0.65)).frame(height: 1)
+                }
             }
             .padding(inset)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .animation(reduceMotion ? nil : .easeInOut(duration: 0.25), value: online)
         }
     }
 
@@ -54,68 +51,128 @@ struct OverviewView: View {
                 .foregroundStyle(MelloTVTheme.text)
             Spacer()
             if let updated = model.lastRefreshed {
-                HStack(spacing: 5) {
-                    Circle().fill(MelloTVTheme.mutedSubtle).frame(width: 3, height: 3)
-                    Text("Updated \(updated.formatted(date: .omitted, time: .shortened))")
-                }
-                .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(MelloTVTheme.textSecondary)
+                Text("Updated \(updated.formatted(date: .omitted, time: .shortened))")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(MelloTVTheme.textSecondary)
             }
         }
     }
 
-    private func statusComposition(short: Bool) -> some View {
-        VStack(alignment: .leading, spacing: short ? 16 : 22) {
-            HStack(spacing: 8) {
+    private func cinemaStage(compact: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 7) {
                 Circle()
-                    .fill(online ? Color(red: 0.35, green: 0.85, blue: 0.55) : process.isRunning ? .orange : MelloTVTheme.mutedSubtle)
+                    .fill(online ? Color(red: 0.65, green: 0.93, blue: 0.72) : process.isRunning ? .orange : .white.opacity(0.45))
                     .frame(width: 6, height: 6)
                     .accessibilityHidden(true)
                 Text(online ? "Running on this Mac" : process.isRunning ? "Connecting to this Mac" : "Server stopped")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(MelloTVTheme.textSecondary)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.8))
             }
-            VStack(alignment: .leading, spacing: 12) {
-                Text(headline)
-                    .font(.system(size: short ? 32 : 38, weight: .semibold))
-                    .tracking(short ? -1.1 : -1.5)
-                    .lineSpacing(-1)
+            .padding(.bottom, compact ? 14 : 20)
+
+            Text(headline)
+                .font(.system(size: compact ? 34 : 42, weight: .semibold, design: .rounded))
+                .tracking(-1.4)
+                .lineSpacing(-1)
+                .foregroundStyle(Color(red: 0.95, green: 0.97, blue: 0.88))
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityAddTraits(.isHeader)
+
+            ServerPortraitView(isOnline: online, needsAttention: !ready && online)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding(.horizontal, -18)
+                .padding(.bottom, -12)
+        }
+        .padding(compact ? 26 : 32)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background {
+            RoundedRectangle(cornerRadius: 34, style: .continuous)
+                .fill(LinearGradient(stops: [
+                    .init(color: Color(red: 0.20, green: 0.49, blue: 0.39), location: 0),
+                    .init(color: Color(red: 0.12, green: 0.36, blue: 0.28), location: 0.57),
+                    .init(color: Color(red: 0.08, green: 0.26, blue: 0.21), location: 1)
+                ], startPoint: .topLeading, endPoint: .bottomTrailing))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 34, style: .continuous)
+                        .strokeBorder(LinearGradient(colors: [.white.opacity(0.2), .clear],
+                                                     startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1)
+                }
+                .shadow(color: Color(red: 0.03, green: 0.13, blue: 0.10).opacity(0.20), radius: 16, x: 0, y: 12)
+        }
+    }
+
+    private func serverDetails(compact: Bool) -> some View {
+        VStack(alignment: .leading, spacing: compact ? 18 : 24) {
+            VStack(alignment: .leading, spacing: 10) {
+                Text(ready ? "At home,\nalways ready." : "Your Mac.\nYour cinema.")
+                    .font(.system(size: compact ? 25 : 29, weight: .medium, design: .rounded))
+                    .tracking(-0.8)
                     .foregroundStyle(MelloTVTheme.text)
                     .fixedSize(horizontal: false, vertical: true)
-                    .accessibilityAddTraits(.isHeader)
                 Text(detail)
-                    .font(.system(size: 13))
+                    .font(.system(size: 12))
                     .lineSpacing(4)
                     .foregroundStyle(MelloTVTheme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            HStack(spacing: 14) {
-                Button(action: actions.toggleServer) {
-                    Label(process.isRunning ? "Stop server" : "Start server", systemImage: "power")
-                        .font(.system(size: 12, weight: .medium))
-                        .padding(.horizontal, 13)
-                        .frame(height: 34)
-                        .foregroundStyle(process.isRunning ? MelloTVTheme.text : Color.white)
-                        .background(process.isRunning ? MelloTVTheme.sunken : MelloTVTheme.accent,
-                                    in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-                        .overlay { RoundedRectangle(cornerRadius: 9).strokeBorder(MelloTVTheme.border, lineWidth: 1) }
+
+            VStack(spacing: 0) {
+                metric(title: "Uptime", value: online ? uptime : "—", symbol: "clock")
+                Divider().overlay(MelloTVTheme.border.opacity(0.4))
+                metric(title: "Library", value: !online ? "Offline" : libraryReady ? "Available" : "Needs care", symbol: "rectangle.stack")
+                Divider().overlay(MelloTVTheme.border.opacity(0.4))
+                Button { destination = .network } label: {
+                    metric(title: "Connection", value: connection, symbol: "network")
+                        .contentShape(Rectangle())
                 }
-                .buttonStyle(OverviewPressStyle())
-                if process.isRunning {
-                    Button(action: actions.restartServer) {
-                        Image(systemName: "arrow.clockwise")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(MelloTVTheme.textSecondary)
-                            .frame(width: 30, height: 34)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(OverviewPressStyle())
-                    .help("Restart server")
-                    .accessibilityLabel("Restart server")
+                .buttonStyle(.plain)
+                .help("View network addresses")
+            }
+
+            serverControls
+        }
+        .padding(.vertical, compact ? 8 : 18)
+        .frame(maxHeight: .infinity, alignment: .center)
+    }
+
+    private var serverControls: some View {
+        HStack(spacing: 10) {
+            Button(action: actions.toggleServer) {
+                HStack(spacing: 8) {
+                    Image(systemName: "power")
+                    Text(process.isRunning ? "Stop server" : "Start server")
+                }
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(MelloTVTheme.text)
+                .padding(.horizontal, 18)
+                .frame(height: 44)
+                .background {
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .fill(LinearGradient(colors: [MelloTVTheme.cardHover, MelloTVTheme.card],
+                                             startPoint: .topLeading, endPoint: .bottomTrailing))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                .strokeBorder(MelloTVTheme.subtleBorder, lineWidth: 1)
+                        }
+                        .shadow(color: .black.opacity(0.14), radius: 8, x: 3, y: 6)
                 }
             }
+            .buttonStyle(OverviewPressStyle())
+
+            if process.isRunning {
+                Button(action: actions.restartServer) {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(MelloTVTheme.textSecondary)
+                        .frame(width: 44, height: 44)
+                        .background(MelloTVTheme.sunken, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                }
+                .buttonStyle(OverviewPressStyle())
+                .help("Restart server")
+                .accessibilityLabel("Restart server")
+            }
         }
-        .frame(maxWidth: 390, alignment: .leading)
     }
 
     private var headline: String {
@@ -134,38 +191,34 @@ struct OverviewView: View {
         return "A quiet home for everything you love to watch."
     }
 
-    private func systemRail(short: Bool) -> some View {
-        HStack(alignment: .top, spacing: 16) {
-            metric(title: "Uptime", value: online ? uptime : "—", symbol: "clock")
-            railDivider
-            metric(title: "Library", value: !online ? "Offline" : libraryReady ? "Available" : "Needs care", symbol: "rectangle.stack")
-            railDivider
-            Button { destination = .network } label: {
-                metric(title: "Connection", value: connection, symbol: "network")
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .help("View network addresses")
-        }
-        .padding(.vertical, short ? 17 : 22)
-        .overlay(alignment: .top) { Rectangle().fill(MelloTVTheme.border).frame(height: 1) }
-        .overlay(alignment: .bottom) { Rectangle().fill(MelloTVTheme.border).frame(height: 1) }
-    }
-
-    private var railDivider: some View {
-        Rectangle().fill(MelloTVTheme.border).frame(width: 1, height: 40)
-            .padding(.horizontal, 2)
-    }
-
     private func metric(title: String, value: String, symbol: String) -> some View {
-        VStack(alignment: .leading, spacing: 9) {
-            Label(title, systemImage: symbol)
-                .font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary)
-            Text(value)
-                .font(.system(size: 17, weight: .medium)).monospacedDigit().tracking(-0.4)
-                .lineLimit(1).minimumScaleFactor(0.8)
+        HStack(spacing: 13) {
+            Image(systemName: symbol)
+                .font(.system(size: 14, weight: .regular))
+                .foregroundStyle(MelloTVTheme.textSecondary)
+                .frame(width: 38, height: 38)
+                .background(MelloTVTheme.sunken.opacity(0.65), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(MelloTVTheme.textSecondary)
+                Text(value)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(MelloTVTheme.text)
+                    .monospacedDigit()
+                    .tracking(-0.2)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
+            }
+            Spacer(minLength: 0)
+            if symbol == "network" {
+                Image(systemName: "arrow.up.right")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(MelloTVTheme.textSecondary)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 12)
     }
 
     private var uptime: String {
