@@ -229,7 +229,13 @@ private struct TitleDetailContent: View {
                             defer { feedbackBusy = false }
                             do {
                                 try await api.setRecommendationChoice(profileID: profileID, title: title, choice: choice, enabled: !selected)
-                                NotificationCenter.default.post(name: .melloTVRecommendationsChanged, object: nil)
+                                var info: [String: Any] = ["profileID": profileID, "titleID": title.id,
+                                                           "choice": choice.rawValue, "enabled": !selected]
+                                if choice == .favorites {
+                                    info["favoriteTitle"] = title
+                                    info["favoriteEnabled"] = !selected
+                                }
+                                NotificationCenter.default.post(name: .melloTVRecommendationsChanged, object: nil, userInfo: info)
                                 do {
                                     recommendationChoices = try await api.recommendationChoices(profileID: profileID)
                                     feedbackError = nil

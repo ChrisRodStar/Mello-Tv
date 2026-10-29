@@ -139,6 +139,18 @@ struct CatalogView: View {
                 }
             )
         }
+        .onReceive(NotificationCenter.default.publisher(for: .melloTVRecommendationsChanged)) { notification in
+            guard let changedProfile = notification.userInfo?["profileID"] as? String,
+                  changedProfile == profileID,
+                  let titleID = notification.userInfo?["titleID"] as? String,
+                  let choice = notification.userInfo?["choice"] as? String,
+                  let enabled = notification.userInfo?["enabled"] as? Bool else { return }
+            if enabled && ["hidden", "watched", "favorites"].contains(choice) {
+                store.removeRecommendation(titleID)
+            } else if !enabled {
+                Task { await store.load(force: true) }
+            }
+        }
         .onDisappear(perform: cancelResume)
     }
 

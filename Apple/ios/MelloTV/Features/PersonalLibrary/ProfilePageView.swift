@@ -1125,7 +1125,13 @@ private struct RecommendationChoicesEditor: View {
         defer { busy = false }
         do {
             try await api.setRecommendationChoice(profileID: profileID, title: title, choice: choice, enabled: false)
-            NotificationCenter.default.post(name: .melloTVRecommendationsChanged, object: nil)
+            var info: [String: Any] = ["profileID": profileID, "titleID": title.id,
+                                       "choice": choice.rawValue, "enabled": false]
+            if choice == .favorites {
+                info["favoriteTitle"] = title
+                info["favoriteEnabled"] = false
+            }
+            NotificationCenter.default.post(name: .melloTVRecommendationsChanged, object: nil, userInfo: info)
             await load()
         } catch { self.error = "Couldn’t remove this choice. Try again." }
     }
