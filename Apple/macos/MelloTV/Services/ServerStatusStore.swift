@@ -161,6 +161,7 @@ struct WatchingActivity: Decodable, Identifiable {
     let sessionId: String
     let profileId: String
     let title: String
+    let device: String?
     let season: Int?
     let episode: Int?
     let state: String

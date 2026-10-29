@@ -90,7 +90,7 @@ struct OverviewView: View {
                     HStack(spacing: 10) {
                         Image(systemName: "play.rectangle")
                         VStack(alignment: .leading, spacing: 3) {
-                            Text("Watching now · iPhone").font(.system(size: 10, weight: .medium)).foregroundStyle(MelloTVTheme.textSecondary)
+                            Text("Watching now").font(.system(size: 10, weight: .medium)).foregroundStyle(MelloTVTheme.textSecondary)
                             Text(activityDescription(first)).font(.system(size: 12, weight: .medium)).foregroundStyle(MelloTVTheme.text).lineLimit(1)
                         }
                         Spacer()
@@ -287,16 +287,16 @@ struct OverviewView: View {
     }
 
     private func activityDescription(_ activity: WatchingActivity) -> String {
-        let profile = model.profileNames[activity.profileId] ?? "iPhone"
+        let profile = model.profileNames[activity.profileId] ?? "Viewer"
         let episode = activity.season.flatMap { season in activity.episode.map { " · S\(season) E\($0)" } } ?? ""
         let status = activity.state.capitalized
-        return "\(profile) · \(activity.title)\(episode) · \(status)"
+        return "\(profile) · \(activity.title)\(episode) · \(activity.device ?? "iOS app") · \(status)"
     }
 
     private func watchingPopover(_ sessions: [WatchingActivity]) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Watching now").font(.headline)
-            Text("Reported by Mello TV on iPhone").font(.caption).foregroundStyle(.secondary)
+            Text("Reported by Mello TV on iPhone and iPad").font(.caption).foregroundStyle(.secondary)
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
                     ForEach(sessions) { activity in

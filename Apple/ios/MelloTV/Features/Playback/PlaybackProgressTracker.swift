@@ -1,5 +1,6 @@
 import Foundation
 import AVFoundation
+import UIKit
 import MelloKit
 
 @MainActor
@@ -81,6 +82,7 @@ final class PlaybackProgressTracker {
         let title = boundedTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Untitled" : boundedTitle
         var body: [String: Any] = [
             "session_id": activityID, "profile_id": request.profileID, "title": title,
+            "device": UIDevice.current.userInterfaceIdiom == .pad ? "iPad" : "iPhone",
             "state": state, "position_seconds": position.isFinite ? max(0, position) : 0
         ]
         if duration.isFinite && duration > 0 { body["duration_seconds"] = duration }

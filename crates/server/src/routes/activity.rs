@@ -21,6 +21,7 @@ pub struct Activity {
     pub session_id: String,
     pub profile_id: String,
     pub title: String,
+    pub device: Option<String>,
     pub season: Option<u32>,
     pub episode: Option<u32>,
     pub state: PlaybackState,
@@ -75,6 +76,10 @@ async fn update(
         || activity.profile_id.len() > 128
         || activity.title.trim().is_empty()
         || activity.title.len() > 512
+        || activity
+            .device
+            .as_deref()
+            .is_some_and(|device| !["iPhone", "iPad", "iOS"].contains(&device))
         || !activity.position_seconds.is_finite()
         || activity.position_seconds < 0.0
         || activity
