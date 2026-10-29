@@ -51,6 +51,8 @@ final class MelloTVAppDelegate: NSObject, NSApplicationDelegate {
         presentMainWindow()
     }
 
+    func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool { true }
+
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         if !flag { presentMainWindow() }
         return true

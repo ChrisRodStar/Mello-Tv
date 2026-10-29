@@ -1,5 +1,8 @@
 import XCTest
 import SwiftUI
+#if os(macOS)
+import AppKit
+#endif
 @testable import MelloKit
 
 final class MelloKitTests: XCTestCase {
@@ -99,11 +102,22 @@ final class MelloKitTests: XCTestCase {
         XCTAssertEqual(AppearanceMode.light.colorScheme, .light)
         XCTAssertEqual(AppearanceMode.dark.colorScheme, .dark)
 
-        // Standardized Phosphor icon names for both platforms
+        // Bundled Phosphor asset names used by iOS
         XCTAssertEqual(AppearanceMode.system.iconName, "circle-half")
         XCTAssertEqual(AppearanceMode.light.iconName, "sun")
         XCTAssertEqual(AppearanceMode.dark.iconName, "moon")
     }
+
+    #if os(macOS)
+    func testAppearanceSystemImagesExist() {
+        for mode in AppearanceMode.allCases {
+            XCTAssertNotNil(
+                NSImage(systemSymbolName: mode.systemImageName, accessibilityDescription: nil),
+                "Missing SF Symbol for \(mode.rawValue): \(mode.systemImageName)"
+            )
+        }
+    }
+    #endif
 
     func testThemeTokens() {
         // Verify iOS-standardized surfaces and tokens

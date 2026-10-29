@@ -15,6 +15,15 @@ public enum AppearanceMode: String, CaseIterable, Identifiable, Codable, Sendabl
         }
     }
 
+    /// SF Symbols for clients that use `Image(systemName:)` rather than bundled assets.
+    public var systemImageName: String {
+        switch self {
+        case .system: return "circle.lefthalf.filled"
+        case .light: return "sun.max"
+        case .dark: return "moon"
+        }
+    }
+
     public var colorScheme: ColorScheme? {
         switch self {
         case .system: return nil

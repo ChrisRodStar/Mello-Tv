@@ -171,7 +171,7 @@ final class ServerController {
             try process.run()
             self.serverProcess = process
             self.setRunning(true)
-            NSLog("Mello TV: server launched successfully (PID \(process.processIdentifier))")
+            NSLog("Mello TV: server process launched (PID \(process.processIdentifier))")
         } catch {
             NSLog("Mello TV: failed to run the server: \(error)")
             setRunning(false)

@@ -21,7 +21,10 @@ final class ServerStatusStore: ObservableObject {
             while !Task.isCancelled {
                 guard let self = self else { return }
                 await self.refresh()
-                do { try await Task.sleep(nanoseconds: 15_000_000_000) }
+                // A launched process may still be opening its HTTP listener.
+                // Recover promptly instead of leaving the dashboard disconnected for 15 seconds.
+                let interval: UInt64 = self.isReachable ? 15_000_000_000 : 1_000_000_000
+                do { try await Task.sleep(nanoseconds: interval) }
                 catch { return }
             }
         }

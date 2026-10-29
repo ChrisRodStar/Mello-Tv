@@ -109,7 +109,7 @@ struct SettingsView: View {
         VStack(spacing: 16) {
             SettingsCard {
                 SettingsItemRow(
-                    icon: preferences.appearance.iconName,
+                    icon: preferences.appearance.systemImageName,
                     iconColor: MelloTVTheme.accent,
                     title: "Appearance",
                     subtitle: "Choose between Light, Dark, or System matching"
@@ -119,7 +119,7 @@ struct SettingsView: View {
                         set: { preferences.setAppearance($0) }
                     )) {
                         ForEach(AppearanceMode.allCases) { mode in
-                            Label(mode.rawValue, systemImage: mode.iconName).tag(mode)
+                            Label(mode.rawValue, systemImage: mode.systemImageName).tag(mode)
                         }
                     }
                     .labelsHidden()
