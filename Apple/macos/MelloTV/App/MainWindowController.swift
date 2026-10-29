@@ -2,22 +2,14 @@ import Cocoa
 import SwiftUI
 
 @MainActor
-final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolbarDelegate, NSToolbarItemValidation {
+final class MainWindowController: NSWindowController, NSWindowDelegate {
     private let model: ServerStatusStore
-    private let process: ServerProcessState
-    private let actions: AppActions
     private let navigation = DesktopNavigation()
     var onVisibilityChange: ((Bool) -> Void)?
     private var hasPresented = false
-    private let sidebarID = NSToolbarItem.Identifier("MelloTVSidebar")
-    private let refreshID = NSToolbarItem.Identifier("MelloTVRefresh")
-    private let websiteID = NSToolbarItem.Identifier("MelloTVWebsite")
-    private let logsID = NSToolbarItem.Identifier("MelloTVLogs")
 
     init(port: Int, process: ServerProcessState, actions: AppActions) {
         self.model = ServerStatusStore(port: port)
-        self.process = process
-        self.actions = actions
         let window = NSWindow(
             contentRect: NSRect(origin: .zero, size: WindowSizing.mainFrame),
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
@@ -32,12 +24,25 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         window.isReleasedWhenClosed = false
         super.init(window: window)
         window.delegate = self
-        let toolbar = NSToolbar(identifier: "MelloTVMainToolbar")
-        toolbar.delegate = self
-        toolbar.displayMode = .iconOnly
-        toolbar.allowsUserCustomization = false
-        window.toolbar = toolbar
-        window.toolbarStyle = .unified
+        let sidebarButton = NSButton(
+            image: NSImage(systemSymbolName: "sidebar.left", accessibilityDescription: "Toggle sidebar")!,
+            target: self,
+            action: #selector(toggleSidebar)
+        )
+        sidebarButton.isBordered = false
+        sidebarButton.bezelStyle = .regularSquare
+        sidebarButton.contentTintColor = .secondaryLabelColor
+        sidebarButton.toolTip = "Toggle sidebar (⌃⌘S)"
+        sidebarButton.setAccessibilityLabel("Toggle sidebar")
+        sidebarButton.frame = NSRect(x: 6, y: 0, width: 32, height: 28)
+
+        // A borderless title-bar accessory keeps this control out of the
+        // system toolbar's automatic glass background.
+        let accessory = NSTitlebarAccessoryViewController()
+        accessory.layoutAttribute = .left
+        accessory.view = NSView(frame: NSRect(x: 0, y: 0, width: 44, height: 28))
+        accessory.view.addSubview(sidebarButton)
+        window.addTitlebarAccessoryViewController(accessory)
         window.contentViewController = WindowContentController(
             rootView: DesktopShellView(navigation: navigation, model: model, process: process, port: port, actions: actions)
         )
@@ -70,89 +75,13 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
 
     func serverStateChanged() {
         if window?.isVisible == true { model.refreshNow() }
-        window?.toolbar?.validateVisibleItems()
     }
 
     func windowWillResize(_ sender: NSWindow, to frameSize: NSSize) -> NSSize {
         WindowSizing.constrainedMainFrame(frameSize)
     }
 
-    // MARK: - NSToolbarDelegate
-
-    func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [sidebarID, .flexibleSpace, refreshID, websiteID, logsID]
-    }
-
-    func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [sidebarID, .flexibleSpace, refreshID, websiteID, logsID]
-    }
-
-    func toolbar(_ toolbar: NSToolbar, itemForItemIdentifier itemIdentifier: NSToolbarItem.Identifier, willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? {
-        switch itemIdentifier {
-        case sidebarID:
-            let item = NSToolbarItem(itemIdentifier: itemIdentifier)
-            item.label = "Toggle sidebar"
-            item.paletteLabel = "Toggle sidebar"
-            item.toolTip = "Toggle sidebar"
-            item.image = NSImage(systemSymbolName: "sidebar.left", accessibilityDescription: "Toggle sidebar")
-            item.target = self
-            item.action = #selector(toggleSidebarAction)
-            return item
-        case refreshID:
-            let item = NSToolbarItem(itemIdentifier: itemIdentifier)
-            item.label = "Refresh"
-            item.paletteLabel = "Refresh status"
-            item.toolTip = "Refresh server status"
-            item.image = NSImage(systemSymbolName: "arrow.clockwise", accessibilityDescription: "Refresh status")
-            item.target = self
-            item.action = #selector(refreshAction)
-            return item
-        case websiteID:
-            let item = NSToolbarItem(itemIdentifier: itemIdentifier)
-            item.label = "Website"
-            item.paletteLabel = "Open website"
-            item.toolTip = "Open web dashboard"
-            item.image = NSImage(systemSymbolName: "safari", accessibilityDescription: "Open web dashboard")
-            item.target = self
-            item.action = #selector(openWebsiteAction)
-            return item
-        case logsID:
-            let item = NSToolbarItem(itemIdentifier: itemIdentifier)
-            item.label = "Logs"
-            item.paletteLabel = "Open logs"
-            item.toolTip = "Open server log file"
-            item.image = NSImage(systemSymbolName: "doc.text", accessibilityDescription: "Open server log file")
-            item.target = self
-            item.action = #selector(openLogsAction)
-            return item
-        default:
-            return nil
-        }
-    }
-
-    func validateToolbarItem(_ item: NSToolbarItem) -> Bool {
-        if item.itemIdentifier == refreshID { return !model.isRefreshing }
-        if item.itemIdentifier == websiteID { return process.isRunning && model.isReachable }
-        return true
-    }
-
     @objc func toggleSidebar() {
         navigation.isSidebarExpanded.toggle()
-    }
-
-    @objc private func toggleSidebarAction() {
-        toggleSidebar()
-    }
-
-    @objc private func refreshAction() {
-        model.refreshNow()
-    }
-
-    @objc private func openWebsiteAction() {
-        actions.openWebsite()
-    }
-
-    @objc private func openLogsAction() {
-        actions.openLogs()
     }
 }

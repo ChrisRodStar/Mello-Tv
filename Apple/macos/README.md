@@ -15,7 +15,7 @@ App state and window controllers stay on the main actor. The server status store
 
 ## Window sizing
 
-`MelloTV/Core/Configuration/WindowSizing.swift` is the single source of window dimensions. The main window's opening and minimum frame are both 1150 × 750 points, including the title bar and toolbar. Its AppKit minimum and live-resize delegate use that same policy. The opening frame and minimum are applied after the first presentation realizes the toolbar, and after frame restoration, so neither toolbar chrome nor an old saved size changes the requested dimensions. Later presentations retain the user's larger window size.
+`MelloTV/Core/Configuration/WindowSizing.swift` is the single source of window dimensions. The main window's opening and minimum frame are both 1150 × 750 points, including the title bar. Its AppKit minimum and live-resize delegate use that same policy. The opening frame and minimum are applied after the first presentation and frame restoration, so neither window chrome nor an old saved size changes the requested dimensions. Later presentations retain the user's larger window size. The title bar has a borderless sidebar toggle; Refresh Status, Open Website, and Open Logs are named commands in the View menu.
 
 Both windows embed SwiftUI inside a plain AppKit content controller with hosting sizing options disabled. Individual destinations fill the offered content area without controlling window bounds. Onboarding has separate content dimensions (excluding window chrome), explicitly named in the same configuration file. Ordinary SwiftUI component widths and heights are layout values, not window sizing rules.
 

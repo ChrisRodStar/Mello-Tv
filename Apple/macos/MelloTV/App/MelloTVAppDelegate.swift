@@ -90,7 +90,9 @@ final class MelloTVAppDelegate: NSObject, NSApplicationDelegate {
         return NSApp.setActivationPolicy(policy)
     }
 
-    private func openWebsite() { NSWorkspace.shared.open(AppLinks.clientURL(port: server.port)) }
+    @objc private func openWebsite() { NSWorkspace.shared.open(AppLinks.clientURL(port: server.port)) }
+
+    @objc private func openLogs() { server.openLogs() }
 
     @objc private func quit() {
         NSApp.terminate(nil)
@@ -138,6 +140,9 @@ final class MelloTVAppDelegate: NSObject, NSApplicationDelegate {
         let sidebar = add("Toggle Sidebar", action: #selector(toggleSidebar), key: "s", to: viewMenu)
         sidebar.keyEquivalentModifierMask = [.command, .control]
         add("Refresh Status", action: #selector(refreshStatus), key: "r", to: viewMenu)
+        viewMenu.addItem(.separator())
+        add("Open Website", action: #selector(openWebsite), key: "", to: viewMenu)
+        add("Open Logs…", action: #selector(openLogs), key: "", to: viewMenu)
         viewItem.submenu = viewMenu
         main.addItem(viewItem)
 
