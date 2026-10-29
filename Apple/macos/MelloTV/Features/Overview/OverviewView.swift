@@ -62,12 +62,12 @@ struct OverviewView: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 7) {
                 Circle()
-                    .fill(online ? Color(red: 0.65, green: 0.93, blue: 0.72) : process.isRunning ? .orange : .white.opacity(0.45))
+                    .fill(online ? MelloTVTheme.accent : process.isRunning ? .orange : MelloTVTheme.mutedSubtle)
                     .frame(width: 6, height: 6)
                     .accessibilityHidden(true)
                 Text(online ? "Running on this Mac" : process.isRunning ? "Connecting to this Mac" : "Server stopped")
                     .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.8))
+                    .foregroundStyle(MelloTVTheme.textSecondary)
             }
             .padding(.bottom, compact ? 14 : 20)
 
@@ -75,7 +75,7 @@ struct OverviewView: View {
                 .font(.system(size: compact ? 34 : 42, weight: .semibold, design: .rounded))
                 .tracking(-1.4)
                 .lineSpacing(-1)
-                .foregroundStyle(Color(red: 0.95, green: 0.97, blue: 0.88))
+                .foregroundStyle(MelloTVTheme.text)
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityAddTraits(.isHeader)
 
@@ -88,17 +88,14 @@ struct OverviewView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background {
             RoundedRectangle(cornerRadius: 34, style: .continuous)
-                .fill(LinearGradient(stops: [
-                    .init(color: Color(red: 0.20, green: 0.49, blue: 0.39), location: 0),
-                    .init(color: Color(red: 0.12, green: 0.36, blue: 0.28), location: 0.57),
-                    .init(color: Color(red: 0.08, green: 0.26, blue: 0.21), location: 1)
-                ], startPoint: .topLeading, endPoint: .bottomTrailing))
+                .fill(LinearGradient(colors: [MelloTVTheme.card, MelloTVTheme.sunken],
+                                     startPoint: .topLeading, endPoint: .bottomTrailing))
                 .overlay {
                     RoundedRectangle(cornerRadius: 34, style: .continuous)
-                        .strokeBorder(LinearGradient(colors: [.white.opacity(0.2), .clear],
-                                                     startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1)
+                        .strokeBorder(online ? MelloTVTheme.accent.opacity(0.22) : MelloTVTheme.subtleBorder,
+                                      lineWidth: 1)
                 }
-                .shadow(color: Color(red: 0.03, green: 0.13, blue: 0.10).opacity(0.20), radius: 16, x: 0, y: 12)
+                .shadow(color: .black.opacity(0.12), radius: 16, x: 0, y: 12)
         }
     }
 

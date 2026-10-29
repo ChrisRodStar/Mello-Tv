@@ -5,6 +5,16 @@
 	};
 	"objectVersion" = "60";
 	"objects" = {
+        "C41000000000000000000001" = {
+            "isa" = "PBXFileReference";
+            "lastKnownFileType" = "file.usdz";
+            "path" = "Resources/MacMini.usdz";
+            "sourceTree" = "<group>";
+        };
+        "C41000000000000000000002" = {
+            "isa" = "PBXBuildFile";
+            "fileRef" = "C41000000000000000000001";
+        };
 		"BFFEEDCD5B781D3EA4B54CDD" = {
 			"isa" = "PBXFileReference";
 			"lastKnownFileType" = "sourcecode.swift";
@@ -466,6 +476,7 @@
 		"BC43D48AB8DB13B9081DC724" = {
 			"isa" = "PBXGroup";
 			"children" = (
+				"C41000000000000000000001",
 				"787F790199297C1B271C6214",
 				"B11000000000000000000001",
 				"9A3C0A6D161788757CAF5A6C",
@@ -621,6 +632,7 @@
 			"isa" = "PBXResourcesBuildPhase";
 			"buildActionMask" = "2147483647";
 			"files" = (
+				"C41000000000000000000002",
 				"74C2431FE30C4A47C8443B80",
 			);
 			"runOnlyForDeploymentPostprocessing" = "0";
