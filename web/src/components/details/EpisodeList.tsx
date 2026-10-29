@@ -6,6 +6,7 @@ export function EpisodeList({
   episodes,
   onPlay,
   onPreload,
+  onRewatch,
   progress = [],
   resumeEpisodeNumber,
 }: {
@@ -14,6 +15,7 @@ export function EpisodeList({
   resumeEpisodeNumber?: number;
   onPlay: (episode: Episode) => void;
   onPreload?: (episode: Episode) => void;
+  onRewatch?: (episode: Episode) => void;
 }) {
   return (
     <ol className="episode-list">
@@ -25,6 +27,7 @@ export function EpisodeList({
           isNextUp={resumeEpisodeNumber !== undefined && resumeEpisodeNumber === episode.number}
           onPlay={onPlay}
           onPreload={onPreload}
+          onRewatch={onRewatch}
         />
       ))}
     </ol>
