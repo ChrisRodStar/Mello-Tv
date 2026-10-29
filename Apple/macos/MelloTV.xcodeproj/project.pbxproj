@@ -5,16 +5,6 @@
 	};
 	"objectVersion" = "60";
 	"objects" = {
-        "C41000000000000000000001" = {
-            "isa" = "PBXFileReference";
-            "lastKnownFileType" = "file.usdz";
-            "path" = "Resources/MacMini.usdz";
-            "sourceTree" = "<group>";
-        };
-        "C41000000000000000000002" = {
-            "isa" = "PBXBuildFile";
-            "fileRef" = "C41000000000000000000001";
-        };
 		"BFFEEDCD5B781D3EA4B54CDD" = {
 			"isa" = "PBXFileReference";
 			"lastKnownFileType" = "sourcecode.swift";
@@ -190,22 +180,11 @@
 			"isa" = "PBXBuildFile";
 			"fileRef" = "26CA3609D8B6FC379C654FD4";
 		};
-		"D0468AE504A4167984C6A332" = {
-			"isa" = "PBXFileReference";
-			"lastKnownFileType" = "sourcecode.swift";
-			"path" = "ServerPortraitView.swift";
-			"sourceTree" = "<group>";
-		};
-		"50425FC026A8564C9690360A" = {
-			"isa" = "PBXBuildFile";
-			"fileRef" = "D0468AE504A4167984C6A332";
-		};
 		"357133DE025AD90FAB29D768" = {
 			"isa" = "PBXGroup";
 			"children" = (
 				"E56A317A39381F0847DD477E",
 				"26CA3609D8B6FC379C654FD4",
-				"D0468AE504A4167984C6A332",
 			);
 			"path" = "Overview";
 			"sourceTree" = "<group>";
@@ -476,7 +455,6 @@
 		"BC43D48AB8DB13B9081DC724" = {
 			"isa" = "PBXGroup";
 			"children" = (
-				"C41000000000000000000001",
 				"787F790199297C1B271C6214",
 				"B11000000000000000000001",
 				"9A3C0A6D161788757CAF5A6C",
@@ -597,7 +575,6 @@
 				"E29D3D4389F9C359472368B5",
 				"B601287130DC4AE9B246D2A9",
 				"DB0EF5A46E315F4FAD038CA9",
-				"50425FC026A8564C9690360A",
 				"4B0E20147745FC3EBB9F5BFB",
 				"D1C4E82FF34DBCE94A4805EE",
 				"47C1D14B7560325DF86E1378",
@@ -632,7 +609,6 @@
 			"isa" = "PBXResourcesBuildPhase";
 			"buildActionMask" = "2147483647";
 			"files" = (
-				"C41000000000000000000002",
 				"74C2431FE30C4A47C8443B80",
 			);
 			"runOnlyForDeploymentPostprocessing" = "0";

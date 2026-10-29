@@ -74,9 +74,9 @@ private struct SourceWordmark: View {
     }
 
     private var tone: Color {
-        if !isReachable || provider.observedAt == nil { return .white.opacity(0.3) }
+        if !isReachable || provider.observedAt == nil { return MelloTVTheme.mutedSubtle }
         if provider.needsAttention { return .orange }
-        return provider.lastFailure == nil ? MelloTVTheme.accent.opacity(0.8) : .white.opacity(0.3)
+        return provider.lastFailure == nil ? MelloTVTheme.accent.opacity(0.8) : MelloTVTheme.mutedSubtle
     }
 }
 
