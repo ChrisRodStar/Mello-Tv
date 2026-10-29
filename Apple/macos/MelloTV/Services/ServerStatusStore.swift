@@ -11,10 +11,32 @@ final class ServerStatusStore: ObservableObject {
     @Published private(set) var activeStreams: Int?
     private let port: Int
     private var monitor: Task<Void, Never>?
+    private var serverIsRunning: Bool
+    private var startupBeganAt: Date?
+    private var serverGeneration: UInt64 = 0
 
-    init(port: Int) { self.port = port }
+    init(port: Int, isServerRunning: Bool = false) {
+        self.port = port
+        serverIsRunning = isServerRunning
+        startupBeganAt = isServerRunning ? Date() : nil
+    }
 
-    var isReachable: Bool { snapshot != nil && error == nil }
+    var hasConnected: Bool { snapshot != nil }
+    var isStarting: Bool { serverIsRunning && !hasConnected && error == nil }
+    var isReachable: Bool { serverIsRunning && hasConnected && error == nil }
+
+    func serverStateChanged(isRunning: Bool) {
+        serverGeneration &+= 1
+        serverIsRunning = isRunning
+        startupBeganAt = isRunning ? Date() : nil
+        snapshot = nil
+        error = nil
+        activeStreams = nil
+        if monitor != nil {
+            stop()
+            start()
+        }
+    }
 
     func start() {
         guard monitor == nil else { return }
@@ -24,7 +46,7 @@ final class ServerStatusStore: ObservableObject {
                 await self.refresh()
                 // A launched process may still be opening its HTTP listener.
                 // Recover promptly instead of leaving the dashboard disconnected for 15 seconds.
-                let interval: UInt64 = self.isReachable ? 15_000_000_000 : 1_000_000_000
+                let interval: UInt64 = self.isReachable || !self.serverIsRunning ? 15_000_000_000 : 1_000_000_000
                 do { try await Task.sleep(nanoseconds: interval) }
                 catch { return }
             }
@@ -41,32 +63,39 @@ final class ServerStatusStore: ObservableObject {
     }
 
     private func refresh() async {
-        guard !isRefreshing else { return }
+        guard serverIsRunning, !isRefreshing else { return }
+        let generation = serverGeneration
         isRefreshing = true
         defer { isRefreshing = false }
         do {
             // Process launch precedes listener readiness. Probe the loopback socket
             // before creating a URLSession task, which logs expected refusals as errors.
             let isListening = await LocalServerListener.isListening(port: port)
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, generation == serverGeneration else { return }
             guard isListening else { throw URLError(.cannotConnectToHost) }
             async let activity = fetchPlaybackActivity()
             let url = AppLinks.clientURL(port: port).appendingPathComponent("api/v1/status")
             let request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 6)
             let (data, response) = try await URLSession.shared.data(for: request)
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, generation == serverGeneration else { return }
             guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw URLError(.badServerResponse) }
             let decoder = JSONDecoder()
             decoder.keyDecodingStrategy = .convertFromSnakeCase
             snapshot = try decoder.decode(ServerSnapshot.self, from: data)
             error = nil
             let streamCount = await activity
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, generation == serverGeneration else { return }
             activeStreams = streamCount
         } catch {
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, generation == serverGeneration else { return }
             activeStreams = nil
-            self.error = "Couldn't reach the local server."
+            if hasConnected {
+                self.error = "Lost connection to the local server."
+            } else if let startupBeganAt, Date().timeIntervalSince(startupBeganAt) >= 30 {
+                self.error = "The server is taking longer than expected to start. Open the logs for details."
+            }
+            // A refused connection before the first successful status response
+            // is normal startup, not a lost connection.
         }
     }
 

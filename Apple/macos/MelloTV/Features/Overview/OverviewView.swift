@@ -54,7 +54,7 @@ struct OverviewView: View {
                     .frame(width: 6, height: 6)
                     .shadow(color: statusTint.opacity(online ? 0.3 : 0), radius: 4)
                     .accessibilityHidden(true)
-                Text(online ? "Running on this Mac" : process.isRunning ? "Connecting to this Mac" : "Server stopped")
+                Text(statusLabel)
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(MelloTVTheme.textSecondary)
                 Spacer()
@@ -201,20 +201,30 @@ struct OverviewView: View {
 
     private var statusTint: Color {
         if !process.isRunning { return MelloTVTheme.mutedSubtle }
+        if model.isStarting { return MelloTVTheme.accent }
         if !online || !ready { return .orange }
         return MelloTVTheme.accent
     }
 
+    private var statusLabel: String {
+        if !process.isRunning { return "Server stopped" }
+        if model.isStarting { return "Starting server" }
+        if online { return "Running on this Mac" }
+        return model.hasConnected ? "Connection lost" : "Server not ready"
+    }
+
     private var headline: String {
         if !process.isRunning { return "Your cinema,\non pause." }
-        if !online { return model.error == nil ? "Waking up\nyour cinema." : "Let's reconnect\nyour cinema." }
+        if model.isStarting { return "Starting up\nyour cinema." }
+        if !online { return model.hasConnected ? "Let's reconnect\nyour cinema." : "Your server\nisn't ready." }
         if !catalogUsable || !mediaReady { return "Your server\nneeds attention." }
         return "Your cinema\nis online."
     }
 
     private var detail: String {
         if !process.isRunning { return "Start your server to watch on your iPhone or in the web player." }
-        if !online { return model.error ?? "Getting your library and connections ready." }
+        if model.isStarting { return "Starting the server and getting your library ready." }
+        if !online { return model.error ?? "Waiting for the local server." }
         if !mediaReady { return "The playback engine is unavailable. Open the logs to investigate." }
         if model.snapshot?.catalogStatus == "unavailable" {
             return "Your library couldn't be opened. Open the logs to investigate."
@@ -229,14 +239,14 @@ struct OverviewView: View {
     }
 
     private var playback: String {
-        guard online else { return "Offline" }
+        guard online else { return model.isStarting ? "Starting…" : "Offline" }
         guard mediaReady else { return "Unavailable" }
         guard let count = model.activeStreams else { return "Unavailable" }
         return count == 0 ? "Idle" : "\(count) stream\(count == 1 ? "" : "s")"
     }
 
     private var libraryStatus: String {
-        if !online { return "Offline" }
+        if !online { return model.isStarting ? "Getting ready" : "Offline" }
         if libraryReady { return "Ready" }
         if libraryNew { return "Ready to browse" }
         return model.snapshot?.catalogStatus == "unconfigured" ? "Set up needed" : "Unavailable"
@@ -267,7 +277,7 @@ struct OverviewView: View {
     }
 
     private var connection: String {
-        guard online else { return "Offline" }
+        guard online else { return model.isStarting ? "Starting…" : "Offline" }
         let roaming = model.snapshot?.endpoints.contains { endpoint in
             guard let host = URL(string: endpoint)?.host else { return false }
             let octets = host.split(separator: ".").compactMap { Int($0) }

@@ -44,7 +44,7 @@ final class MelloTVAppDelegate: NSObject, NSApplicationDelegate {
         _ = applyPresentation(preferences.presentation)
         server.onStateChange = { [weak self] running in
             self?.menuBar.update(running: running)
-            self?.mainWindow.serverStateChanged()
+            self?.mainWindow.serverStateChanged(isRunning: running)
         }
         server.start()
         updater.start()
