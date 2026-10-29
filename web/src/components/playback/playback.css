@@ -365,6 +365,7 @@ button.player-action:hover,
   font-size: 12px;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
+  line-clamp: 2;
 }
 .player-status-icon {
   color: var(--muted, #8e9096);

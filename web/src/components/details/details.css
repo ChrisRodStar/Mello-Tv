@@ -59,12 +59,7 @@ body:has(.detail-dialog[open]) {
     rgba(0, 0, 0, 0.65) 45%,
     transparent 100%
   );
-  mask-image: linear-gradient(
-    to bottom,
-    #000 0%,
-    rgba(0, 0, 0, 0.65) 45%,
-    transparent 100%
-  );
+  mask-image: linear-gradient(to bottom, #000 0%, rgba(0, 0, 0, 0.65) 45%, transparent 100%);
 }
 
 /* Artwork Header */
@@ -117,7 +112,7 @@ body:has(.detail-dialog[open]) {
   left: 0;
   height: 110px;
   background: linear-gradient(to bottom, rgba(0, 0, 0, 0.22), transparent);
-  content: "";
+  content: '';
   pointer-events: none;
   z-index: 1;
 }
@@ -794,6 +789,7 @@ body:has(.detail-dialog[open]) {
   line-height: 1.3;
   display: -webkit-box;
   -webkit-line-clamp: 2;
+  line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
