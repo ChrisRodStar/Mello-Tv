@@ -3,7 +3,8 @@ import SwiftUI
 
 /// The Mac companion owns onboarding. The viewing client stays in the browser.
 @MainActor
-final class WelcomeWindowController: NSWindowController {
+final class WelcomeWindowController: NSWindowController, NSWindowDelegate {
+    var onVisibilityChange: ((Bool) -> Void)?
     static let completedKey = "mellotv.native.onboarding.completed"
     private let port: Int
     private let onCompleted: () -> Void
@@ -27,9 +28,14 @@ final class WelcomeWindowController: NSWindowController {
         window.isReleasedWhenClosed = false
         window.center()
         super.init(window: window)
+        window.delegate = self
     }
 
     required init?(coder: NSCoder) { nil }
+
+    func windowWillClose(_ notification: Notification) {
+        onVisibilityChange?(false)
+    }
 
     func present() {
         window?.contentViewController = WindowContentController(rootView: WelcomeOnboardingView(port: port) { [weak self] in
@@ -38,6 +44,7 @@ final class WelcomeWindowController: NSWindowController {
             self.close()
             self.onCompleted()
         })
+        onVisibilityChange?(true)
         showWindow(nil)
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)

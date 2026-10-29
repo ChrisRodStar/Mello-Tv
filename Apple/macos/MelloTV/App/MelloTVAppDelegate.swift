@@ -5,6 +5,8 @@ import Sparkle
 final class MelloTVAppDelegate: NSObject, NSApplicationDelegate {
     private let server = ServerController(port: 8080)
     private let preferences = AppPreferences()
+    private var isMainWindowOpen = false
+    private var isWelcomeWindowOpen = false
     private lazy var updater = AppUpdateService(port: server.port, isServerRunning: { [weak self] in self?.server.isRunning == true })
     private lazy var actions: AppActions = AppActions(
         preferences: preferences,
@@ -25,6 +27,16 @@ final class MelloTVAppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         configureApplicationMenu()
+        mainWindow.onVisibilityChange = { [weak self] isOpen in
+            guard let self else { return }
+            self.isMainWindowOpen = isOpen
+            _ = self.updateDockPresence(for: self.preferences.presentation)
+        }
+        welcomeWindow.onVisibilityChange = { [weak self] isOpen in
+            guard let self else { return }
+            self.isWelcomeWindowOpen = isOpen
+            _ = self.updateDockPresence(for: self.preferences.presentation)
+        }
         preferences.applyPresentation = { [weak self] mode in
             self?.applyPresentation(mode) ?? false
         }
@@ -61,13 +73,21 @@ final class MelloTVAppDelegate: NSObject, NSApplicationDelegate {
         // Create the status item before hiding the Dock icon; remove it only
         // after the Dock is available when switching back to Dock-only mode.
         if mode.showsMenuBar { menuBar.setVisible(true) }
-        guard NSApp.setActivationPolicy(mode.showsDock ? .regular : .accessory) else { return false }
+        guard updateDockPresence(for: mode) else { return false }
         menuBar.setVisible(mode.showsMenuBar)
         if let keyWindow {
             keyWindow.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
         }
         return true
+    }
+
+    private func updateDockPresence(for mode: AppPresentation) -> Bool {
+        // A minimized or hidden window is still open and needs its Dock entry.
+        let showsDock = mode.showsDock || isMainWindowOpen || isWelcomeWindowOpen
+        let policy: NSApplication.ActivationPolicy = showsDock ? .regular : .accessory
+        guard NSApp.activationPolicy() != policy else { return true }
+        return NSApp.setActivationPolicy(policy)
     }
 
     private func openWebsite() { NSWorkspace.shared.open(AppLinks.clientURL(port: server.port)) }

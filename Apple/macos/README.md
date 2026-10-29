@@ -29,7 +29,7 @@ Server data and logs live under `~/Library/Application Support/Mello TV` and `~/
 
 ## Settings
 
-Settings stays in the native content pane, with General, Server, Updates, and About sections. General saves a Dock-only, menu-bar-only, or combined presentation preference and applies it immediately. The menu bar and application menu both expose Settings; the application shortcut is Command-comma. Launch at login is shared between General and the menu-bar command. Server contains process controls and shortcuts to logs and data. Settings uses a fixed layout that fits the minimum window without scrolling. Updates shows the installed app version and a single bundled-provider summary, a manual update check, and automatic checking/installation preferences. Individual provider details remain in Providers.
+Settings stays in the native content pane, with General, Server, Updates, and About sections. General saves a Dock-only, menu-bar-only, or combined presentation preference and applies it immediately. The menu bar and application menu both expose Settings; the application shortcut is Command-comma. In menu-bar mode, the Dock icon stays visible while the main or welcome window is open, including when minimized; closing the last of those windows returns to menu-bar-only operation and keeps the server running. Launch at login is shared between General and the menu-bar command. Server contains process controls and shortcuts to logs and data. Settings uses a fixed layout that fits the minimum window without scrolling. Updates shows the installed app version and a single bundled-provider summary, a manual update check, and automatic checking/installation preferences. Individual provider details remain in Providers.
 
 
 ## Catalog setup

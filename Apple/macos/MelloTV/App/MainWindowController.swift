@@ -7,6 +7,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
     private let process: ServerProcessState
     private let actions: AppActions
     private let navigation = DesktopNavigation()
+    var onVisibilityChange: ((Bool) -> Void)?
     private var hasPresented = false
     private let sidebarID = NSToolbarItem.Identifier("MelloTVSidebar")
     private let refreshID = NSToolbarItem.Identifier("MelloTVRefresh")
@@ -49,6 +50,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         if let destination = destination { navigation.selection = destination }
         model.start()
         model.refreshNow()
+        onVisibilityChange?(true)
         showWindow(nil)
         window?.makeKeyAndOrderFront(nil)
         if !hasPresented, let window {
@@ -63,6 +65,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
 
     func windowWillClose(_ notification: Notification) {
         model.stop()
+        onVisibilityChange?(false)
     }
 
     func serverStateChanged() {
