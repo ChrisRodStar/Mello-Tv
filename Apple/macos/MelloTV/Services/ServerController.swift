@@ -6,6 +6,9 @@ final class ServerController {
     let state = ServerProcessState()
     var onStateChange: ((Bool) -> Void)?
     private var serverProcess: Process?
+    // The write end stays in the app. Even Xcode's force-stop closes it,
+    // allowing the child to detect owner death without an app termination callback.
+    private var serverLifetimePipe: Pipe?
     private var bonjourService: NetService?
     private var logFileHandle: FileHandle?
     var isRunning: Bool { state.isRunning }
@@ -122,7 +125,7 @@ final class ServerController {
         ensureDirectories()
         
         let dbPath = dataDirectoryURL.appendingPathComponent("data").path
-        var args = ["--port", "\(port)", "--db-path", dbPath]
+        var args = ["--port", "\(port)", "--db-path", dbPath, "--exit-on-stdin-close"]
         
         if let webDir = locateWebDirectory() {
             args.append(contentsOf: ["--static-dir", webDir.path])
@@ -136,6 +139,8 @@ final class ServerController {
         let process = Process()
         process.executableURL = serverBinary
         process.arguments = args
+        let lifetimePipe = Pipe()
+        process.standardInput = lifetimePipe
         var environment = ProcessInfo.processInfo.environment
         do {
             if let credential = try CatalogCredentialStore.read() {
@@ -163,6 +168,9 @@ final class ServerController {
             DispatchQueue.main.async {
                 guard let self = self, self.serverProcess === proc else { return }
                 self.serverProcess = nil
+                self.closeServerLifetimePipe()
+                try? self.logFileHandle?.close()
+                self.logFileHandle = nil
                 self.setRunning(false)
             }
         }
@@ -170,9 +178,14 @@ final class ServerController {
         do {
             try process.run()
             self.serverProcess = process
+            self.serverLifetimePipe = lifetimePipe
             self.setRunning(true)
             NSLog("Mello TV: server process launched (PID \(process.processIdentifier))")
         } catch {
+            try? lifetimePipe.fileHandleForWriting.close()
+            try? lifetimePipe.fileHandleForReading.close()
+            try? logFileHandle?.close()
+            logFileHandle = nil
             NSLog("Mello TV: failed to run the server: \(error)")
             setRunning(false)
         }
@@ -180,6 +193,7 @@ final class ServerController {
     
     func stop(waitTimeout: TimeInterval = 2.0) {
         guard let process = serverProcess, process.isRunning else {
+            closeServerLifetimePipe()
             setRunning(false)
             return
         }
@@ -200,11 +214,17 @@ final class ServerController {
         }
         
         self.serverProcess = nil
+        closeServerLifetimePipe()
         try? logFileHandle?.close()
         self.logFileHandle = nil
         setRunning(false)
     }
     
+    private func closeServerLifetimePipe() {
+        try? serverLifetimePipe?.fileHandleForWriting.close()
+        serverLifetimePipe = nil
+    }
+
     func primaryServerAddress() -> String {
         var ifaddr: UnsafeMutablePointer<ifaddrs>?
         var lanIP: String?

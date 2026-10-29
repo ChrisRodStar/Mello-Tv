@@ -1,4 +1,6 @@
-use std::{path::PathBuf, process::ExitCode, sync::Arc};
+use std::{path::PathBuf, process::ExitCode, sync::Arc, time::Duration};
+
+mod owner_lifetime;
 
 use stream_core::ports::MediaEngine;
 use stream_media::DiscoveryCoordinator;
@@ -16,6 +18,7 @@ pub struct ServerConfig {
     pub port: u16,
     pub db_path: PathBuf,
     pub static_dir: Option<PathBuf>,
+    pub exit_on_stdin_close: bool,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -56,6 +59,7 @@ impl ServerConfig {
                 }
             });
 
+        let mut exit_on_stdin_close = false;
         let mut args = std::env::args().skip(1);
         while let Some(arg) = args.next() {
             match arg.as_str() {
@@ -71,9 +75,11 @@ impl ServerConfig {
                     println!(
                         "      --host <HOST>          Host address to bind to [default: 0.0.0.0]"
                     );
+                    println!("      --exit-on-stdin-close  Shut down when the launching app exits");
                     println!("  -h, --help                 Print help");
                     std::process::exit(0);
                 }
+                "--exit-on-stdin-close" => exit_on_stdin_close = true,
                 "--port" | "-p" => {
                     if let Some(val) = args.next() {
                         port = val.parse::<u16>()?;
@@ -137,6 +143,7 @@ impl ServerConfig {
             port,
             db_path,
             static_dir,
+            exit_on_stdin_close,
         })
     }
 }
@@ -210,6 +217,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         .try_init();
 
     let config = ServerConfig::parse()?;
+    let owner_closed = owner_lifetime::watch_stdin(config.exit_on_stdin_close)?;
     tracing::info!(
         host = %config.host,
         port = config.port,
@@ -241,7 +249,11 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let household_id = accounts.select_household(None).await?;
     tracing::info!(%household_id, "household account selected");
 
-    let media: Arc<dyn MediaEngine> = match DiscoveryCoordinator::default_live() {
+    let media_shutdown = tokio_util::sync::CancellationToken::new();
+    let _cancel_media_on_exit = media_shutdown.clone().drop_guard();
+    let media: Arc<dyn MediaEngine> = match DiscoveryCoordinator::default_live(
+        media_shutdown.clone(),
+    ) {
         Ok(coordinator) => {
             tracing::info!("initialized live media discovery engine with 5 native providers");
             Arc::new(coordinator)
@@ -345,12 +357,31 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     tokio::select! {
         _ = shutdown_signal() => {
             tracing::info!("shutdown signal received, initiating graceful shutdown");
-            let _ = shutdown_tx.send(());
+        }
+        _ = owner_closed => {
+            tracing::info!("launching app disconnected, initiating graceful shutdown");
         }
     }
+    media_shutdown.cancel();
+    let _ = shutdown_tx.send(());
 
-    for handle in serve_handles {
-        match handle.await {
+    // An active request must not keep the app-owned server alive indefinitely.
+    let drain_deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+    for mut handle in serve_handles {
+        let result = if config.exit_on_stdin_close {
+            match tokio::time::timeout_at(drain_deadline, &mut handle).await {
+                Ok(result) => result,
+                Err(_) => {
+                    tracing::info!("closing remaining requests after app-owned shutdown deadline");
+                    handle.abort();
+                    let _ = handle.await;
+                    continue;
+                }
+            }
+        } else {
+            handle.await
+        };
+        match result {
             Ok((addr, Ok(()))) => {
                 tracing::debug!(?addr, "listener shutdown cleanly");
             }

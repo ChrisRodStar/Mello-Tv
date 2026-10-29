@@ -227,7 +227,7 @@ impl NativeProviders {
         Ok(Self { providers, client })
     }
 
-    pub fn spawn_prewarm(&self) {
+    pub fn spawn_prewarm(&self, cancel: CancellationToken) {
         let client = self.client.clone();
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
             let handle_clone = handle.clone();
@@ -245,7 +245,11 @@ impl NativeProviders {
                         let _ = c.head(*url).timeout(Duration::from_secs(3)).send().await;
                     }
                 });
-                futures_util::future::join_all(futures).await;
+                tokio::select! {
+                    biased;
+                    _ = cancel.cancelled() => return,
+                    _ = futures_util::future::join_all(futures) => {}
+                }
 
                 if let Ok(tmdb_id) = TmdbId::try_from(27205) {
                     let warmup_lookup = Lookup {
@@ -275,7 +279,7 @@ impl NativeProviders {
                         let host = BlockingProviderHost {
                             handle: handle_clone,
                             client,
-                            cancel: CancellationToken::new(),
+                            cancel,
                         };
                         let _ = stream_provider_adapters::resolve("vidcore", &warmup_lookup, &host);
                     })
@@ -293,9 +297,9 @@ impl ProviderCatalog for NativeProviders {
 }
 
 impl DiscoveryCoordinator {
-    pub fn default_live() -> Result<Self, DiscoveryError> {
+    pub fn default_live(shutdown: CancellationToken) -> Result<Self, DiscoveryError> {
         let catalog = NativeProviders::new()?;
-        catalog.spawn_prewarm();
+        catalog.spawn_prewarm(shutdown);
         let transport = HttpClient::new().map_err(|_| DiscoveryError::Closed)?;
         let probe_limits = ProbeLimits {
             total_sample_bytes: 16 * 1024 * 1024,

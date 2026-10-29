@@ -46,7 +46,12 @@ Apple/macos/
 3. Select the **Mello TV** scheme and target **My Mac**.
 4. Press **Run** (`⌘R`).
 
-> **Tip**: If you already have an installed copy of Mello TV running, quit it first so port `8080` is free.
+The bundled server follows the Mac app's lifetime, including when Xcode's
+**Stop Running** force-stops the app. The app keeps a private stdin pipe open;
+`--exit-on-stdin-close` makes the server shut down and release its listeners when
+that pipe closes. Standalone server launches do not enable this behavior.
+
+> **Tip**: If you already have a separate installed copy of Mello TV running, quit it first so port `8080` is free.
 
 ### From the Terminal
 
