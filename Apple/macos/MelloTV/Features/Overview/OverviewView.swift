@@ -44,6 +44,7 @@ struct OverviewView: View {
             .padding(compact ? 26 : 34)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
+        .onAppear { model.refreshNow() }
     }
 
     private func serverPanel(compact: Bool) -> some View {
@@ -159,6 +160,18 @@ struct OverviewView: View {
 
     private var systemRail: some View {
         HStack(alignment: .center, spacing: 18) {
+            Button { destination = .users } label: {
+                HStack(spacing: 8) {
+                    metric(title: "Users", value: userCount)
+                    Image(systemName: "arrow.up.right")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(MelloTVTheme.textSecondary)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(OverviewPressStyle())
+            .help("View users and their profiles")
+            railDivider
             metric(title: "Playback", value: playback)
                 .help("Streams delivering data now or within the last three minutes, including buffered playback.")
             railDivider
@@ -236,6 +249,12 @@ struct OverviewView: View {
         }
         if libraryNew { return "Open the web player to browse. Your library fills as you explore." }
         return "Browse in the web player, or open Mello TV on your iPhone."
+    }
+
+    private var userCount: String {
+        guard online else { return model.isStarting ? "Starting…" : "Offline" }
+        guard let count = model.userCount else { return "Unavailable" }
+        return "\(count) \(count == 1 ? "user" : "users")"
     }
 
     private var playback: String {

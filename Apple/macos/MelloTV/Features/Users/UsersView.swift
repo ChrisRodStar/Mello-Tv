@@ -46,6 +46,8 @@ struct UsersView: View {
                                 UserDetailView(profile: profile,
                                                details: store.details?.profileID == profile.id ? store.details : nil,
                                                loading: store.isLoadingDetails,
+                                               recommendation: store.recommendations[profile.id],
+                                               regenerate: { Task { await store.regenerateRecommendations(for: profile, port: port) } },
                                                edit: { editor = UserEditorTarget(profile: profile) })
                                     .padding(26)
                             } else {
@@ -77,6 +79,15 @@ struct UsersView: View {
             while !Task.isCancelled {
                 await store.loadDetails(profileID: selectedID, port: port)
                 do { try await Task.sleep(nanoseconds: 30_000_000_000) }
+                catch { return }
+            }
+        }
+        .task(id: "recommendations-\(online)-\(selectedID ?? "none")-\(store.recommendations[selectedID ?? ""]?.isRunning == true)") {
+            guard online, let selectedID else { return }
+            while !Task.isCancelled {
+                await store.refreshRecommendationStatus(for: selectedID, port: port)
+                let delay: UInt64 = store.recommendations[selectedID]?.isRunning == true ? 2_000_000_000 : 15_000_000_000
+                do { try await Task.sleep(nanoseconds: delay) }
                 catch { return }
             }
         }
@@ -185,6 +196,8 @@ private struct UserDetailView: View {
     let profile: Profile
     let details: UserDetails?
     let loading: Bool
+    let recommendation: UserRecommendationRefresh?
+    let regenerate: () -> Void
     let edit: () -> Void
 
     var body: some View {
@@ -225,9 +238,31 @@ private struct UserDetailView: View {
             .background(MelloTVTheme.sunken.opacity(0.65), in: RoundedRectangle(cornerRadius: 17))
 
             VStack(alignment: .leading, spacing: 11) {
-                sectionLabel("Taste")
+                HStack(spacing: 10) {
+                    sectionLabel("Taste")
+                    Spacer(minLength: 0)
+                    Button(action: regenerate) {
+                        HStack(spacing: 7) {
+                            if recommendation?.isRunning == true { ProgressView().controlSize(.mini) }
+                            else { Image(systemName: "arrow.clockwise") }
+                            Text(recommendation?.isRunning == true ? "Regenerating…" : "Regenerate recommendations")
+                        }
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(profile.preferences.completed ? MelloTVTheme.accent : MelloTVTheme.muted)
+                        .padding(.vertical, 6)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(OverviewPressStyle())
+                    .disabled(!profile.preferences.completed || recommendation?.isRunning == true)
+                    .help("Rebuild recommendations using this profile’s current tastes and viewing history.")
+                }
                 Text(tasteDescription).font(.system(size: 12)).lineSpacing(4)
                     .foregroundStyle(MelloTVTheme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if let message = recommendation?.message {
+                Text(message).font(.system(size: 11)).lineSpacing(3)
+                    .foregroundStyle(recommendation?.status == "failed" || recommendation?.status == "unavailable" || recommendation?.status == "request_failed" ? Color.orange : MelloTVTheme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
             VStack(alignment: .leading, spacing: 17) {

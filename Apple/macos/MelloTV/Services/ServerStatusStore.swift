@@ -9,6 +9,7 @@ final class ServerStatusStore: ObservableObject {
     @Published private(set) var isRefreshing = false
     @Published private(set) var error: String?
     @Published private(set) var activeStreams: Int?
+    @Published private(set) var userCount: Int?
     private let port: Int
     private var monitor: Task<Void, Never>?
     private var serverIsRunning: Bool
@@ -32,6 +33,7 @@ final class ServerStatusStore: ObservableObject {
         snapshot = nil
         error = nil
         activeStreams = nil
+        userCount = nil
         if monitor != nil {
             stop()
             start()
@@ -74,6 +76,7 @@ final class ServerStatusStore: ObservableObject {
             guard !Task.isCancelled, generation == serverGeneration else { return }
             guard isListening else { throw URLError(.cannotConnectToHost) }
             async let activity = fetchPlaybackActivity()
+            async let profiles = fetchUserCount()
             let url = AppLinks.clientURL(port: port).appendingPathComponent("api/v1/status")
             let request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 6)
             let (data, response) = try await URLSession.shared.data(for: request)
@@ -83,12 +86,14 @@ final class ServerStatusStore: ObservableObject {
             decoder.keyDecodingStrategy = .convertFromSnakeCase
             snapshot = try decoder.decode(ServerSnapshot.self, from: data)
             error = nil
-            let streamCount = await activity
+            let (streamCount, profileCount) = await (activity, profiles)
             guard !Task.isCancelled, generation == serverGeneration else { return }
             activeStreams = streamCount
+            userCount = profileCount
         } catch {
             guard !Task.isCancelled, generation == serverGeneration else { return }
             activeStreams = nil
+            userCount = nil
             if hasConnected {
                 self.error = "Lost connection to the local server."
             } else if let startupBeganAt, Date().timeIntervalSince(startupBeganAt) >= 30 {
@@ -97,6 +102,16 @@ final class ServerStatusStore: ObservableObject {
             // A refused connection before the first successful status response
             // is normal startup, not a lost connection.
         }
+    }
+
+    private func fetchUserCount() async -> Int? {
+        let url = AppLinks.clientURL(port: port).appendingPathComponent("api/v1/profiles")
+        let request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 3)
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard !Task.isCancelled, (response as? HTTPURLResponse)?.statusCode == 200 else { return nil }
+            return try JSONDecoder().decode(ProfileCountReply.self, from: data).profiles.count
+        } catch { return nil }
     }
 
     private func fetchPlaybackActivity() async -> Int? {
@@ -112,6 +127,11 @@ final class ServerStatusStore: ObservableObject {
             return nil
         }
     }
+}
+
+private struct ProfileCountReply: Decodable {
+    struct Identity: Decodable { let id: String }
+    let profiles: [Identity]
 }
 
 private struct PlaybackActivity: Decodable {

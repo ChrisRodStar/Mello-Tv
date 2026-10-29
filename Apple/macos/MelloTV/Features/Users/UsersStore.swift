@@ -30,6 +30,20 @@ struct UserDetails {
     let titles: [String: String]
 }
 
+struct UserRecommendationRefresh: Decodable {
+    let status: String
+    let reason: String?
+    var isRunning: Bool { status == "pending" }
+    var message: String? {
+        switch status {
+        case "pending": return reason ?? "Regenerating recommendations… Your saved picks stay available."
+        case "ready": return "Recommendations regenerated."
+        case "failed", "unavailable", "request_failed": return reason ?? "Couldn’t regenerate recommendations. Try again."
+        default: return nil
+        }
+    }
+}
+
 private struct UsersReply: Decodable { let profiles: [Profile] }
 private struct UserHistoryReply: Decodable { let records: [UserWatchRecord] }
 private struct UserTitle: Decodable {
@@ -91,9 +105,11 @@ final class UsersStore: ObservableObject {
     @Published private(set) var details: UserDetails?
     @Published private(set) var isLoadingDetails = false
     @Published private(set) var isSaving = false
+    @Published private(set) var recommendations: [String: UserRecommendationRefresh] = [:]
     private var online = false
     private var generation = UUID()
     private var revision = 0
+    private var regenerationRequests = Set<String>()
     private var titleCache: [String: String] = [:]
 
     func setOnline(_ value: Bool) {
@@ -107,6 +123,8 @@ final class UsersStore: ObservableObject {
         isLoadingDetails = false
         listError = nil
         titleCache = [:]
+        recommendations = [:]
+        regenerationRequests = []
     }
 
     func refresh(port: Int) async {
@@ -152,6 +170,47 @@ final class UsersStore: ObservableObject {
         }
         guard !Task.isCancelled, token == generation else { return }
         details = UserDetails(profileID: profileID, savedCount: saved?.titles.count, history: recent, titles: titleCache)
+    }
+
+    func regenerateRecommendations(for profile: Profile, port: Int) async {
+        guard online, profile.preferences.completed, recommendations[profile.id]?.isRunning != true else { return }
+        let token = generation
+        recommendations[profile.id] = UserRecommendationRefresh(status: "pending", reason: nil)
+        regenerationRequests.insert(profile.id)
+        defer { if token == generation { regenerationRequests.remove(profile.id) } }
+        do {
+            _ = try await UsersAPI(port: port).send("profiles/\(profile.id)/recommendations/refresh", method: "POST")
+            guard token == generation, !Task.isCancelled else { return }
+        } catch {
+            guard token == generation, !Task.isCancelled else { return }
+            let message: String
+            switch (error as? UserRequestError)?.status {
+            case 400: message = "Finish this profile’s taste setup on a viewing device first."
+            case 422: message = "Check the catalog configuration in Settings before regenerating recommendations."
+            case 409: message = "Recommendation generation is busy. Try again shortly."
+            case 404: message = "This profile or regeneration action is unavailable. Refresh the users list."
+            default: message = "Couldn’t start regeneration. Check your server connection and try again."
+            }
+            recommendations[profile.id] = UserRecommendationRefresh(status: "request_failed", reason: message)
+        }
+    }
+
+    func refreshRecommendationStatus(for profileID: String, port: Int) async {
+        guard online, !regenerationRequests.contains(profileID), recommendations[profileID]?.status != "request_failed" else { return }
+        let token = generation
+        let previous = recommendations[profileID]
+        do {
+            let reply: UserRecommendationRefresh = try await UsersAPI(port: port).get("profiles/\(profileID)/recommendations/refresh")
+            guard token == generation, !Task.isCancelled else { return }
+            // A poll started before the button click must not clear the new pending state.
+            guard !regenerationRequests.contains(profileID), previous?.status == recommendations[profileID]?.status else { return }
+            recommendations[profileID] = reply
+        } catch {
+            guard token == generation, !Task.isCancelled else { return }
+            if recommendations[profileID]?.isRunning == true {
+                recommendations[profileID] = UserRecommendationRefresh(status: "pending", reason: "Couldn’t check progress. Retrying…")
+            }
+        }
     }
 
     func save(profile: Profile?, name: String, color: String, port: Int) async throws -> Profile {

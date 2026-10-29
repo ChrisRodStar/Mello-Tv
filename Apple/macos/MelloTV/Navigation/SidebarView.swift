@@ -15,9 +15,9 @@ struct SidebarView: View {
             VStack(alignment: .leading, spacing: 20) {
                 sidebarSection("Server") {
                     destinationButton(.overview)
+                    destinationButton(.users)
                     destinationButton(.providers)
                     destinationButton(.network)
-                    destinationButton(.users)
                 }
             }
 

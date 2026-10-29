@@ -204,6 +204,10 @@ pub fn routes() -> Router<AppState> {
             "/api/v1/profiles/{id}/recommendations",
             get(get_recommendations),
         )
+        .route(
+            "/api/v1/profiles/{id}/recommendations/refresh",
+            get(recommendation_refresh_status).post(refresh_profile_recommendations),
+        )
         // Progress, Resume & History
         .route("/api/profiles/{id}/history", get(get_history))
         .route("/api/v1/profiles/{id}/history", get(get_history))
@@ -565,7 +569,7 @@ async fn queue_profile_recommendations(
     profile_id: String,
     mark_dirty: bool,
     preserve_stale: bool,
-) {
+) -> bool {
     let worker = match state.catalog_worker.clone() {
         Some(worker) if worker.available() => worker,
         _ => {
@@ -581,11 +585,11 @@ async fn queue_profile_recommendations(
                     Some(CATALOG_CONFIG_GUIDANCE.to_owned()),
                 );
             }
-            return;
+            return false;
         }
     };
     let Some(inputs) = recommendation_inputs(&state, &profile_id).await else {
-        return;
+        return false;
     };
     let job_key = format!("profile:{profile_id}:recommendations");
     let started = if mark_dirty {
@@ -597,7 +601,7 @@ async fn queue_profile_recommendations(
         if !preserve_stale {
             state.set_catalog_generation(&profile_id, CatalogGenerationStatus::Pending, None);
         }
-        return;
+        return state.is_catalog_job_running(&job_key);
     }
     if !preserve_stale {
         state.set_catalog_generation(&profile_id, CatalogGenerationStatus::Pending, None);
@@ -643,7 +647,23 @@ async fn queue_profile_recommendations(
                         current_inputs = latest_inputs;
                         continue;
                     }
+                    if !state_for_job.is_catalog_job_running(&job_key) {
+                        state_for_job.set_catalog_request_status(
+                            &job_key,
+                            CatalogGenerationStatus::Failed,
+                            Some(
+                                "Recommendation generation is busy. Try again shortly.".to_owned(),
+                            ),
+                        );
+                    }
                 } else {
+                    state_for_job.set_catalog_request_status(
+                        &job_key,
+                        CatalogGenerationStatus::Unavailable,
+                        Some(
+                            "Complete profile preferences to generate recommendations.".to_owned(),
+                        ),
+                    );
                     let _ = state_for_job
                         .catalog
                         .delete("recommendations", &profile_id)
@@ -658,6 +678,18 @@ async fn queue_profile_recommendations(
                 }
                 return;
             }
+            let (status, reason) = match &result {
+                Ok(record) if record.data.sections.is_empty() => (
+                    CatalogGenerationStatus::Unavailable,
+                    Some("No matching catalog titles are available yet.".to_owned()),
+                ),
+                Ok(_) => (CatalogGenerationStatus::Ready, None),
+                Err(_) => (
+                    CatalogGenerationStatus::Failed,
+                    Some("Couldn’t regenerate recommendations. Check the catalog configuration and try again.".to_owned()),
+                ),
+            };
+            state_for_job.set_catalog_request_status(&job_key, status, reason);
             match result {
                 Ok(record) if record.data.sections.is_empty() && preserve_stale => state_for_job.set_catalog_generation_stale(&profile_id, Some("No new matching titles; showing the last saved recommendations.".to_owned())),
                 Ok(record) if record.data.sections.is_empty() => state_for_job.set_catalog_generation(&profile_id, CatalogGenerationStatus::Unavailable, Some("No matching catalog titles are available yet.".to_owned())),
@@ -668,6 +700,62 @@ async fn queue_profile_recommendations(
             break;
         }
     });
+    true
+}
+
+/// Explicit regeneration preserves the saved catalog until a replacement is ready.
+async fn refresh_profile_recommendations(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<(StatusCode, Json<serde_json::Value>), AppError> {
+    if !is_safe_identifier(&id) {
+        return Err(AppError::BadRequest("invalid profile identifier".into()));
+    }
+    let profile = state
+        .accounts
+        .get_profile(&state.household_account_id, &id)
+        .await?;
+    if !profile.preferences.completed {
+        return Err(AppError::BadRequest(
+            "Complete this profile’s taste setup first.".into(),
+        ));
+    }
+    if !state
+        .catalog_worker
+        .as_ref()
+        .is_some_and(|worker| worker.available())
+    {
+        return Err(AppError::Unprocessable(CATALOG_CONFIG_GUIDANCE.to_owned()));
+    }
+    // Repeated clicks join the existing job rather than scheduling another rebuild.
+    if !queue_profile_recommendations(state.clone(), id, false, true).await {
+        return Err(AppError::Conflict(
+            "Recommendation generation is busy. Try again shortly.".into(),
+        ));
+    }
+    Ok((StatusCode::ACCEPTED, Json(json!({ "status": "pending" }))))
+}
+
+async fn recommendation_refresh_status(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    if !is_safe_identifier(&id) {
+        return Err(AppError::BadRequest("invalid profile identifier".into()));
+    }
+    state
+        .accounts
+        .get_profile(&state.household_account_id, &id)
+        .await?;
+    let key = format!("profile:{id}:recommendations");
+    if state.is_catalog_job_running(&key) {
+        return Ok(Json(json!({ "status": "pending" })));
+    }
+    // Unlike catalog-status, this records the job outcome even if an older cache is usable.
+    Ok(Json(match state.catalog_request_status(&key) {
+        Some(status) => serde_json::to_value(status)?,
+        None => json!({ "status": "idle" }),
+    }))
 }
 
 async fn get_profile(
