@@ -22,14 +22,6 @@ struct DesktopSidebarView: View {
             Spacer(minLength: 24)
 
             VStack(spacing: 4) {
-                destinationButton(.settings)
-                    .padding(.bottom, 8)
-                SidebarRowButton(
-                    title: "Welcome guide",
-                    symbol: "book.closed",
-                    expanded: expanded,
-                    action: actions.showWelcome
-                )
                 SidebarRowButton(
                     title: "Support",
                     symbol: "heart.fill",
@@ -39,6 +31,20 @@ struct DesktopSidebarView: View {
                     NSWorkspace.shared.open(AppLinks.buyMeACoffeeURL)
                 }
                 .help("Support Mello TV on Buy Me a Coffee")
+
+                SidebarRowButton(
+                    title: "Welcome guide",
+                    symbol: "book.closed",
+                    expanded: expanded,
+                    action: actions.showWelcome
+                )
+
+                Divider()
+                    .overlay(MelloTVTheme.border)
+                    .padding(.horizontal, expanded ? 12 : 8)
+                    .padding(.vertical, 8)
+
+                destinationButton(.settings)
             }
         }
         .padding(.horizontal, 10)
