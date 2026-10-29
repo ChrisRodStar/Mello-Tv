@@ -1,6 +1,8 @@
 //! Bounded provider racing with scoped coalescing and progressive measured
 //! startup. Provider generations are captured once; cached URLs are re-probed.
 
+mod health;
+
 use crate::{
     prober::{ProbeOptions, ProbeProgress, StreamProber},
     selection,
@@ -196,6 +198,7 @@ struct ProviderObservation {
 
 struct Inner {
     observations: Mutex<BTreeMap<ProviderId, ProviderObservation>>,
+    health_results: tokio::sync::Mutex<Option<health::CachedHealth>>,
     providers: Arc<dyn ProviderCatalog>,
     prober: StreamProber,
     limits: DiscoveryLimits,
@@ -255,6 +258,7 @@ impl DiscoveryCoordinator {
         Ok(Self {
             inner: Arc::new(Inner {
                 observations: Mutex::new(BTreeMap::new()),
+                health_results: tokio::sync::Mutex::new(None),
                 providers,
                 prober,
                 slots: Semaphore::new(limits.concurrent_providers),
@@ -756,6 +760,15 @@ impl stream_core::ports::MediaEngine for DiscoveryCoordinator {
                 .collect(),
         }
     }
+    async fn check_provider_health(
+        &self,
+    ) -> Result<Vec<stream_core::ports::media::ProviderHealth>, stream_core::error::DomainError>
+    {
+        self.run_provider_health_checks()
+            .await
+            .map_err(|error| stream_core::error::DomainError::Infrastructure(Box::new(error)))
+    }
+
     async fn resolve_stream(
         &self,
         lookup: &Lookup,

@@ -1,5 +1,6 @@
 pub mod browse;
 pub mod profiles;
+pub mod providers;
 pub mod stream;
 
 use crate::state::AppState;
@@ -14,6 +15,7 @@ pub fn build_router_with_static(state: AppState, static_dir: Option<PathBuf>) ->
     let mut router = Router::new()
         .merge(browse::routes())
         .merge(profiles::routes())
+        .merge(providers::routes())
         .merge(stream::routes())
         .layer(axum::middleware::from_fn(crate::middleware::trace_request))
         .with_state(state);
