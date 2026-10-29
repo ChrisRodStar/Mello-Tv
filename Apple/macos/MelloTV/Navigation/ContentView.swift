@@ -15,7 +15,7 @@ struct ContentView: View {
             case .overview:
                 OverviewView(model: model, process: process, actions: actions, destination: $destination)
             case .providers:
-                ProvidersView(providers: model.snapshot?.media.providers ?? [], online: process.isRunning && model.isReachable)
+                ProvidersView(providers: model.snapshot?.media.providers ?? [], online: process.isRunning && model.isReachable, starting: model.isStarting, port: port)
             case .network:
                 NetworkView(port: port, endpoints: process.isRunning && model.isReachable ? model.snapshot?.endpoints ?? [] : [])
             case .settings:
