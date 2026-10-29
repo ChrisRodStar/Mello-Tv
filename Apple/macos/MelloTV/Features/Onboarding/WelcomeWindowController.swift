@@ -14,7 +14,7 @@ final class WelcomeWindowController: NSWindowController, NSWindowDelegate {
         self.onCompleted = onCompleted
         let window = NSWindow(
             contentRect: NSRect(origin: .zero, size: WindowSizing.welcomeContent),
-            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
+            styleMask: [.titled, .closable, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
@@ -24,11 +24,20 @@ final class WelcomeWindowController: NSWindowController, NSWindowDelegate {
         window.titlebarSeparatorStyle = .none
         window.backgroundColor = MelloTVTheme.workspaceColor
         window.isMovableByWindowBackground = true
-        window.contentMinSize = WindowSizing.welcomeMinimumContent
+        window.setContentSize(WindowSizing.welcomeContent)
+        window.contentMinSize = WindowSizing.welcomeContent
+        window.contentMaxSize = WindowSizing.welcomeContent
         window.isReleasedWhenClosed = false
-        window.center()
         super.init(window: window)
         window.delegate = self
+        window.contentViewController = WindowContentController(rootView: WelcomeOnboardingView(port: port) { [weak self] in
+            guard let self = self else { return }
+            UserDefaults.standard.set(true, forKey: Self.completedKey)
+            self.close()
+            self.onCompleted()
+        })
+        window.setContentSize(WindowSizing.welcomeContent)
+        window.center()
     }
 
     required init?(coder: NSCoder) { nil }
@@ -38,12 +47,8 @@ final class WelcomeWindowController: NSWindowController, NSWindowDelegate {
     }
 
     func present() {
-        window?.contentViewController = WindowContentController(rootView: WelcomeOnboardingView(port: port) { [weak self] in
-            guard let self = self else { return }
-            UserDefaults.standard.set(true, forKey: Self.completedKey)
-            self.close()
-            self.onCompleted()
-        })
+        window?.setContentSize(WindowSizing.welcomeContent)
+        window?.center()
         onVisibilityChange?(true)
         showWindow(nil)
         window?.makeKeyAndOrderFront(nil)

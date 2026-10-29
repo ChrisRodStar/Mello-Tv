@@ -11,24 +11,19 @@ struct WelcomeOnboardingView: View {
     private let steps = ["Welcome", "Your server", "Made independently"]
 
     var body: some View {
-        GeometryReader { viewport in
-            let horizontalInset = min(40, max(24, viewport.size.width * 0.08))
-            let verticalInset = min(48, max(24, viewport.size.height * 0.06))
-
-            ScrollView {
-                VStack(spacing: 28) {
-                    header
-                    pageContent
-                    navigation
-                }
-                .frame(maxWidth: 440)
-                .padding(.horizontal, horizontalInset)
-                .padding(.vertical, verticalInset)
-                .frame(maxWidth: .infinity)
-                .frame(minHeight: viewport.size.height, alignment: .center)
-            }
-            .id(step)
+        VStack(spacing: 0) {
+            header
+            Spacer(minLength: 12)
+            pageContent
+                .id(step)
+            Spacer(minLength: 16)
+            navigation
         }
+        .frame(maxWidth: 440)
+        .padding(.horizontal, 36)
+        .padding(.top, 32)
+        .padding(.bottom, 36)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background { SatinBackdrop().ignoresSafeArea() }
         .foregroundStyle(MelloTVTheme.text)
     }

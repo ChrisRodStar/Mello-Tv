@@ -44,7 +44,10 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         window.contentViewController = WindowContentController(
             rootView: DesktopShellView(navigation: navigation, model: model, process: process, port: port, actions: actions)
         )
-        window.setFrameAutosaveName("MelloTVDesktopWindow")
+        window.setContentSize(WindowSizing.mainFrame)
+        window.minSize = WindowSizing.mainFrame
+        window.contentMinSize = WindowSizing.mainFrame
+        window.center()
     }
 
     required init?(coder: NSCoder) { nil }
@@ -54,15 +57,19 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         model.start()
         model.refreshNow()
         onVisibilityChange?(true)
+        if let window {
+            window.minSize = WindowSizing.mainFrame
+            window.contentMinSize = WindowSizing.mainFrame
+            if !hasPresented {
+                window.setContentSize(WindowSizing.mainFrame)
+                window.center()
+                hasPresented = true
+            } else if window.frame.width < WindowSizing.mainFrame.width || window.frame.height < WindowSizing.mainFrame.height {
+                window.setFrame(NSRect(origin: window.frame.origin, size: WindowSizing.constrainedMainFrame(window.frame.size)), display: true)
+            }
+        }
         showWindow(nil)
         window?.makeKeyAndOrderFront(nil)
-        if !hasPresented, let window {
-            window.contentView?.layoutSubtreeIfNeeded()
-            window.minSize = WindowSizing.mainFrame
-            window.setFrame(NSRect(origin: window.frame.origin, size: WindowSizing.mainFrame), display: true)
-            window.center()
-            hasPresented = true
-        }
         NSApp.activate(ignoringOtherApps: true)
     }
 
