@@ -7,8 +7,7 @@ The native SwiftUI and AppKit app manages the local Mello TV server. Onboarding 
 - `MelloTV/App/`: application entry point, lifecycle, and app environment.
 - `MelloTV/Windows/`: window controllers and window sizing configuration.
 - `MelloTV/Navigation/`: desktop shell, collapsible sidebar, items, and content routing.
-- `MelloTV/Core/`: server paths and storage locations.
-- `MelloTV/Services/`: server supervision, status polling, update readiness, and login-item integration.
+- `MelloTV/Services/`: server supervision, storage paths, status polling, update readiness, and login-item integration.
 - `MelloTV/UI/`: shared presentation components and backdrop styles.
 - `MelloTV/Features/`: Overview, Providers, Network, Settings, Onboarding, and Menu Bar.
 
