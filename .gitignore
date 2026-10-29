@@ -4,8 +4,10 @@ Thumbs.db
 
 # Environment and Secrets
 .env
-.env.local
-.env.*.local
+.env.*
+!.env.example
+!.env.sample
+!.env.template
 *.pem
 *.key
 secrets/
@@ -15,31 +17,24 @@ secrets/
 *.sqlite
 *.sqlite-wal
 *.sqlite-shm
+*.sqlite-journal
 *.db
 *.db-wal
 *.db-shm
+*.db-journal
 .local/
 
-# Web & Node / Bun
-**/node_modules/
+# Dependencies and generated build output
+node_modules/
 dist/
 build/
-.output/
+target/
 
-# Rust
-**/target/
-
-# Compiled binaries
-*.exe
-*.test
-bin/
-
-# iOS / Xcode
-**/xcuserdata/
-**/DerivedData/
-**/build/
+# Swift Package Manager / Xcode
+.build/
+DerivedData/
+xcuserdata/
 *.xcuserstate
-*.build/
 
 # Logs & Temp
 *.log
