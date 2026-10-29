@@ -21,6 +21,10 @@ Both windows embed SwiftUI inside a plain AppKit content controller with hosting
 
 ## Build and install
 
+Open `Apple/macos/MelloTV.xcodeproj`, select **Mello TV → My Mac**, and press **Run** (Command-R). Quit any installed Mello TV instance first so its server releases port 8080. The scheme runs the app from Xcode's build directory, without replacing `/Applications/Mello TV.app`.
+
+Xcode compiles the native Swift sources, resolves the pinned Sparkle 2.10.1 package, and builds and bundles the Rust server and web player. Cargo and Bun must be installed; the build phase includes their standard user paths. Debug uses Cargo's incremental development profile; Release uses the optimized profile. The bundled server retains its Wasmtime executable-memory entitlement. The project uses the existing app identity and local profiles, history, credentials, and appearance preferences. The shared iOS Icon Composer asset supplies its app icon.
+
 Release builds are assembled and signed locally, using tooling outside Git tracking. The DMG contains `Mello TV.app` and an Applications shortcut for drag-and-drop installation. Signing keys and notarization credentials remain in the maintainer’s Keychain.
 
 The bundle uses `MelloTV` for the native executable and `MelloTVServer` for its bundled server. The internal Rust package remains `stream-server`. The shared iOS Icon Composer document is compiled for macOS during packaging.
