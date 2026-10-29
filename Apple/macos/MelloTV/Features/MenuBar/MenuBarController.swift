@@ -1,37 +1,4 @@
 import Cocoa
-import SwiftUI
-
-private struct MenuBarHeaderView: View {
-    let isRunning: Bool
-    let port: Int
-
-    var body: some View {
-        HStack(spacing: 8) {
-            Circle()
-                .fill(isRunning ? Color.green : Color.orange)
-                .frame(width: 8, height: 8)
-            
-            Text(isRunning ? "Streaming Active" : "Server Paused")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundColor(.primary)
-            
-            Spacer()
-            
-            if isRunning {
-                Text(":\(port)")
-                    .font(.system(size: 11, weight: .medium, design: .monospaced))
-                    .foregroundColor(.secondary)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(Color.secondary.opacity(0.12))
-                    .clipShape(Capsule())
-            }
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 4)
-        .frame(minWidth: 220, alignment: .leading)
-    }
-}
 
 @MainActor
 final class MenuBarController: NSObject, NSMenuDelegate {
@@ -65,8 +32,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     }
 
     private func setup() {
-        // This item displays only an icon. A fixed native width avoids the
-        // automatic width changes in AppKit's status-item scene layout.
+        // Reserve the native icon-sized slot in the menu bar.
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         guard let button = statusItem.button else { return }
         
@@ -92,8 +58,10 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         menu.autoenablesItems = false
         menu.delegate = self
         
-        // 1. Live Server Status (Color-coded indicator via custom view)
+        // A native informational row avoids replacing a self-sizing hosting view
+        // while AppKit is connecting or laying out the status-item scene.
         statusMenuItem = NSMenuItem()
+        statusMenuItem.isEnabled = false
         menu.addItem(statusMenuItem)
         
         menu.addItem(NSMenuItem.separator())
@@ -138,10 +106,10 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     func update(running: Bool) {
         guard statusItem != nil else { return }
         
-        let headerView = MenuBarHeaderView(isRunning: running, port: port)
-        let hostingView = NSHostingView(rootView: headerView)
-        hostingView.frame = NSRect(x: 0, y: 0, width: 220, height: 28)
-        statusMenuItem.view = hostingView
+        statusMenuItem.title = running ? "Server running on port \(port)" : "Server stopped"
+        let indicator = NSImage.SymbolConfiguration(paletteColors: [running ? .systemGreen : .systemOrange])
+        statusMenuItem.image = NSImage(systemSymbolName: "circle.fill", accessibilityDescription: nil)?
+            .withSymbolConfiguration(indicator)
         
         openBrowserMenuItem.isEnabled = running
         restartServerMenuItem.isEnabled = running
