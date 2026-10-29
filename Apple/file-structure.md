@@ -72,7 +72,8 @@ Apple/
 │       │       └── MenuBarHeaderView.swift
 │       │
 │       └── Services/                         # Native System Integrations
-│           ├── ServerSupervisor.swift        # Bundled Rust child process management
+│           ├── ServerProcessState.swift      # Observable server run state
+│           ├── ServerController.swift        # Background server process lifecycle
 │           ├── ServerStatusStore.swift       # HTTP polling coordinator
 │           ├── TMDBKeychainStore.swift       # macOS Keychain API token storage
 │           ├── LaunchAtLoginService.swift    # SMAppService wrapper

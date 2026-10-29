@@ -76,11 +76,21 @@ final class MelloKitTests: XCTestCase {
     }
 
     func testColorHexParsing() {
-        let color = Color(hex: "#FF0000")
-        XCTAssertNotNil(color)
+        #if canImport(AppKit)
+        let red = NSColor(hex: "#FF0000")
+        XCTAssertEqual(red.redComponent, 1.0, accuracy: 0.01)
+        XCTAssertEqual(red.greenComponent, 0.0, accuracy: 0.01)
+        XCTAssertEqual(red.blueComponent, 0.0, accuracy: 0.01)
 
-        let color3 = Color(hex: "F00")
-        XCTAssertNotNil(color3)
+        let green = NSColor(hex: "00FF00")
+        XCTAssertEqual(green.redComponent, 0.0, accuracy: 0.01)
+        XCTAssertEqual(green.greenComponent, 1.0, accuracy: 0.01)
+        XCTAssertEqual(green.blueComponent, 0.0, accuracy: 0.01)
+        #endif
+
+        let profileColor = ProfileColor.color(for: "#446e88")
+        XCTAssertNotNil(profileColor)
+        XCTAssertEqual(ProfileColor.name(for: "#446e88"), "Blue")
     }
 
     func testAppearanceMode() {
@@ -88,5 +98,10 @@ final class MelloKitTests: XCTestCase {
         XCTAssertNil(AppearanceMode.system.colorScheme)
         XCTAssertEqual(AppearanceMode.light.colorScheme, .light)
         XCTAssertEqual(AppearanceMode.dark.colorScheme, .dark)
+
+        // Standardized Phosphor icon names for both platforms
+        XCTAssertEqual(AppearanceMode.system.iconName, "circle-half")
+        XCTAssertEqual(AppearanceMode.light.iconName, "sun")
+        XCTAssertEqual(AppearanceMode.dark.iconName, "moon")
     }
 }

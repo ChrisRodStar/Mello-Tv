@@ -22,6 +22,10 @@ public enum ProfileColor {
         default: return "Profile Color"
         }
     }
+
+    public static func color(for hex: String) -> Color {
+        Color(hex: hex)
+    }
 }
 
 public struct LikedTitle: Codable, Hashable, Identifiable, Sendable {
