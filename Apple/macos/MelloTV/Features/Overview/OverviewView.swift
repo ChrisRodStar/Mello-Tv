@@ -88,7 +88,7 @@ struct OverviewView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background {
             RoundedRectangle(cornerRadius: 34, style: .continuous)
-                .fill(LinearGradient(colors: [MelloTVTheme.card, MelloTVTheme.sunken],
+                .fill(LinearGradient(colors: [MelloTVTheme.surfaceHighlight, MelloTVTheme.surfaceShade],
                                      startPoint: .topLeading, endPoint: .bottomTrailing))
                 .overlay {
                     RoundedRectangle(cornerRadius: 34, style: .continuous)

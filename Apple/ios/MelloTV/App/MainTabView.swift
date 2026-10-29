@@ -18,10 +18,8 @@ struct MainTabView: View {
         // Dynamic Titanium Pro appearance for Tab Bar
         let appearance = UITabBarAppearance()
         appearance.configureWithDefaultBackground()
-        appearance.backgroundColor = UIColor { trait in
-            trait.userInterfaceStyle == .dark
-                ? UIColor(hex: "121316", alpha: 0.94)
-                : UIColor(hex: "eceae5", alpha: 0.94)
+        appearance.backgroundColor = UIColor { traits in
+            UIColor(MelloTVTheme.background).resolvedColor(with: traits).withAlphaComponent(0.94)
         }
 
         let itemAppearance = UITabBarItemAppearance()
