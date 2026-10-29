@@ -8,7 +8,7 @@ final class ServerStatusStore: ObservableObject {
     @Published private(set) var snapshot: ServerSnapshot?
     @Published private(set) var isRefreshing = false
     @Published private(set) var error: String?
-    @Published private(set) var lastRefreshed: Date?
+    @Published private(set) var activeStreams: Int?
     private let port: Int
     private var monitor: Task<Void, Never>?
 
@@ -50,6 +50,7 @@ final class ServerStatusStore: ObservableObject {
             let isListening = await LocalServerListener.isListening(port: port)
             guard !Task.isCancelled else { return }
             guard isListening else { throw URLError(.cannotConnectToHost) }
+            async let activity = fetchPlaybackActivity()
             let url = AppLinks.clientURL(port: port).appendingPathComponent("api/v1/status")
             let request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 6)
             let (data, response) = try await URLSession.shared.data(for: request)
@@ -59,11 +60,36 @@ final class ServerStatusStore: ObservableObject {
             decoder.keyDecodingStrategy = .convertFromSnakeCase
             snapshot = try decoder.decode(ServerSnapshot.self, from: data)
             error = nil
-            lastRefreshed = Date()
+            let streamCount = await activity
+            guard !Task.isCancelled else { return }
+            activeStreams = streamCount
         } catch {
             guard !Task.isCancelled else { return }
+            activeStreams = nil
             self.error = "Couldn't reach the local server."
         }
+    }
+
+    private func fetchPlaybackActivity() async -> Int? {
+        let url = AppLinks.clientURL(port: port).appendingPathComponent("api/v1/update-readiness")
+        let request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 3)
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard !Task.isCancelled, (response as? HTTPURLResponse)?.statusCode == 200 else { return nil }
+            let activity = try JSONDecoder().decode(PlaybackActivity.self, from: data)
+            return activity.activeStreams >= 0 ? activity.activeStreams : nil
+        } catch {
+            // Missing activity must not make an otherwise available server look offline.
+            return nil
+        }
+    }
+}
+
+private struct PlaybackActivity: Decodable {
+    let activeStreams: Int
+
+    enum CodingKeys: String, CodingKey {
+        case activeStreams = "active_streams"
     }
 }
 

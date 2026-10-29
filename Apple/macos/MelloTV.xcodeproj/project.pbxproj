@@ -160,16 +160,6 @@
 			"path" = "Onboarding";
 			"sourceTree" = "<group>";
 		};
-		"E56A317A39381F0847DD477E" = {
-			"isa" = "PBXFileReference";
-			"lastKnownFileType" = "sourcecode.swift";
-			"path" = "ProviderStripView.swift";
-			"sourceTree" = "<group>";
-		};
-		"B601287130DC4AE9B246D2A9" = {
-			"isa" = "PBXBuildFile";
-			"fileRef" = "E56A317A39381F0847DD477E";
-		};
 		"26CA3609D8B6FC379C654FD4" = {
 			"isa" = "PBXFileReference";
 			"lastKnownFileType" = "sourcecode.swift";
@@ -183,7 +173,6 @@
 		"357133DE025AD90FAB29D768" = {
 			"isa" = "PBXGroup";
 			"children" = (
-				"E56A317A39381F0847DD477E",
 				"26CA3609D8B6FC379C654FD4",
 			);
 			"path" = "Overview";
@@ -573,7 +562,6 @@
 				"5F4D5126F5D9ED1C4E227152",
 				"34F2F6839C123C9B0824DBD0",
 				"E29D3D4389F9C359472368B5",
-				"B601287130DC4AE9B246D2A9",
 				"DB0EF5A46E315F4FAD038CA9",
 				"4B0E20147745FC3EBB9F5BFB",
 				"D1C4E82FF34DBCE94A4805EE",

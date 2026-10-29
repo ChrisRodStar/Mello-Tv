@@ -8,11 +8,11 @@ struct OverviewView: View {
     @Binding var destination: DesktopDestination
 
     private var online: Bool { process.isRunning && model.isReachable }
-    private var providers: [ServerSnapshot.ProviderStatus] { model.snapshot?.media.providers ?? [] }
     private var libraryReady: Bool { online && model.snapshot?.catalogStatus == "ready" && model.snapshot?.catalogSnapshot == "retained" }
+    private var libraryNew: Bool { online && model.snapshot?.catalogStatus == "pending" }
     private var mediaReady: Bool { online && model.snapshot?.media.configured == true }
-    private var attention: Int { providers.filter(\.needsAttention).count }
-    private var ready: Bool { online && libraryReady && mediaReady }
+    private var catalogUsable: Bool { libraryReady || libraryNew }
+    private var ready: Bool { online && catalogUsable && mediaReady }
 
     @Environment(\.colorScheme) private var colorScheme
 
@@ -20,73 +20,67 @@ struct OverviewView: View {
         GeometryReader { viewport in
             let compact = viewport.size.height < 600
             VStack(alignment: .leading, spacing: compact ? 22 : 28) {
-                pageHeader
                 serverPanel(compact: compact)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                OverviewProviderStrip(providers: providers, isReachable: online) {
-                    destination = .providers
+                HStack {
+                    Button { destination = .network } label: {
+                        Label("Connect a device", systemImage: "iphone")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(MelloTVTheme.textSecondary)
+                            .padding(.vertical, 8)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(OverviewPressStyle())
+                    Spacer()
+                    if online {
+                        Text("Running for \(uptime)")
+                            .font(.system(size: 11, weight: .medium))
+                            .monospacedDigit()
+                            .foregroundStyle(MelloTVTheme.textSecondary)
+                    }
                 }
-                .padding(.horizontal, 4)
-                .padding(.bottom, 4)
+                .padding(.horizontal, 8)
             }
             .padding(compact ? 26 : 34)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
     }
 
-    private var pageHeader: some View {
-        HStack(alignment: .firstTextBaseline) {
-            Text("Overview")
-                .font(.system(size: 20, weight: .semibold))
-                .tracking(-0.4)
-                .foregroundStyle(MelloTVTheme.text)
-            Spacer()
-            if let updated = model.lastRefreshed {
-                Text("Updated \(updated.formatted(date: .omitted, time: .shortened))")
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(MelloTVTheme.textSecondary)
-            }
-        }
-        .padding(.horizontal, 4)
-    }
-
     private func serverPanel(compact: Bool) -> some View {
         VStack(alignment: .leading, spacing: compact ? 24 : 34) {
-            HStack(alignment: .center, spacing: 32) {
-                VStack(alignment: .leading, spacing: compact ? 18 : 24) {
-                    HStack(spacing: 8) {
-                        Circle()
-                            .fill(statusTint)
-                            .frame(width: 6, height: 6)
-                            .shadow(color: statusTint.opacity(online ? 0.3 : 0), radius: 4)
-                            .accessibilityHidden(true)
-                        Text(online ? "Running on this Mac" : process.isRunning ? "Connecting to this Mac" : "Server stopped")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(MelloTVTheme.textSecondary)
-                    }
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(statusTint)
+                    .frame(width: 6, height: 6)
+                    .shadow(color: statusTint.opacity(online ? 0.3 : 0), radius: 4)
+                    .accessibilityHidden(true)
+                Text(online ? "Running on this Mac" : process.isRunning ? "Connecting to this Mac" : "Server stopped")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(MelloTVTheme.textSecondary)
+                Spacer()
+                if process.isRunning { serverControls }
+            }
 
-                    VStack(alignment: .leading, spacing: 14) {
-                        Text(headline)
-                            .font(.system(size: compact ? 36 : 44, weight: .semibold))
-                            .tracking(-1.6)
-                            .lineSpacing(-1)
-                            .foregroundStyle(MelloTVTheme.text)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .accessibilityAddTraits(.isHeader)
-                        Text(detail)
-                            .font(.system(size: 13))
-                            .lineSpacing(4)
-                            .foregroundStyle(MelloTVTheme.textSecondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
+            VStack(alignment: .leading, spacing: compact ? 22 : 28) {
+                VStack(alignment: .leading, spacing: 14) {
+                    Text(headline)
+                        .font(.system(size: compact ? 36 : 44, weight: .semibold))
+                        .tracking(-1.6)
+                        .lineSpacing(-1)
+                        .foregroundStyle(MelloTVTheme.text)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityAddTraits(.isHeader)
+                    Text(detail)
+                        .font(.system(size: 13))
+                        .lineSpacing(4)
+                        .foregroundStyle(MelloTVTheme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: 480, alignment: .leading)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-                serverControls
-                    .frame(width: compact ? 120 : 140)
+                primaryControl
             }
             .padding(.horizontal, compact ? 4 : 8)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
 
             systemRail
         }
@@ -116,61 +110,63 @@ struct OverviewView: View {
     }
 
     private var serverControls: some View {
-        VStack(spacing: 16) {
-            Button(action: actions.toggleServer) {
-                VStack(spacing: 13) {
-                    Image(systemName: "power")
-                        .font(.system(size: 28, weight: .light))
-                        .foregroundStyle(process.isRunning ? statusTint : MelloTVTheme.textSecondary)
-                        .frame(width: 88, height: 88)
-                        .background {
-                            Circle()
-                                .fill(LinearGradient(colors: [MelloTVTheme.surfaceHighlight, MelloTVTheme.surfaceShade],
-                                                     startPoint: .topLeading, endPoint: .bottomTrailing))
-                                .overlay {
-                                    Circle().strokeBorder(process.isRunning ? statusTint.opacity(0.25) : MelloTVTheme.subtleBorder,
-                                                          lineWidth: 1)
-                                }
-                                .shadow(color: .white.opacity(colorScheme == .dark ? 0.04 : 0.65), radius: 4, x: -3, y: -3)
-                                .shadow(color: MelloTVTheme.ambientShadow.opacity(colorScheme == .dark ? 0.4 : 0.18),
-                                        radius: 10, x: 4, y: 7)
-                        }
-                    Text(process.isRunning ? "Stop server" : "Start server")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(MelloTVTheme.text)
-                }
-                .padding(6)
-                .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-            }
-            .buttonStyle(OverviewPressStyle())
-            .help(process.isRunning ? "Stop the local server" : "Start the local server")
-            .accessibilityLabel(process.isRunning ? "Stop server" : "Start server")
-
-            if process.isRunning {
-                Button(action: actions.restartServer) {
-                    Label("Restart", systemImage: "arrow.clockwise")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(MelloTVTheme.textSecondary)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
-                        .contentShape(Capsule())
-                }
-                .buttonStyle(OverviewPressStyle())
-                .help("Restart server")
-                .accessibilityLabel("Restart server")
-            }
+        Button(action: actions.toggleServer) {
+            Label("Stop server", systemImage: "power")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(MelloTVTheme.textSecondary)
+                .padding(.horizontal, 13)
+                .frame(height: 34)
+                .background(MelloTVTheme.sunken.opacity(0.65), in: Capsule())
+                .overlay { Capsule().strokeBorder(MelloTVTheme.subtleBorder, lineWidth: 1) }
         }
+        .buttonStyle(OverviewPressStyle())
+        .help("Stop the local server")
+    }
+
+    @ViewBuilder
+    private var primaryControl: some View {
+        if !process.isRunning {
+            overviewAction("Start server", symbol: "power", action: actions.toggleServer)
+        } else if online {
+            if !mediaReady || model.snapshot?.catalogStatus == "unavailable" {
+                overviewAction("Open logs", symbol: "doc.text.magnifyingglass", action: actions.openLogs)
+            } else if !catalogUsable {
+                overviewAction("Open settings", symbol: "gearshape", action: { destination = .settings })
+            } else {
+                overviewAction("Open web player", symbol: "play.fill", action: actions.openWebsite)
+            }
+        } else if process.isRunning, model.error != nil {
+            overviewAction("Open logs", symbol: "doc.text.magnifyingglass", action: actions.openLogs)
+        }
+    }
+
+    private func overviewAction(_ title: String, symbol: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: symbol)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(Color.white)
+                .padding(.horizontal, 18)
+                .frame(height: 42)
+                .background(MelloTVTheme.accent, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 13, style: .continuous)
+                        .strokeBorder(.white.opacity(0.16), lineWidth: 1)
+                }
+                .shadow(color: MelloTVTheme.accent.opacity(0.15), radius: 8, y: 4)
+        }
+        .buttonStyle(OverviewPressStyle())
     }
 
     private var systemRail: some View {
         HStack(alignment: .center, spacing: 18) {
-            metric(title: "Uptime", value: online ? uptime : "—")
+            metric(title: "Playback", value: playback)
+                .help("Streams delivering data now or within the last three minutes, including buffered playback.")
             railDivider
-            metric(title: "Library", value: !online ? "Offline" : libraryReady ? "Available" : "Needs care")
+            metric(title: "Library", value: libraryStatus)
             railDivider
             Button { destination = .network } label: {
                 HStack(spacing: 8) {
-                    metric(title: "Connection", value: connection)
+                    metric(title: "Network", value: connection)
                     Image(systemName: "arrow.up.right")
                         .font(.system(size: 10, weight: .medium))
                         .foregroundStyle(MelloTVTheme.textSecondary)
@@ -205,24 +201,45 @@ struct OverviewView: View {
 
     private var statusTint: Color {
         if !process.isRunning { return MelloTVTheme.mutedSubtle }
-        if !online || !ready || attention > 0 { return .orange }
+        if !online || !ready { return .orange }
         return MelloTVTheme.accent
     }
 
     private var headline: String {
         if !process.isRunning { return "Your cinema,\non pause." }
         if !online { return model.error == nil ? "Waking up\nyour cinema." : "Let's reconnect\nyour cinema." }
-        if !libraryReady || !mediaReady { return "Your server\nneeds attention." }
+        if !catalogUsable || !mediaReady { return "Your server\nneeds attention." }
         return "Your cinema\nis online."
     }
 
     private var detail: String {
-        if !process.isRunning { return "Start Mello TV to share your library." }
-        if !online { return model.error ?? "The server is getting ready on this Mac." }
-        if !mediaReady { return "The media engine needs attention. Open the logs for details." }
-        if !libraryReady { return "The server is running. Your catalog needs attention." }
-        if attention > 0 { return "\(attention) source\(attention == 1 ? " needs" : "s need") attention. Your server is available." }
-        return "A quiet home for everything you love to watch."
+        if !process.isRunning { return "Start your server to watch on your iPhone or in the web player." }
+        if !online { return model.error ?? "Getting your library and connections ready." }
+        if !mediaReady { return "The playback engine is unavailable. Open the logs to investigate." }
+        if model.snapshot?.catalogStatus == "unavailable" {
+            return "Your library couldn't be opened. Open the logs to investigate."
+        }
+        if !catalogUsable {
+            return model.snapshot?.catalogStatus == "unconfigured"
+                ? "Your catalog isn't configured. Open settings to set it up."
+                : "Your library is unavailable. Open settings to check its configuration."
+        }
+        if libraryNew { return "Open the web player to browse. Your library fills as you explore." }
+        return "Browse in the web player, or open Mello TV on your iPhone."
+    }
+
+    private var playback: String {
+        guard online else { return "Offline" }
+        guard mediaReady else { return "Unavailable" }
+        guard let count = model.activeStreams else { return "Unavailable" }
+        return count == 0 ? "Idle" : "\(count) stream\(count == 1 ? "" : "s")"
+    }
+
+    private var libraryStatus: String {
+        if !online { return "Offline" }
+        if libraryReady { return "Ready" }
+        if libraryNew { return "Ready to browse" }
+        return model.snapshot?.catalogStatus == "unconfigured" ? "Set up needed" : "Unavailable"
     }
 
     private func metric(title: String, value: String) -> some View {
