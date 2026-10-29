@@ -39,6 +39,7 @@ bin/
 **/DerivedData/
 **/build/
 *.xcuserstate
+*.build/
 
 # Logs & Temp
 *.log
