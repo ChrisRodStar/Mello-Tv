@@ -65,7 +65,9 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     }
 
     private func setup() {
-        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        // This item displays only an icon. A fixed native width avoids the
+        // automatic width changes in AppKit's status-item scene layout.
+        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         guard let button = statusItem.button else { return }
         
         let config = NSImage.SymbolConfiguration(pointSize: 14, weight: .semibold)
