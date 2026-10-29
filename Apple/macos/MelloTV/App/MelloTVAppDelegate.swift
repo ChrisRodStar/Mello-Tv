@@ -6,16 +6,30 @@ import MelloKit
 final class MelloTVAppDelegate: NSObject, NSApplicationDelegate {
     private let server = ServerController(port: 8080)
     private let preferences = AppPreferences()
+    private var startupReady = false
+    private lazy var backups: HouseholdBackupCoordinator = {
+        let server = self.server
+        return HouseholdBackupCoordinator(
+            dataDirectoryURL: server.dataDirectoryURL,
+            isServerRunning: { server.isRunning },
+            stopServer: { server.stopAndConfirm(waitTimeout: 3) },
+            startServer: { server.start() }
+        )
+    }()
     private var isMainWindowOpen = false
     private var isWelcomeWindowOpen = false
     private lazy var updater = AppUpdateService(port: server.port, isServerRunning: { [weak self] in self?.server.isRunning == true })
     private lazy var actions: AppActions = AppActions(
         preferences: preferences,
         updater: updater,
+        backups: backups,
         openSettings: { [weak self] in self?.mainWindow.present(destination: .settings) },
         openDashboard: { [weak self] in self?.mainWindow.present() },
-        toggleServer: { [weak self] in self?.server.toggle() },
-        restartServer: { [weak self] in self?.server.restart() },
+        toggleServer: { [weak self] in self?.toggleServerAfterRecovery() },
+        restartServer: { [weak self] in
+            guard let self, self.startupReady, !self.backups.busy else { return }
+            self.server.restart()
+        },
         openWebsite: { [weak self] in self?.openWebsite() },
         openLogs: { [weak self] in self?.server.openLogs() },
         openData: { [weak self] in self?.server.openDataDirectory() },
@@ -46,7 +60,16 @@ final class MelloTVAppDelegate: NSObject, NSApplicationDelegate {
             self?.menuBar.update(running: running)
             self?.mainWindow.serverStateChanged(isRunning: running)
         }
-        server.start()
+        Task { [weak self] in
+            guard let self else { return }
+            guard await self.backups.recoverInterruptedRestore() else {
+                self.server.state.message = "Backup recovery needs attention. Open Settings > Backups before starting the server."
+                return
+            }
+            self.startupReady = true
+            self.server.start()
+            self.backups.startAutomaticSchedule()
+        }
         updater.start()
         presentMainWindow()
     }
@@ -63,6 +86,17 @@ final class MelloTVAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) { stopServer(waitTimeout: 3) }
+
+    private func toggleServerAfterRecovery() {
+        guard !backups.busy else { return }
+        if startupReady { server.toggle(); return }
+        Task { [weak self] in
+            guard let self, await self.backups.recoverInterruptedRestore() else { return }
+            self.startupReady = true
+            self.server.start()
+            self.backups.startAutomaticSchedule()
+        }
+    }
 
     func stopServer(waitTimeout: TimeInterval) { server.stop(waitTimeout: waitTimeout) }
 
