@@ -1,63 +1,95 @@
-# Mello TV for macOS
+# Mello TV for macOS 🖥️
 
-The native SwiftUI and AppKit app manages the local Mello TV server. Onboarding finishes at the native Overview. The viewing website opens only through the explicit Open Website command.
+The native Mac app for **Mello TV**. It lives in your menu bar and Dock, manages the local streaming server, and lets you manage providers, check network connections, and control server settings without touching a terminal.
 
-## Source structure
+---
 
-- `MelloTV/App/`: application entry point, lifecycle, and app environment.
-- `MelloTV/Windows/`: window controllers and window sizing configuration.
-- `MelloTV/Navigation/`: desktop shell, collapsible sidebar, items, and content routing.
-- `MelloTV/Services/`: server supervision, storage paths, status polling, update readiness, and login-item integration.
-- `MelloTV/UI/`: shared presentation components and backdrop styles.
-- `MelloTV/Features/`: Overview, Providers, Network, Settings, Onboarding, and Menu Bar.
+## What It Does
 
-App state and window controllers stay on the main actor. The server status store handles HTTP polling separately from view presentation. Provider activity is server-reported operational metadata. Sparkle manages updates for the complete Mac app and bundled server.
+- **One-Click Server**: Starts and stops the bundled Rust server quietly in the background.
+- **Menu Bar & Dock**: Keep it tucked away in your menu bar, run it in the Dock, or both.
+- **Native Dashboard**: Check your providers, see who's streaming, view system logs, and change settings in a clean SwiftUI interface.
+- **Automatic Updates**: Built-in Sparkle updater checks for updates and installs them safely when no one is actively watching a show.
 
-## Window sizing
+---
 
-`MelloTV/Windows/WindowConfiguration.swift` is the single source of window dimensions. The main window's opening and minimum frame are both 1150 × 750 points, including the title bar. Its AppKit minimum and live-resize delegate use that same policy. The opening frame and minimum are applied after the first presentation and frame restoration, so neither window chrome nor an old saved size changes the requested dimensions. Later presentations retain the user's larger window size. The title bar has a borderless sidebar toggle; Refresh Status, Open Website, and Open Logs are named commands in the View menu.
+## Project Structure
 
-Both windows embed SwiftUI inside a plain AppKit content controller with hosting sizing options disabled. Individual destinations fill the offered content area without controlling window bounds. Onboarding has separate content dimensions (excluding window chrome), explicitly named in the same configuration file. Ordinary SwiftUI component widths and heights are layout values, not window sizing rules.
+```text
+Apple/macos/
+├── MelloTV.xcodeproj/         # Xcode project and build configurations
+├── MelloTV/
+│   ├── App/                   # App lifecycle, delegate, and shared environment
+│   ├── Windows/               # Window controllers and locked sizing rules (1150×750)
+│   ├── Navigation/            # Collapsible sidebar, tabs, and content routing
+│   ├── Features/
+│   │   ├── Overview/          # Server status, quick stats, and provider strip
+│   │   ├── Providers/         # Provider health and live stream metrics
+│   │   ├── Network/           # IP address, port info, and Tailscale connection guide
+│   │   ├── Settings/          # General, Server, Updates, and TMDB catalog setup
+│   │   ├── Onboarding/        # First-launch welcome window (580×640)
+│   │   └── MenuBar/           # Fast menu bar status item and quick controls
+│   ├── Services/              # Server process supervision, paths, preferences, updates
+│   └── UI/                    # Clean satin backdrops, styles, and presentation states
+├── Tests/                     # Standalone readiness probe tests
+└── tools/                     # Build script that packages the server & web app into Xcode
+```
 
-## Build and install
+---
 
-Open `Apple/macos/MelloTV.xcodeproj`, select **Mello TV → My Mac**, and press **Run** (Command-R). Quit any installed Mello TV instance first so its server releases port 8080. The scheme runs the app from Xcode's build directory, without replacing `/Applications/Mello TV.app`.
+## How to Build & Run
 
-Xcode compiles the native Swift sources, resolves the pinned Sparkle 2.10.1 package, and builds and bundles the Rust server and web player. Cargo and Bun must be installed; the build phase includes their standard user paths. Debug uses Cargo's incremental development profile; Release uses the optimized profile. The bundled server retains its Wasmtime executable-memory entitlement. The project uses the existing app identity and local profiles, history, credentials, and appearance preferences. The shared iOS Icon Composer asset supplies its app icon.
+### In Xcode (Recommended)
 
-Release builds are assembled and signed locally, using tooling outside Git tracking. The DMG contains `Mello TV.app` and an Applications shortcut for drag-and-drop installation. Signing keys and notarization credentials remain in the maintainer’s Keychain.
+1. Make sure you have **Rust** (`cargo`) and **Bun** installed.
+2. Open `Apple/macos/MelloTV.xcodeproj` in Xcode.
+3. Select the **Mello TV** scheme and target **My Mac**.
+4. Press **Run** (`⌘R`).
 
-The bundle uses `MelloTV` for the native executable and `MelloTVServer` for its bundled server. The internal Rust package remains `stream-server`. The shared iOS Icon Composer document is compiled for macOS during packaging.
+> **Tip**: If you already have an installed copy of Mello TV running, quit it first so port `8080` is free.
 
-Server data and logs live under `~/Library/Application Support/Mello TV` and `~/Library/Logs/Mello TV`. Existing legacy directories are moved as complete directories on first launch, after the previous app and server have exited. If a move fails, the app continues using the existing directory. No database is reset.
+### From the Terminal
 
-## Settings
+```bash
+xcodebuild -project Apple/macos/MelloTV.xcodeproj \
+  -scheme "Mello TV" \
+  -destination "platform=macOS" \
+  CODE_SIGNING_ALLOWED=NO \
+  build
+```
 
-Settings stays in the native content pane, with General, Server, Updates, and About sections. General saves a Dock-only, menu-bar-only, or combined presentation preference and applies it immediately. The menu bar and application menu both expose Settings; the application shortcut is Command-comma. In menu-bar mode, the Dock icon stays visible while the main or welcome window is open, including when minimized; closing the last of those windows returns to menu-bar-only operation and keeps the server running. Launch at login is shared between General and the menu-bar command. Server contains process controls and shortcuts to logs and data. Settings uses a fixed layout that fits the minimum window without scrolling. Updates shows the installed app version and a single bundled-provider summary, a manual update check, and automatic checking/installation preferences. Individual provider details remain in Providers.
+### Standalone Readiness Tests
 
+To run the update readiness probe tests without Xcode:
 
-## Catalog setup
+```bash
+swiftc Apple/macos/MelloTV/Services/UpdateReadinessProbe.swift \
+  Apple/macos/Tests/UpdateReadinessProbeTests.swift \
+  -o /tmp/update-readiness-tests && /tmp/update-readiness-tests
+```
 
-Catalog access is included through the Rust server's shared application key.
-No TMDB account or key setup is required. To use a personal override, open
-**Settings → Server → Catalog · TMDB** and paste a TMDB API key or API Read
-Access Token. **Save & Restart Server** validates and saves it in this Mac's
-Keychain, then restarts the server. **Remove Override** deletes that personal
-credential and restores the default configuration. Server restarts interrupt
-active streams; profiles and cached metadata remain.
+---
 
-A new install starts with no catalog entries. Creating a profile starts fetching real onboarding title choices. Saving the completed profile’s genres and favorite titles starts its personalized recommendations. Missing title and season details are fetched on demand; cached metadata remains available during upstream outages. There is no bundled demo catalog. Companion iOS and web clients use the credential configured on their server, rather than storing a second credential on each viewing device.
+## Key Features & How They Work
 
-For a server launched directly from a terminal or service manager, `TMDB_API_KEY` or `TMDB_READ_ACCESS_TOKEN` can optionally override the shared default. Personal credentials stay outside Git. The Mac’s saved Keychain credential takes precedence over an inherited runtime credential. The shared application key is distributed with the backend and can be extracted; it is not treated as a secret.
+### Window Sizing
+The main dashboard window opens at a locked **1150 × 750** points. You can resize it bigger, but it will never shrink below those bounds so everything stays visible and never gets cut off. The first-launch welcome screen stays compact at **580 × 640** without scrolling.
 
-## Software updates
+### Menu Bar & Dock Modes
+You can customize where Mello TV shows up in **Settings → General**:
+- **Menu bar only**: Perfect if you want it running silently in the background like a home server.
+- **Dock only**: Traditional Mac app experience.
+- **Both**: Best of both worlds.
 
-Mello TV uses Sparkle 2.10.1 for signed whole-app updates, including the bundled server, web player, and providers. **Check for Updates…** is available in Settings → Updates and the Mello TV menu. Background checking and automatic installation can be disabled independently in Settings. Installation waits for streaming to become idle; in-flight media delivery and recent playback/progress activity defer it. The server retains a three-minute grace period between requests, so an update may wait after viewing stops. An unavailable readiness check postpones installation. Relaunching restarts the server. Profiles, watch history, metadata, and Keychain credentials stay outside the app bundle.
+### Movie & Show Metadata (TMDB)
+Mello TV comes with catalog access out of the box—no API key setup is required. If you want to use your own personal TMDB account, open **Settings → Server → Catalog** and paste your key. It's stored securely in your Mac's Keychain.
 
-Existing releases without Sparkle need one manual DMG installation to gain in-app updates. Updates must preserve compatibility with existing companion clients.
+### Seamless Updates
+Mello TV uses Sparkle for whole-app updates. It is smart about when to install: if you or someone on your network is watching a show, it will wait until the stream is idle before restarting.
 
-App sources and the canonical update feed live under `Apple/macos/`. Future Mac builds use `Apple/macos/appcast.xml` on this repository's `main` branch. Published alpha.3 apps still check `macos/appcast.xml`; keep that legacy URL available. At the next Mac release, publish the new signed update entry to both feeds. That release contains the new feed URL, so users switch feeds after updating. Leave the legacy feed frozen on that bridge release for people who update later; subsequent releases only need the canonical feed.
+---
 
-Publish a feed entry only after its signed/notarized archive is available at the final GitHub Release URL. Use increasing `CFBundleVersion` values, the product release label, and Sparkle archive signatures. Private signing keys remain in Keychain; only the public verification key belongs in `Info.plist`. An app update does not independently activate the Rust provider updater.
+## Where Files Live
 
-Local packaging links and embeds the official Sparkle framework. Use the pinned [Sparkle 2.10.1 distribution](https://github.com/sparkle-project/Sparkle/releases/tag/2.10.1); its release archive SHA-256 is `1a856d2a9edb8e628de88121d7be04cf0e2167f8641650b78fca00b14244cf27`. The local packaging/signing tools handle the framework's nested helpers before signing the outer app. Do not commit framework binaries or local release tools.
+- **Server Data**: `~/Library/Application Support/Mello TV`
+- **Logs**: `~/Library/Logs/Mello TV/MelloTV.log` (you can open this directly from the View menu or Settings)
