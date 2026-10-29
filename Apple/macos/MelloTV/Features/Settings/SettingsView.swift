@@ -35,35 +35,30 @@ struct SettingsView: View {
     }
 
     var body: some View {
-        ScrollView(.vertical, showsIndicators: false) {
-            VStack(spacing: 22) {
-                // Fixed-position Segmented Capsule Control (never jumps between tabs)
-                segmentedPicker
-                    .frame(maxWidth: 500)
-                    .padding(.top, 28)
+        VStack(spacing: 20) {
+            segmentedPicker
+                .frame(maxWidth: 500)
 
-                // Section Content anchored directly beneath the fixed tabs
-                VStack(spacing: 16) {
-                    switch section {
-                    case .general:
-                        generalSection
-                    case .server:
-                        serverSection
-                    case .updates:
-                        updatesSection
-                    case .about:
-                        aboutSection
-                    }
+            Group {
+                switch section {
+                case .general:
+                    generalSection
+                case .server:
+                    serverSection
+                case .updates:
+                    updatesSection
+                case .about:
+                    aboutSection
                 }
-                .frame(maxWidth: 740)
-                .frame(minHeight: 280, alignment: .top)
-                .animation(.spring(response: 0.35, dampingFraction: 0.86), value: section)
-                .padding(.bottom, 36)
             }
-            .frame(maxWidth: .infinity)
-            .padding(.horizontal, 32)
+            .frame(maxWidth: 740)
+
+            Spacer(minLength: 0)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(.horizontal, 28)
+        .padding(.top, 24)
+        .padding(.bottom, 20)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
     // MARK: - Segmented Picker
@@ -98,6 +93,7 @@ struct SettingsView: View {
                     .contentShape(Capsule())
                 }
                 .buttonStyle(.plain)
+                .accessibilityAddTraits(section == item ? .isSelected : [])
             }
         }
         .padding(5)
@@ -117,7 +113,7 @@ struct SettingsView: View {
                     title: "Appearance",
                     subtitle: "Choose between Light, Dark, or System matching"
                 ) {
-                    Picker("", selection: Binding(
+                    Picker("Appearance", selection: Binding(
                         get: { preferences.appearance },
                         set: { preferences.setAppearance($0) }
                     )) {
@@ -138,7 +134,7 @@ struct SettingsView: View {
                     title: "Presentation",
                     subtitle: "Choose where Mello TV appears"
                 ) {
-                    Picker("", selection: Binding(
+                    Picker("Presentation", selection: Binding(
                         get: { preferences.presentation },
                         set: { preferences.setPresentation($0) }
                     )) {
@@ -159,7 +155,7 @@ struct SettingsView: View {
                     title: "Launch at Login",
                     subtitle: "Start Mello TV automatically when you sign in"
                 ) {
-                    Toggle("", isOn: Binding(
+                    Toggle("Launch at Login", isOn: Binding(
                         get: { preferences.launchAtLogin },
                         set: { preferences.setLaunchAtLogin($0) }
                     ))
@@ -280,6 +276,20 @@ struct SettingsView: View {
         }
     }
 
+    private var providerAttentionCount: Int {
+        snapshot?.media.providers.filter(\.needsAttention).count ?? 0
+    }
+
+    private var providerSummary: String {
+        guard let providers = snapshot?.media.providers else { return "Status unavailable" }
+        guard !providers.isEmpty else { return "None reported" }
+        if providerAttentionCount > 0 {
+            let attention = providerAttentionCount == 1 ? "1 needs attention" : "\(providerAttentionCount) need attention"
+            return "\(providers.count) included · \(attention)"
+        }
+        return "\(providers.count) included"
+    }
+
     // MARK: - Updates Section
     private var updatesSection: some View {
         VStack(spacing: 16) {
@@ -333,8 +343,8 @@ struct SettingsView: View {
                 SettingsItemRow(
                     icon: "sparkles",
                     iconColor: Color(red: 0.85, green: 0.35, blue: 0.8),
-                    title: "Mello TV Core",
-                    subtitle: "Native macOS Desktop & Server bundle"
+                    title: "Installed Version",
+                    subtitle: "Mello TV app and server"
                 ) {
                     Text("v\(appVersion)")
                         .font(.system(size: 13, weight: .medium, design: .monospaced))
@@ -348,27 +358,18 @@ struct SettingsView: View {
                         }
                 }
 
-                if let providers = snapshot?.media.providers, !providers.isEmpty {
-                    ForEach(providers) { provider in
-                        SettingsDivider()
-                        SettingsItemRow(
-                            icon: "puzzlepiece.extension",
-                            iconColor: Color(red: 0.25, green: 0.72, blue: 0.75),
-                            title: provider.name,
-                            subtitle: provider.needsAttention ? "Needs configuration" : "Integrated provider module"
-                        ) {
-                            Text("v\(provider.version)")
-                                .font(.system(size: 13, weight: .medium, design: .monospaced))
-                                .foregroundStyle(provider.needsAttention ? .orange : MelloTVTheme.textSecondary)
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 5)
-                                .background(MelloTVTheme.sunken, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-                                .overlay {
-                                    RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                        .strokeBorder(MelloTVTheme.border, lineWidth: 1)
-                                }
-                        }
-                    }
+                SettingsDivider()
+
+                SettingsItemRow(
+                    icon: "puzzlepiece.extension",
+                    iconColor: Color(red: 0.25, green: 0.72, blue: 0.75),
+                    title: "Bundled Providers",
+                    subtitle: "Updated with the Mac app and server"
+                ) {
+                    Text(providerSummary)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(providerAttentionCount > 0 ? .orange : MelloTVTheme.textSecondary)
+                        .multilineTextAlignment(.trailing)
                 }
             }
 
@@ -378,13 +379,13 @@ struct SettingsView: View {
 
     // MARK: - About Section
     private var aboutSection: some View {
-        VStack(spacing: 20) {
-            VStack(spacing: 12) {
+        VStack(spacing: 16) {
+            VStack(spacing: 10) {
                 if let icon = NSApp.applicationIconImage {
                     Image(nsImage: icon)
                         .resizable()
                         .scaledToFit()
-                        .frame(width: 72, height: 72)
+                        .frame(width: 64, height: 64)
                         .shadow(color: .black.opacity(colorScheme == .dark ? 0.35 : 0.08), radius: 8, y: 4)
                 }
 
@@ -504,8 +505,8 @@ private struct SettingsCard<Content: View>: View {
         VStack(spacing: 0) {
             content
         }
-        .padding(.horizontal, 24)
-        .padding(.vertical, 12)
+        .padding(.horizontal, 20)
+        .padding(.vertical, 10)
         .background(
             RoundedRectangle(cornerRadius: 20, style: .continuous)
                 .fill(MelloTVTheme.card)
