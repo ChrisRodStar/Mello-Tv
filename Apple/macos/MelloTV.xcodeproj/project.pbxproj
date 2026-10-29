@@ -8,7 +8,7 @@
 		"BFFEEDCD5B781D3EA4B54CDD" = {
 			"isa" = "PBXFileReference";
 			"lastKnownFileType" = "sourcecode.swift";
-			"path" = "AppActions.swift";
+			"path" = "AppEnvironment.swift";
 			"sourceTree" = "<group>";
 		};
 		"8F994DEC7CF72B34E14E62FC" = {
@@ -38,7 +38,7 @@
 		"C8A0891C9DDAE970CCB53D7B" = {
 			"isa" = "PBXFileReference";
 			"lastKnownFileType" = "sourcecode.swift";
-			"path" = "WindowContentController.swift";
+			"path" = "WindowHostingController.swift";
 			"sourceTree" = "<group>";
 		};
 		"35232F7E440AB511D9CD220C" = {
@@ -58,13 +58,22 @@
 		"787F790199297C1B271C6214" = {
 			"isa" = "PBXGroup";
 			"children" = (
-				"BFFEEDCD5B781D3EA4B54CDD",
-				"28B4C63AECD925681CCF61D3",
-				"976044D181F325B907AE0F31",
-				"C8A0891C9DDAE970CCB53D7B",
 				"D4BDAE65759669DFF723D09C",
+				"976044D181F325B907AE0F31",
+				"BFFEEDCD5B781D3EA4B54CDD",
 			);
 			"path" = "App";
+			"sourceTree" = "<group>";
+		};
+		"B11000000000000000000001" = {
+			"isa" = "PBXGroup";
+			"children" = (
+				"28B4C63AECD925681CCF61D3",
+				"0EEF048CB0149BF87965530E",
+				"33E7F3E4191FDAF50ECAEDFB",
+				"C8A0891C9DDAE970CCB53D7B",
+			);
+			"path" = "Windows";
 			"sourceTree" = "<group>";
 		};
 		"E1013396FC837F15D6DE1C02" = {
@@ -80,26 +89,17 @@
 		"33E7F3E4191FDAF50ECAEDFB" = {
 			"isa" = "PBXFileReference";
 			"lastKnownFileType" = "sourcecode.swift";
-			"path" = "WindowSizing.swift";
+			"path" = "WindowConfiguration.swift";
 			"sourceTree" = "<group>";
 		};
 		"E6C78E374006EBAF9BCC651C" = {
 			"isa" = "PBXBuildFile";
 			"fileRef" = "33E7F3E4191FDAF50ECAEDFB";
 		};
-		"686674CA080794909559DECA" = {
-			"isa" = "PBXGroup";
-			"children" = (
-				"E1013396FC837F15D6DE1C02",
-				"33E7F3E4191FDAF50ECAEDFB",
-			);
-			"path" = "Configuration";
-			"sourceTree" = "<group>";
-		};
 		"A7BE41121CE63949293203E6" = {
 			"isa" = "PBXGroup";
 			"children" = (
-				"686674CA080794909559DECA",
+				"E1013396FC837F15D6DE1C02",
 			);
 			"path" = "Core";
 			"sourceTree" = "<group>";
@@ -164,7 +164,6 @@
 			"isa" = "PBXGroup";
 			"children" = (
 				"93F8BD7AD8FF97CE79AA6CEB",
-				"0EEF048CB0149BF87965530E",
 			);
 			"path" = "Onboarding";
 			"sourceTree" = "<group>";
@@ -172,7 +171,7 @@
 		"E56A317A39381F0847DD477E" = {
 			"isa" = "PBXFileReference";
 			"lastKnownFileType" = "sourcecode.swift";
-			"path" = "OverviewProviderStrip.swift";
+			"path" = "ProviderStripView.swift";
 			"sourceTree" = "<group>";
 		};
 		"B601287130DC4AE9B246D2A9" = {
@@ -272,7 +271,7 @@
 		"F0D0A3A6371672E11BAAF6E2" = {
 			"isa" = "PBXFileReference";
 			"lastKnownFileType" = "sourcecode.swift";
-			"path" = "DesktopContentView.swift";
+			"path" = "ContentView.swift";
 			"sourceTree" = "<group>";
 		};
 		"3BF5A9CDB806622E17DCD945" = {
@@ -282,7 +281,7 @@
 		"A0B59A0C76DBDBCADF7A95FA" = {
 			"isa" = "PBXFileReference";
 			"lastKnownFileType" = "sourcecode.swift";
-			"path" = "DesktopDestination.swift";
+			"path" = "SidebarItem.swift";
 			"sourceTree" = "<group>";
 		};
 		"6D5758FE26462DF74484F214" = {
@@ -292,7 +291,7 @@
 		"21CD1C8F118A1BD7F2216F9D" = {
 			"isa" = "PBXFileReference";
 			"lastKnownFileType" = "sourcecode.swift";
-			"path" = "DesktopShellView.swift";
+			"path" = "ShellView.swift";
 			"sourceTree" = "<group>";
 		};
 		"797B0897C008C19F98D9E350" = {
@@ -302,7 +301,7 @@
 		"C0CDD44363306DCC9A1F0E9E" = {
 			"isa" = "PBXFileReference";
 			"lastKnownFileType" = "sourcecode.swift";
-			"path" = "DesktopSidebarView.swift";
+			"path" = "SidebarView.swift";
 			"sourceTree" = "<group>";
 		};
 		"810EB523D979AA347939CC17" = {
@@ -329,14 +328,6 @@
 		"DF3C9A5B9D78209D4081AA25" = {
 			"isa" = "PBXBuildFile";
 			"fileRef" = "6232A524C178917003BB7C98";
-		};
-		"A3860F911B2434A6E89909DD" = {
-			"isa" = "PBXGroup";
-			"children" = (
-				"6232A524C178917003BB7C98",
-			);
-			"path" = "Catalog";
-			"sourceTree" = "<group>";
 		};
 		"EDF82293F66125A56B2CF1C8" = {
 			"isa" = "PBXFileReference";
@@ -368,16 +359,6 @@
 			"isa" = "PBXBuildFile";
 			"fileRef" = "C03CEAB20B13620F430A6575";
 		};
-		"423F8C0C30B973BC2981C250" = {
-			"isa" = "PBXGroup";
-			"children" = (
-				"EDF82293F66125A56B2CF1C8",
-				"119EC4A22C7B65E8C8DAB790",
-				"C03CEAB20B13620F430A6575",
-			);
-			"path" = "Server";
-			"sourceTree" = "<group>";
-		};
 		"05345EE378AC455820C97A83" = {
 			"isa" = "PBXFileReference";
 			"lastKnownFileType" = "sourcecode.swift";
@@ -397,15 +378,6 @@
 		"8F9555BD00B2CC2C91AD929A" = {
 			"isa" = "PBXBuildFile";
 			"fileRef" = "D01524D27A5CBEEBBD8B5C51";
-		};
-		"125CF88A70A751A12C642BF3" = {
-			"isa" = "PBXGroup";
-			"children" = (
-				"05345EE378AC455820C97A83",
-				"D01524D27A5CBEEBBD8B5C51",
-			);
-			"path" = "System";
-			"sourceTree" = "<group>";
 		};
 		"8DF02ABC9D0FB8FE9124145A" = {
 			"isa" = "PBXFileReference";
@@ -427,22 +399,17 @@
 			"isa" = "PBXBuildFile";
 			"fileRef" = "24F689B3271066A6205DEFF2";
 		};
-		"E885130606A7CD40EE792947" = {
-			"isa" = "PBXGroup";
-			"children" = (
-				"8DF02ABC9D0FB8FE9124145A",
-				"24F689B3271066A6205DEFF2",
-			);
-			"path" = "Updates";
-			"sourceTree" = "<group>";
-		};
 		"B0AAA41241B9CE110F17EF1E" = {
 			"isa" = "PBXGroup";
 			"children" = (
-				"A3860F911B2434A6E89909DD",
-				"423F8C0C30B973BC2981C250",
-				"125CF88A70A751A12C642BF3",
-				"E885130606A7CD40EE792947",
+				"05345EE378AC455820C97A83",
+				"8DF02ABC9D0FB8FE9124145A",
+				"6232A524C178917003BB7C98",
+				"D01524D27A5CBEEBBD8B5C51",
+				"EDF82293F66125A56B2CF1C8",
+				"119EC4A22C7B65E8C8DAB790",
+				"C03CEAB20B13620F430A6575",
+				"24F689B3271066A6205DEFF2",
 			);
 			"path" = "Services";
 			"sourceTree" = "<group>";
@@ -473,7 +440,7 @@
 				"52493840D085FE52E089849A",
 				"159E17217B0926B9E86D6131",
 			);
-			"path" = "Components";
+			"path" = "Presentation";
 			"sourceTree" = "<group>";
 		};
 		"97B0D71492EC1A43C511644D" = {
@@ -507,6 +474,7 @@
 			"isa" = "PBXGroup";
 			"children" = (
 				"787F790199297C1B271C6214",
+				"B11000000000000000000001",
 				"A7BE41121CE63949293203E6",
 				"9A3C0A6D161788757CAF5A6C",
 				"F7B12AA25C2BE20A39CA7000",

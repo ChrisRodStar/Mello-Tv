@@ -1,7 +1,7 @@
 import SwiftUI
 import MelloKit
 
-struct OverviewProviderStrip: View {
+struct ProviderStripView: View {
     let providers: [ServerSnapshot.ProviderStatus]
     let isReachable: Bool
     let onManage: () -> Void
@@ -79,3 +79,6 @@ private struct SourceWordmark: View {
         return provider.lastFailure == nil ? MelloTVTheme.accent.opacity(0.8) : .white.opacity(0.3)
     }
 }
+
+typealias OverviewProviderStrip = ProviderStripView
+

@@ -1,11 +1,14 @@
 import SwiftUI
 
-enum DesktopDestination: String, CaseIterable, Identifiable {
+/// Sidebar destination item for macOS navigation.
+enum SidebarItem: String, CaseIterable, Identifiable {
     case overview = "Overview"
     case providers = "Providers"
     case network = "Network"
     case settings = "Settings"
+
     var id: Self { self }
+
     var symbol: String {
         switch self {
         case .overview: return "house"
@@ -14,6 +17,7 @@ enum DesktopDestination: String, CaseIterable, Identifiable {
         case .settings: return "gearshape"
         }
     }
+
     var shortcut: KeyEquivalent {
         switch self {
         case .overview: return "1"
@@ -25,7 +29,10 @@ enum DesktopDestination: String, CaseIterable, Identifiable {
 }
 
 @MainActor
-final class DesktopNavigation: ObservableObject {
-    @Published var selection = DesktopDestination.overview
+final class SidebarNavigationModel: ObservableObject {
+    @Published var selection = SidebarItem.overview
     @Published var isSidebarExpanded = true
 }
+
+typealias DesktopDestination = SidebarItem
+typealias DesktopNavigation = SidebarNavigationModel

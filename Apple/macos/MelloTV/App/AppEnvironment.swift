@@ -1,4 +1,7 @@
-struct AppActions {
+import Foundation
+
+/// Dependency container and action routing for Mello TV macOS.
+struct AppEnvironment {
     let preferences: AppPreferences
     let updater: AppUpdateService
     let openSettings: () -> Void
@@ -11,3 +14,5 @@ struct AppActions {
     let showWelcome: () -> Void
     let quit: () -> Void
 }
+
+typealias AppActions = AppEnvironment

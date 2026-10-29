@@ -1,7 +1,7 @@
 import Cocoa
 
-/// Window bounds live here, separate from individual SwiftUI component sizes.
-enum WindowSizing {
+/// Window bounds and sizing rules. Single source of truth.
+enum WindowConfiguration {
     /// Whole window, including the title bar and toolbar. Both opening and minimum size.
     static let mainFrame = NSSize(width: 1150, height: 750)
 
@@ -14,3 +14,5 @@ enum WindowSizing {
                height: max(mainFrame.height, proposed.height))
     }
 }
+
+typealias WindowSizing = WindowConfiguration

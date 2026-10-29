@@ -1,7 +1,7 @@
 import SwiftUI
 import MelloKit
 
-struct DesktopContentView: View {
+struct ContentView: View {
     @Binding var destination: DesktopDestination
     @ObservedObject var model: ServerStatusStore
     @ObservedObject var process: ServerProcessState
@@ -32,3 +32,5 @@ struct DesktopContentView: View {
         .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.35 : 0.05), radius: 16, y: 4)
     }
 }
+
+typealias DesktopContentView = ContentView

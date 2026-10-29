@@ -5,7 +5,7 @@ import SwiftUI
 /// Keep hosting below a plain container so it cannot propagate root hosting
 /// controller minimum/maximum sizes back to NSWindow when destinations change.
 @MainActor
-final class WindowContentController<Content: View>: NSViewController {
+final class WindowHostingController<Content: View>: NSViewController {
     private let hostingView: NSHostingView<Content>
 
     init(rootView: Content) {
@@ -29,3 +29,5 @@ final class WindowContentController<Content: View>: NSViewController {
         ])
     }
 }
+
+typealias WindowContentController = WindowHostingController

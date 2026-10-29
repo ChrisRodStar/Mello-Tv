@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 import MelloKit
 
-struct DesktopSidebarView: View {
+struct SidebarView: View {
     @ObservedObject var navigation: DesktopNavigation
     let actions: AppActions
     private var expanded: Bool { navigation.isSidebarExpanded }
@@ -152,6 +152,8 @@ private struct SidebarRowButton: View {
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }
+
+typealias DesktopSidebarView = SidebarView
 
 private struct SidebarRowStyle: ButtonStyle {
     let selected: Bool
