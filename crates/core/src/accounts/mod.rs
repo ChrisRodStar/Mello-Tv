@@ -140,6 +140,50 @@ pub struct ProfilesResponse {
     pub profiles: Vec<Profile>,
 }
 
+/// Saved playback defaults, independent of recommendation taste preferences.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ProfilePlaybackSettings {
+    pub audio_language: String,
+    pub subtitle_language: String,
+    pub subtitles_enabled: bool,
+    pub autoplay_next: bool,
+    pub max_height: i64,
+}
+
+impl Default for ProfilePlaybackSettings {
+    fn default() -> Self {
+        Self {
+            audio_language: String::new(),
+            subtitle_language: String::new(),
+            subtitles_enabled: false,
+            autoplay_next: true,
+            max_height: 0,
+        }
+    }
+}
+
+impl ProfilePlaybackSettings {
+    pub fn validate(&self) -> Result<(), AccountValidationError> {
+        for language in [&self.audio_language, &self.subtitle_language] {
+            if language.len() > 32
+                || !language
+                    .bytes()
+                    .all(|c| c.is_ascii_alphanumeric() || c == b'-')
+            {
+                return Err(invalid(
+                    "language",
+                    "expected a language code of at most 32 characters",
+                ));
+            }
+        }
+        if ![0, 360, 480, 720, 1080].contains(&self.max_height) {
+            return Err(invalid("max_height", "unsupported quality"));
+        }
+        Ok(())
+    }
+}
+
 /// Validated public content coordinates. Season zero identifies TV specials.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(try_from = "TargetWire", into = "TargetWire")]

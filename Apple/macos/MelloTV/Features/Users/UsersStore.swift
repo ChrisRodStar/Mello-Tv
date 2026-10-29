@@ -33,6 +33,13 @@ struct UserDetails {
 struct UserRecommendationRefresh: Decodable {
     let status: String
     let reason: String?
+    var updatedAt: String? = nil
+    var date: Date? {
+        guard let updatedAt else { return nil }
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter.date(from: updatedAt) ?? ISO8601DateFormatter().date(from: updatedAt)
+    }
     var isRunning: Bool { status == "pending" }
     var message: String? {
         switch status {
@@ -89,7 +96,7 @@ private struct UserRequestError: LocalizedError {
     let status: Int
     var errorDescription: String? {
         switch status {
-        case 400, 422: return "Check the profile name and try again."
+        case 400, 422: return "Check the entered values and try again."
         case 404: return "This profile is no longer available. Refresh the users list."
         default: return "The server couldn’t complete this request. Try again."
         }
@@ -213,6 +220,29 @@ final class UsersStore: ObservableObject {
         }
     }
 
+    func playbackSettings(profileID: String, port: Int) async throws -> ProfilePlaybackSettings {
+        try await UsersAPI(port: port).get("profiles/\(profileID)/playback-settings")
+    }
+
+    func savePlaybackSettings(_ settings: ProfilePlaybackSettings, profileID: String, port: Int) async throws {
+        let encoder = JSONEncoder()
+        encoder.keyEncodingStrategy = .convertToSnakeCase
+        _ = try await UsersAPI(port: port).send("profiles/\(profileID)/playback-settings", method: "PUT", body: encoder.encode(settings))
+    }
+
+    func saveTaste(_ preferences: ProfilePreferences, original: ProfilePreferences, profileID: String, port: Int) async throws {
+        let api = UsersAPI(port: port)
+        let current: Profile = try await api.get("profiles/\(profileID)")
+        guard current.preferences.format == original.format, current.preferences.genres == original.genres,
+              current.preferences.completed == original.completed else {
+            throw UserTasteConflict()
+        }
+        let body = try JSONSerialization.data(withJSONObject: ["format": preferences.format, "genres": preferences.genres, "completed": preferences.completed])
+        let data = try await api.send("profiles/\(profileID)/preferences", method: "PUT", body: body)
+        let saved: Profile = try api.decode(data)
+        if let index = profiles.firstIndex(where: { $0.id == saved.id }) { profiles[index] = saved }
+    }
+
     func save(profile: Profile?, name: String, color: String, port: Int) async throws -> Profile {
         guard online, !isSaving else { throw URLError(.notConnectedToInternet) }
         let token = generation
@@ -245,4 +275,8 @@ final class UsersStore: ObservableObject {
         if details?.profileID == profile.id { details = nil }
         revision += 1
     }
+}
+
+private struct UserTasteConflict: LocalizedError {
+    var errorDescription: String? { "Taste changed on another device. Close and reopen this editor to review the latest choices." }
 }

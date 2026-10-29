@@ -196,10 +196,10 @@ final class ProfileStore {
                 color: color,
                 preferences: existing.preferences
             )
-            let newProfiles = try await api.updateProfile(updated)
+            let newProfiles = try await api.updateProfileIdentity(updated)
             self.profiles = newProfiles
             if activeProfile?.id == existingID {
-                self.activeProfile = updated
+                self.activeProfile = newProfiles.first(where: { $0.id == existingID })
             }
         } else {
             let newID = UUID().uuidString.lowercased().replacingOccurrences(of: "-", with: "").prefix(12)
@@ -229,14 +229,26 @@ final class ProfileStore {
         showProfileEditor = false
     }
 
-    func completeOnboarding(with preferences: ProfilePreferences) async throws {
-        guard let current = activeProfile else { return }
+    func completeOnboarding(with preferences: ProfilePreferences, original: Profile) async throws {
+        guard let current = activeProfile, current.id == original.id else { return }
+        let latest = try await api.profiles().first { $0.id == original.id }
+        guard let latest else {
+            throw APIError.serverMessage("This profile is no longer available.")
+        }
+        func matches(_ a: ProfilePreferences, _ b: ProfilePreferences) -> Bool {
+            a.format == b.format && Set(a.genres) == Set(b.genres) && a.completed == b.completed && Set(a.likedTitles) == Set(b.likedTitles)
+        }
+        guard matches(latest.preferences, original.preferences) || matches(latest.preferences, preferences) else {
+            throw APIError.serverMessage("Preferences changed on another device. Close and reopen this editor to review them.")
+        }
         var updated = current
         updated.preferences = preferences
-        let newProfiles = try await api.updateProfile(updated)
-        try await api.onboardingGenerate(profileID: current.id)
+        let newProfiles = matches(latest.preferences, preferences) ? try await api.profiles() : try await api.updateProfile(updated)
         self.profiles = newProfiles
-        self.activeProfile = updated
-        showOnboarding = false
+        if activeProfile?.id == current.id {
+            self.activeProfile = newProfiles.first { $0.id == current.id }
+        }
+        try await api.onboardingGenerate(profileID: current.id)
+        if activeProfile?.id == current.id { showOnboarding = false }
     }
 }

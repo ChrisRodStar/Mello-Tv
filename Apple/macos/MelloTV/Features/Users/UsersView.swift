@@ -15,6 +15,7 @@ struct UsersView: View {
     @State private var selectedID: String?
     @State private var editor: UserEditorTarget?
     @State private var query = ""
+    @State private var settingsProfile: Profile?
 
     private var selected: Profile? { store.profiles.first { $0.id == selectedID } }
     private var visibleProfiles: [Profile] {
@@ -48,7 +49,8 @@ struct UsersView: View {
                                                loading: store.isLoadingDetails,
                                                recommendation: store.recommendations[profile.id],
                                                regenerate: { Task { await store.regenerateRecommendations(for: profile, port: port) } },
-                                               edit: { editor = UserEditorTarget(profile: profile) })
+                                               edit: { editor = UserEditorTarget(profile: profile) },
+                                               settings: { settingsProfile = profile })
                                     .padding(26)
                             } else {
                                 Text("Choose a profile to see their activity.")
@@ -93,7 +95,10 @@ struct UsersView: View {
         }
         .onChange(of: online) { value in
             store.setOnline(value)
-            if !value { selectedID = nil; editor = nil }
+            if !value { selectedID = nil; editor = nil; settingsProfile = nil }
+        }
+        .sheet(item: $settingsProfile) { profile in
+            UserPreferencesEditor(profile: profile, store: store, port: port)
         }
         .sheet(item: $editor) { target in
             UserEditorView(profile: target.profile, store: store, port: port) { saved in
@@ -199,6 +204,7 @@ private struct UserDetailView: View {
     let recommendation: UserRecommendationRefresh?
     let regenerate: () -> Void
     let edit: () -> Void
+    let settings: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 27) {
@@ -240,6 +246,7 @@ private struct UserDetailView: View {
             VStack(alignment: .leading, spacing: 11) {
                 HStack(spacing: 10) {
                     sectionLabel("Taste")
+                    Button("Edit preferences", action: settings).font(.system(size: 11))
                     Spacer(minLength: 0)
                     Button(action: regenerate) {
                         HStack(spacing: 7) {
@@ -259,6 +266,10 @@ private struct UserDetailView: View {
                 Text(tasteDescription).font(.system(size: 12)).lineSpacing(4)
                     .foregroundStyle(MelloTVTheme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
+            }
+            if let date = recommendation?.date {
+                Text("Last generation: \(date.formatted(date: .abbreviated, time: .shortened))")
+                    .font(.system(size: 11)).foregroundStyle(MelloTVTheme.textSecondary)
             }
             if let message = recommendation?.message {
                 Text(message).font(.system(size: 11)).lineSpacing(3)
@@ -380,4 +391,83 @@ private struct UsersSurface: View {
             }
             .shadow(color: MelloTVTheme.ambientShadow.opacity(colorScheme == .dark ? 0.25 : 0.10), radius: 18, y: 12)
     }
+}
+
+private struct UserPreferencesEditor: View {
+    let profile: Profile
+    @ObservedObject var store: UsersStore
+    let port: Int
+    @Environment(\.dismiss) private var dismiss
+    @State private var playback = ProfilePlaybackSettings()
+    @State private var originalPlayback: ProfilePlaybackSettings?
+    @State private var taste: ProfilePreferences
+    @State private var originalTaste: ProfilePreferences
+    @State private var loaded = false
+    @State private var saving = false
+    @State private var error: String?
+
+    init(profile: Profile, store: UsersStore, port: Int) {
+        self.profile = profile; self.store = store; self.port = port
+        _taste = State(initialValue: profile.preferences)
+        _originalTaste = State(initialValue: profile.preferences)
+    }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Preferences for \(profile.name)").font(.headline)
+            Form {
+                Section("Taste") {
+                    Picker("Format", selection: $taste.format) {
+                        Text("Movies & TV").tag("both"); Text("Movies").tag("movie"); Text("TV").tag("tv")
+                    }
+                    ForEach(GenreOption.all) { genre in
+                        Toggle(genre.name, isOn: Binding(get: { taste.genres.contains(genre.id) }, set: { enabled in
+                            if enabled && !taste.genres.contains(genre.id) { taste.genres.append(genre.id) }
+                            if !enabled { taste.genres.removeAll { $0 == genre.id } }
+                        }))
+                    }
+                    Toggle("Taste setup complete", isOn: $taste.completed)
+                }
+                Section("Playback") {
+                    TextField("Audio language code (e.g. en)", text: $playback.audioLanguage)
+                    Toggle("Subtitles by default", isOn: $playback.subtitlesEnabled)
+                    TextField("Subtitle language code (e.g. en)", text: $playback.subtitleLanguage)
+                    Toggle("Autoplay next episode", isOn: $playback.autoplayNext)
+                    Picker("Default quality", selection: $playback.maxHeight) {
+                        Text("Auto").tag(0); Text("1080p").tag(1080); Text("720p").tag(720); Text("480p").tag(480); Text("360p").tag(360)
+                    }
+                }
+            }.disabled(!loaded || saving)
+            if let error { Text(error).foregroundColor(.orange).font(.caption) }
+            HStack { Spacer(); Button("Cancel") { dismiss() }; Button("Save") { Task { await save() } }.disabled(!loaded || saving) }
+        }.padding(24).frame(width: 480, height: 650)
+        .task { do { let saved = try await store.playbackSettings(profileID: profile.id, port: port); playback = saved; originalPlayback = saved; loaded = true }
+            catch { self.error = "Couldn’t load playback settings. Close and reopen to try again." } }
+    }
+    private func save() async {
+        saving = true
+        defer { saving = false }
+        var savedTaste = false
+        do {
+            if taste != originalTaste {
+                try await store.saveTaste(taste, original: originalTaste, profileID: profile.id, port: port)
+                originalTaste = taste
+                savedTaste = true
+            }
+            if playback != originalPlayback {
+                let current = try await store.playbackSettings(profileID: profile.id, port: port)
+                guard current == originalPlayback else {
+                    throw UserPlaybackConflict()
+                }
+                try await store.savePlaybackSettings(playback, profileID: profile.id, port: port)
+                originalPlayback = playback
+            }
+            dismiss()
+        } catch {
+            self.error = (savedTaste ? "Taste preferences were saved. " : "") + error.localizedDescription
+        }
+    }
+}
+
+private struct UserPlaybackConflict: LocalizedError {
+    var errorDescription: String? { "Playback settings changed on another device. Close and reopen this editor to review them." }
 }

@@ -11,7 +11,10 @@ use serde::Deserialize;
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use stream_core::{
-    accounts::{Preferences, Profile, ProfileInput, ProgressUpdate, Target, is_safe_identifier},
+    accounts::{
+        Preferences, Profile, ProfileInput, ProfilePlaybackSettings, ProgressUpdate, Target,
+        is_safe_identifier,
+    },
     catalog::{
         ContentPreference, Favorite, MediaType, RecommendationInputs, Title, TitleIdentity,
         ViewingSignal,
@@ -84,6 +87,10 @@ pub fn routes() -> Router<AppState> {
         .route(
             "/api/v1/profiles/{id}/catalog-status",
             get(get_catalog_status),
+        )
+        .route(
+            "/api/v1/profiles/{id}/playback-settings",
+            get(get_playback_settings).put(put_playback_settings),
         )
         // Preferences & Activity
         .route(
@@ -498,6 +505,18 @@ async fn recommendation_inputs(state: &AppState, profile_id: &str) -> Option<Rec
     if !profile.preferences.completed {
         return None;
     }
+    let ignored: std::collections::HashSet<String> = state
+        .accounts
+        .list_titles(
+            &state.household_account_id,
+            profile_id,
+            ListKind::RecommendationIgnored,
+        )
+        .await
+        .ok()?
+        .into_iter()
+        .map(|title| title.identity.key())
+        .collect();
     let titles = state
         .accounts
         .list_titles(&state.household_account_id, profile_id, ListKind::Favorites)
@@ -505,16 +524,18 @@ async fn recommendation_inputs(state: &AppState, profile_id: &str) -> Option<Rec
         .ok()?;
     let favorites = titles
         .into_iter()
+        .filter(|title| !ignored.contains(&title.identity.key()))
         .map(|title| Favorite {
             identity: title.identity,
             title: title.title,
         })
         .collect();
-    let history = state
+    let mut history = state
         .accounts
         .history(&state.household_account_id, profile_id, 0)
         .await
         .unwrap_or_default();
+    history.retain(|progress| !ignored.contains(&progress.target.identity().key()));
     let mut grouped_signals = std::collections::HashMap::<String, ViewingSignal>::new();
     for progress in history.iter().take(100) {
         let identity = *progress.target.identity();
@@ -690,6 +711,19 @@ async fn queue_profile_recommendations(
                 ),
             };
             state_for_job.set_catalog_request_status(&job_key, status, reason);
+            if let Some(outcome) = state_for_job.catalog_request_status(&job_key) {
+                if let Ok(value) = serde_json::to_value(outcome) {
+                    let _ = state_for_job
+                        .accounts
+                        .put_profile_metadata(
+                            &state_for_job.household_account_id,
+                            &profile_id,
+                            "recommendation-outcome",
+                            value,
+                        )
+                        .await;
+                }
+            }
             match result {
                 Ok(record) if record.data.sections.is_empty() && preserve_stale => state_for_job.set_catalog_generation_stale(&profile_id, Some("No new matching titles; showing the last saved recommendations.".to_owned())),
                 Ok(record) if record.data.sections.is_empty() => state_for_job.set_catalog_generation(&profile_id, CatalogGenerationStatus::Unavailable, Some("No matching catalog titles are available yet.".to_owned())),
@@ -754,7 +788,11 @@ async fn recommendation_refresh_status(
     // Unlike catalog-status, this records the job outcome even if an older cache is usable.
     Ok(Json(match state.catalog_request_status(&key) {
         Some(status) => serde_json::to_value(status)?,
-        None => json!({ "status": "idle" }),
+        None => state
+            .accounts
+            .get_profile_metadata(&state.household_account_id, &id, "recommendation-outcome")
+            .await?
+            .unwrap_or_else(|| json!({ "status": "idle" })),
     }))
 }
 
@@ -810,6 +848,38 @@ async fn delete_profile(
     state.catalog.delete("profile_generation", &id).await?;
     state.clear_profile_catalog_state(&id);
     Ok(StatusCode::NO_CONTENT)
+}
+
+async fn get_playback_settings(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<ProfilePlaybackSettings>, AppError> {
+    let value = state
+        .accounts
+        .get_profile_metadata(&state.household_account_id, &id, "playback-settings")
+        .await?;
+    Ok(Json(match value {
+        Some(value) => serde_json::from_value(value)?,
+        None => ProfilePlaybackSettings::default(),
+    }))
+}
+
+async fn put_playback_settings(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(settings): Json<ProfilePlaybackSettings>,
+) -> Result<Json<ProfilePlaybackSettings>, AppError> {
+    settings.validate()?;
+    state
+        .accounts
+        .put_profile_metadata(
+            &state.household_account_id,
+            &id,
+            "playback-settings",
+            serde_json::to_value(&settings)?,
+        )
+        .await?;
+    Ok(Json(settings))
 }
 
 async fn update_profile_preferences(
@@ -1133,6 +1203,7 @@ async fn put_recommendation_ignored_title(
             title,
         )
         .await?;
+    queue_profile_recommendations(state.clone(), id, true, true).await;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -1155,6 +1226,7 @@ async fn delete_recommendation_ignored_title(
             identity,
         )
         .await?;
+    queue_profile_recommendations(state.clone(), id, true, true).await;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -1336,7 +1408,7 @@ async fn get_home(
                     featured.extend(titles.iter().take(5).cloned());
                 }
                 if shelf_filter.is_none() || shelf_filter == Some(shelf_id) {
-                    sections.push(json!({ "id": shelf_id, "heading": section.get("heading").and_then(|v| v.as_str()).unwrap_or("Recommended for you"), "titles": titles }));
+                    sections.push(json!({ "id": shelf_id, "heading": section.get("heading").and_then(|v| v.as_str()).unwrap_or("Recommended for you"), "reason": section.get("reason").and_then(|v| v.as_str()).unwrap_or(""), "titles": titles }));
                 }
             }
         }

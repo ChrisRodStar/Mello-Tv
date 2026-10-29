@@ -40,7 +40,7 @@ final class CatalogStore {
     func removeRecommendation(_ titleID: String) {
         sections = sections.compactMap { section in
             let titles = section.titles.filter { $0.id != titleID }
-            return titles.isEmpty ? nil : CatalogSection(id: section.id, heading: section.heading, titles: titles)
+            return titles.isEmpty ? nil : CatalogSection(id: section.id, heading: section.heading, titles: titles, reason: section.reason)
         }
         featuredTitles.removeAll { $0.id == titleID }
     }

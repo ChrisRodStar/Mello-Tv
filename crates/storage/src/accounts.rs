@@ -396,6 +396,48 @@ impl AccountStore {
             .await
     }
 
+    pub async fn get_profile_metadata(
+        &self,
+        account: &str,
+        profile_id: &str,
+        kind: &str,
+    ) -> Result<Option<serde_json::Value>, StorageError> {
+        let (account, profile_id) = identifiers(account, profile_id)?;
+        let kind = kind.to_owned();
+        self.database
+            .call(move |connection| {
+                owned_profile(connection, &account, &profile_id)?;
+                let data: Option<Vec<u8>> = connection
+                    .query_row(
+                        "SELECT data FROM lists WHERE profile=?1 AND kind=?2 AND target=''",
+                        params![profile_id, kind],
+                        |row| row.get(0),
+                    )
+                    .optional()?;
+                data.map(|value| serde_json::from_slice(&value).map_err(Into::into))
+                    .transpose()
+            })
+            .await
+    }
+
+    pub async fn put_profile_metadata(
+        &self,
+        account: &str,
+        profile_id: &str,
+        kind: &str,
+        value: serde_json::Value,
+    ) -> Result<(), StorageError> {
+        let (account, profile_id) = identifiers(account, profile_id)?;
+        let kind = kind.to_owned();
+        self.database.call(move |connection| {
+            let transaction = connection.transaction()?;
+            owned_profile(&transaction, &account, &profile_id)?;
+            transaction.execute("INSERT INTO lists(profile,kind,target,data) VALUES(?1,?2,'',?3) ON CONFLICT(profile,kind,target) DO UPDATE SET data=excluded.data", params![profile_id, kind, serde_json::to_vec(&value)?])?;
+            transaction.commit()?;
+            Ok(())
+        }).await
+    }
+
     pub async fn delete_profile(
         &self,
         account: &str,

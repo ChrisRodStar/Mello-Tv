@@ -426,6 +426,10 @@ private struct PanoramicShelf: View {
                 .foregroundStyle(MelloTVTheme.text)
                 .padding(.horizontal, 16)
 
+            if let reason = section.reason, reason == "liked" || reason == "watched" {
+                Text(reason == "liked" ? "Based on a title you liked" : "Based on a title you watched")
+                    .font(.caption).foregroundStyle(MelloTVTheme.muted).padding(.horizontal, 16)
+            }
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(alignment: .top, spacing: 14) {
                     ForEach(section.titles) { title in
@@ -660,6 +664,10 @@ private struct CatalogShelf: View {
                 .foregroundStyle(MelloTVTheme.text)
                 .padding(.horizontal, 16)
 
+            if let reason = section.reason, reason == "liked" || reason == "watched" {
+                Text(reason == "liked" ? "Based on a title you liked" : "Based on a title you watched")
+                    .font(.caption).foregroundStyle(MelloTVTheme.muted).padding(.horizontal, 16)
+            }
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(alignment: .top, spacing: 14) {
                     ForEach(section.titles) { title in

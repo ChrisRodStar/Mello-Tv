@@ -377,7 +377,7 @@ struct OnboardingView: View {
         operationTask = Task { @MainActor in
             defer { isLoading = false; operationTask = nil }
             do {
-                try await profileStore.completeOnboarding(with: preferences)
+                try await profileStore.completeOnboarding(with: preferences, original: profile)
                 try Task.checkCancellation()
                 onCompleted?()
             } catch {

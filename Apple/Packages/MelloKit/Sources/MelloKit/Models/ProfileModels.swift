@@ -73,6 +73,15 @@ public struct ProfilePreferences: Codable, Hashable, Sendable {
     }
 }
 
+public struct ProfilePlaybackSettings: Codable, Hashable, Sendable {
+    public var audioLanguage: String = ""
+    public var subtitleLanguage: String = ""
+    public var subtitlesEnabled: Bool = false
+    public var autoplayNext: Bool = true
+    public var maxHeight: Int = 0
+    public init() {}
+}
+
 public struct Profile: Codable, Hashable, Identifiable, Sendable {
     public let id: String
     public var name: String

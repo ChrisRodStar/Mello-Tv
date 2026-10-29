@@ -54,6 +54,9 @@ private struct TitleDetailContent: View {
     @State private var suggestions: CatalogSection?
     @State private var isLoadingSuggestions = true
     @State private var suggestionsError: String?
+    @State private var recommendationChoices: RecommendationChoices?
+    @State private var feedbackError: String?
+    @State private var feedbackBusy = false
 
     private let api = MelloTVAPI(baseURL: ServerAddress.baseURL)
     private let preparedPlayback = PreparedPlaybackService.shared
@@ -85,6 +88,7 @@ private struct TitleDetailContent: View {
                 VStack(alignment: .leading, spacing: 16) {
                     playbackButton
                     detailStatus
+                    if let feedbackError { Text(feedbackError).font(.caption).foregroundStyle(.red) }
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 16)
@@ -115,6 +119,8 @@ private struct TitleDetailContent: View {
         .foregroundStyle(MelloTVTheme.text)
         .tint(MelloTVTheme.accent)
         .task {
+            do { recommendationChoices = try await api.recommendationChoices(profileID: profileID) }
+            catch { if !Task.isCancelled { feedbackError = "Couldn’t load recommendation choices." } }
             if details == nil { await loadDetails() }
             if suggestions == nil, !Task.isCancelled {
                 await loadSuggestions()
@@ -213,6 +219,32 @@ private struct TitleDetailContent: View {
             }
             .accessibilityLabel(libraryStore.isInMyList(title) ? "Remove from My List" : "Add to My List")
             .accessibilityValue(libraryStore.isInMyList(title) ? "Saved" : "Not saved")
+
+            Menu {
+                ForEach(RecommendationChoice.allCases) { choice in
+                    let selected = recommendationChoices?.titles(for: choice).contains { $0.id == title.id } == true
+                    Button {
+                        Task {
+                            feedbackBusy = true
+                            defer { feedbackBusy = false }
+                            do {
+                                try await api.setRecommendationChoice(profileID: profileID, title: title, choice: choice, enabled: !selected)
+                                NotificationCenter.default.post(name: .melloTVRecommendationsChanged, object: nil)
+                                do {
+                                    recommendationChoices = try await api.recommendationChoices(profileID: profileID)
+                                    feedbackError = nil
+                                } catch {
+                                    recommendationChoices = nil
+                                    feedbackError = "Choice saved, but couldn’t refresh recommendation choices. Reopen this title to try again."
+                                }
+                            } catch { feedbackError = "Couldn’t update your recommendation choice. Try again." }
+                        }
+                    } label: { Label(choice.label, systemImage: selected ? "checkmark.circle.fill" : "circle") }
+                }
+            } label: {
+                Image(systemName: "ellipsis").foregroundStyle(.white).frame(width: 44, height: 44).detailGlass(in: Circle())
+            }.accessibilityLabel("Recommendation choices")
+                .disabled(recommendationChoices == nil || feedbackBusy)
 
             Button(action: onClose) {
                 PhosphorIcon("x", size: 16, weight: .bold)
