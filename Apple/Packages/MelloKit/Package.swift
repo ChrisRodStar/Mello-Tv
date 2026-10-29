@@ -16,7 +16,10 @@ let package = Package(
     targets: [
         .target(
             name: "MelloKit",
-            dependencies: []
+            dependencies: [],
+            resources: [
+                .process("Resources")
+            ]
         ),
         .testTarget(
             name: "MelloKitTests",
