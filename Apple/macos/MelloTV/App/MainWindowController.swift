@@ -38,10 +38,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
 
         // A borderless title-bar accessory keeps this control out of the
         // system toolbar's automatic glass background.
-        let accessory = NSTitlebarAccessoryViewController()
+        let accessory = SidebarTitlebarAccessoryViewController(button: sidebarButton)
         accessory.layoutAttribute = .left
-        accessory.view = NSView(frame: NSRect(x: 0, y: 0, width: 44, height: 28))
-        accessory.view.addSubview(sidebarButton)
         window.addTitlebarAccessoryViewController(accessory)
         window.contentViewController = WindowContentController(
             rootView: DesktopShellView(navigation: navigation, model: model, process: process, port: port, actions: actions)
@@ -83,5 +81,26 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
 
     @objc func toggleSidebar() {
         navigation.isSidebarExpanded.toggle()
+    }
+}
+
+private final class SidebarTitlebarAccessoryViewController: NSTitlebarAccessoryViewController {
+    private let button: NSButton
+
+    init(button: NSButton) {
+        self.button = button
+        super.init(nibName: nil, bundle: nil)
+        view = NSView(frame: NSRect(x: 0, y: 0, width: 44, height: 28))
+        view.addSubview(button)
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override func viewDidLayout() {
+        super.viewDidLayout()
+        guard let closeButton = view.window?.standardWindowButton(.closeButton) else { return }
+        // Match the native controls rather than the accessory's own center.
+        let nativeFrame = view.convert(closeButton.bounds, from: closeButton)
+        button.setFrameOrigin(NSPoint(x: button.frame.minX, y: nativeFrame.midY - button.frame.height / 2))
     }
 }
