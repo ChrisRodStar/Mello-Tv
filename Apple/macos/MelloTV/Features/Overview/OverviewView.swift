@@ -17,6 +17,7 @@ struct OverviewView: View {
 
     @Environment(\.colorScheme) private var colorScheme
     @State private var showingWatching = false
+    @StateObject private var network = NetworkStatusService()
 
     var body: some View {
         GeometryReader { viewport in
@@ -64,23 +65,43 @@ struct OverviewView: View {
                 if process.isRunning || process.isRestarting { serverControls }
             }
 
-            VStack(alignment: .leading, spacing: compact ? 22 : 28) {
-                VStack(alignment: .leading, spacing: 14) {
-                    Text(headline)
-                        .font(.system(size: compact ? 36 : 44, weight: .semibold))
-                        .tracking(-1.6)
-                        .lineSpacing(-1)
-                        .foregroundStyle(MelloTVTheme.text)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .accessibilityAddTraits(.isHeader)
-                    Text(detail)
-                        .font(.system(size: 13))
-                        .lineSpacing(4)
-                        .foregroundStyle(MelloTVTheme.textSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: 480, alignment: .leading)
+            HStack(alignment: .center, spacing: 36) {
+                VStack(alignment: .leading, spacing: compact ? 22 : 28) {
+                    VStack(alignment: .leading, spacing: 14) {
+                        Text(headline)
+                            .font(.system(size: compact ? 36 : 44, weight: .semibold))
+                            .tracking(-1.6)
+                            .lineSpacing(-1)
+                            .foregroundStyle(MelloTVTheme.text)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityAddTraits(.isHeader)
+                        Text(detail)
+                            .font(.system(size: 13))
+                            .lineSpacing(4)
+                            .foregroundStyle(MelloTVTheme.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: 480, alignment: .leading)
+                    }
+                    primaryControl
                 }
-                primaryControl
+                .frame(maxWidth: .infinity, alignment: .leading)
+                if online, let address = overviewAddress {
+                    VStack(spacing: 13) {
+                        ServerAddressQRCode(address: address.id, size: compact ? 136 : 160)
+                            .id(address.id)
+                            .shadow(color: MelloTVTheme.ambientShadow.opacity(colorScheme == .dark ? 0.22 : 0.08), radius: 14, y: 8)
+                        VStack(spacing: 5) {
+                            Text("Scan to connect")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(MelloTVTheme.text)
+                            Text("On your home network")
+                                .font(.system(size: 11))
+                                .foregroundStyle(MelloTVTheme.textSecondary)
+                        }
+                    }
+                    .help("Scan with your camera to open \(address.id) in a browser")
+                    .padding(.trailing, compact ? 0 : 8)
+                }
             }
             .padding(.horizontal, compact ? 4 : 8)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
@@ -125,6 +146,16 @@ struct OverviewView: View {
                 .shadow(color: MelloTVTheme.ambientShadow.opacity(colorScheme == .dark ? 0.25 : 0.10),
                         radius: 18, x: 0, y: 12)
         }
+    }
+
+    private var overviewAddress: NetworkAddress? {
+        (model.snapshot?.endpoints ?? []).compactMap(NetworkAddress.init)
+            .filter { !$0.isTailscale }
+            .sorted {
+                let left = $0.localPriority(preferredHosts: network.preferredHosts)
+                let right = $1.localPriority(preferredHosts: network.preferredHosts)
+                return left == right ? $0.id < $1.id : left < right
+            }.first
     }
 
     private var serverControls: some View {

@@ -7,7 +7,7 @@ import MelloKit
 
 /// Uses the active physical interface to prefer a useful LAN address over virtual adapters.
 @MainActor
-private final class NetworkStatusService: ObservableObject {
+final class NetworkStatusService: ObservableObject {
     @Published private(set) var preferredHosts: Set<String> = []
     private let monitor = NWPathMonitor()
 
@@ -47,7 +47,7 @@ private final class NetworkStatusService: ObservableObject {
     }
 }
 
-private struct NetworkAddress: Identifiable {
+struct NetworkAddress: Identifiable {
     let url: URL
     let host: String
     var id: String { url.absoluteString }
@@ -336,14 +336,7 @@ private struct AddressQRSheet: View {
     let address: NetworkAddress
     @Environment(\.dismiss) private var dismiss
 
-    private var qrImage: NSImage? {
-        guard let filter = CIFilter(name: "CIQRCodeGenerator") else { return nil }
-        filter.setValue(Data(address.id.utf8), forKey: "inputMessage")
-        filter.setValue("M", forKey: "inputCorrectionLevel")
-        guard let output = filter.outputImage?.transformed(by: CGAffineTransform(scaleX: 10, y: 10)),
-              let image = CIContext().createCGImage(output, from: output.extent) else { return nil }
-        return NSImage(cgImage: image, size: NSSize(width: 220, height: 220))
-    }
+    private var qrImage: NSImage? { ServerAddressQRCode.makeImage(address.id) }
 
     var body: some View {
         VStack(spacing: 18) {
@@ -368,5 +361,38 @@ private struct AddressQRSheet: View {
             Button("Done") { dismiss() }.keyboardShortcut(.defaultAction)
         }
         .padding(28).frame(width: 360)
+    }
+}
+
+/// Shared by the Network sheet and the Overview connection shortcut.
+struct ServerAddressQRCode: View {
+    let address: String
+    let size: CGFloat
+    @State private var image: NSImage?
+
+    static func makeImage(_ address: String) -> NSImage? {
+        guard let filter = CIFilter(name: "CIQRCodeGenerator") else { return nil }
+        filter.setValue(Data(address.utf8), forKey: "inputMessage")
+        filter.setValue("M", forKey: "inputCorrectionLevel")
+        guard let output = filter.outputImage?.transformed(by: CGAffineTransform(scaleX: 10, y: 10)),
+              let image = CIContext().createCGImage(output, from: output.extent) else { return nil }
+        return NSImage(cgImage: image, size: NSSize(width: 220, height: 220))
+    }
+
+    var body: some View {
+        Group {
+            if let image {
+                Image(nsImage: image).resizable().interpolation(.none)
+                    .scaledToFit().frame(width: size, height: size)
+                    .padding(14)
+                    .background(.white, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .accessibilityLabel("QR code to open Mello TV on your home network")
+            } else {
+                Text("QR code unavailable").font(.system(size: 11))
+                    .foregroundStyle(MelloTVTheme.textSecondary)
+                    .frame(width: size + 28, height: size + 28)
+            }
+        }
+        .task(id: address) { image = Self.makeImage(address) }
     }
 }
