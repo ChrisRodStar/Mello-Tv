@@ -1,4 +1,5 @@
 import SwiftUI
+import MelloKit
 
 struct ProvidersView: View {
     let providers: [ServerSnapshot.ProviderStatus]

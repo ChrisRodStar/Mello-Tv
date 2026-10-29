@@ -1,5 +1,6 @@
 import Cocoa
 import Sparkle
+import MelloKit
 
 @MainActor
 final class MelloTVAppDelegate: NSObject, NSApplicationDelegate {

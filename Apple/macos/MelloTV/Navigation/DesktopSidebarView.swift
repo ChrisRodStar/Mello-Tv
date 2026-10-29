@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import MelloKit
 
 struct DesktopSidebarView: View {
     @ObservedObject var navigation: DesktopNavigation

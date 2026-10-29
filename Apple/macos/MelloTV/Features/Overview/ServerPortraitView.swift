@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import MelloKit
 
 /// An ornamental portrait of the local server. Only the indicator reflects state;
 /// the enclosure and etched signal lines do not imply traffic or measured load.

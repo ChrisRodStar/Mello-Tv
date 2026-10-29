@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import MelloKit
 
 @MainActor
 final class ServerStatusStore: ObservableObject {

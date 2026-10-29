@@ -67,16 +67,6 @@
 			"path" = "App";
 			"sourceTree" = "<group>";
 		};
-		"D7212B17A1383C84381E1669" = {
-			"isa" = "PBXFileReference";
-			"lastKnownFileType" = "sourcecode.swift";
-			"path" = "AppLinks.swift";
-			"sourceTree" = "<group>";
-		};
-		"45FE33865EF91E551A7AB6EB" = {
-			"isa" = "PBXBuildFile";
-			"fileRef" = "D7212B17A1383C84381E1669";
-		};
 		"E1013396FC837F15D6DE1C02" = {
 			"isa" = "PBXFileReference";
 			"lastKnownFileType" = "sourcecode.swift";
@@ -100,36 +90,16 @@
 		"686674CA080794909559DECA" = {
 			"isa" = "PBXGroup";
 			"children" = (
-				"D7212B17A1383C84381E1669",
 				"E1013396FC837F15D6DE1C02",
 				"33E7F3E4191FDAF50ECAEDFB",
 			);
 			"path" = "Configuration";
 			"sourceTree" = "<group>";
 		};
-		"9CE9DFA7A222E844366BC7E4" = {
-			"isa" = "PBXFileReference";
-			"lastKnownFileType" = "sourcecode.swift";
-			"path" = "ServerSnapshot.swift";
-			"sourceTree" = "<group>";
-		};
-		"E4FD661C5842BFD7E1CD9B91" = {
-			"isa" = "PBXBuildFile";
-			"fileRef" = "9CE9DFA7A222E844366BC7E4";
-		};
-		"B1FF3B4283FA817FC389163D" = {
-			"isa" = "PBXGroup";
-			"children" = (
-				"9CE9DFA7A222E844366BC7E4",
-			);
-			"path" = "Models";
-			"sourceTree" = "<group>";
-		};
 		"A7BE41121CE63949293203E6" = {
 			"isa" = "PBXGroup";
 			"children" = (
 				"686674CA080794909559DECA",
-				"B1FF3B4283FA817FC389163D",
 			);
 			"path" = "Core";
 			"sourceTree" = "<group>";
@@ -506,16 +476,6 @@
 			"path" = "Components";
 			"sourceTree" = "<group>";
 		};
-		"33AB2A1EC280924997E39077" = {
-			"isa" = "PBXFileReference";
-			"lastKnownFileType" = "sourcecode.swift";
-			"path" = "MelloTVTheme.swift";
-			"sourceTree" = "<group>";
-		};
-		"ECF7D76944747D3E01715957" = {
-			"isa" = "PBXBuildFile";
-			"fileRef" = "33AB2A1EC280924997E39077";
-		};
 		"97B0D71492EC1A43C511644D" = {
 			"isa" = "PBXFileReference";
 			"lastKnownFileType" = "sourcecode.swift";
@@ -529,7 +489,6 @@
 		"25136CEA47F55E220A1D80C7" = {
 			"isa" = "PBXGroup";
 			"children" = (
-				"33AB2A1EC280924997E39077",
 				"97B0D71492EC1A43C511644D",
 			);
 			"path" = "Styles";
@@ -624,6 +583,19 @@
 			"isa" = "PBXBuildFile";
 			"productRef" = "FB81A65425BBFF7F8119FF0F";
 		};
+		"A11000000000000000000001" = {
+			"isa" = "XCLocalSwiftPackageReference";
+			"relativePath" = "../Packages/MelloKit";
+		};
+		"A11000000000000000000002" = {
+			"isa" = "XCSwiftPackageProductDependency";
+			"package" = "A11000000000000000000001";
+			"productName" = "MelloKit";
+		};
+		"A11000000000000000000003" = {
+			"isa" = "PBXBuildFile";
+			"productRef" = "A11000000000000000000002";
+		};
 		"B28B7AF69320201D1CF206EB" = {
 			"isa" = "PBXGroup";
 			"children" = (
@@ -646,10 +618,8 @@
 				"5011A9DF90492229A018AFC8",
 				"35232F7E440AB511D9CD220C",
 				"CD91546272D74BFB0FAF49D4",
-				"45FE33865EF91E551A7AB6EB",
 				"CB5078F8BAF08A67562DC2FA",
 				"E6C78E374006EBAF9BCC651C",
-				"E4FD661C5842BFD7E1CD9B91",
 				"376A94B58CAF1788317ED79B",
 				"5F4D5126F5D9ED1C4E227152",
 				"34F2F6839C123C9B0824DBD0",
@@ -674,7 +644,6 @@
 				"6BC982764A20E9F3A2D0F415",
 				"54BC19B607D1ED51B9BEC010",
 				"D2271287671A02F27EF469B8",
-				"ECF7D76944747D3E01715957",
 				"1ED0EB18E38FFCEE322D75B3",
 			);
 			"runOnlyForDeploymentPostprocessing" = "0";
@@ -684,6 +653,7 @@
 			"buildActionMask" = "2147483647";
 			"files" = (
 				"3D8B9C2972369B4447B0B495",
+				"A11000000000000000000003",
 			);
 			"runOnlyForDeploymentPostprocessing" = "0";
 		};
@@ -828,6 +798,7 @@
 			"name" = "Mello TV";
 			"packageProductDependencies" = (
 				"FB81A65425BBFF7F8119FF0F",
+				"A11000000000000000000002",
 			);
 			"productName" = "Mello TV";
 			"productReference" = "38A007151ABE87CC01A5B6E9";
@@ -856,6 +827,7 @@
 			"mainGroup" = "B28B7AF69320201D1CF206EB";
 			"packageReferences" = (
 				"6E80D9DF83D7301E2AA82E76",
+				"A11000000000000000000001",
 			);
 			"productRefGroup" = "FBDC4F23F93125BBEEAE800C";
 			"projectDirPath" = "";

@@ -1,6 +1,7 @@
 import AppKit
 import Network
 import SwiftUI
+import MelloKit
 
 // MARK: - Network Status Service
 

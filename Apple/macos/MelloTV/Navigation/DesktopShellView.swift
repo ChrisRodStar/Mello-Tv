@@ -1,4 +1,5 @@
 import SwiftUI
+import MelloKit
 
 struct DesktopShellView: View {
     @ObservedObject var navigation: DesktopNavigation

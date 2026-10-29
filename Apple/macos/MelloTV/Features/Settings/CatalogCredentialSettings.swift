@@ -1,4 +1,5 @@
 import SwiftUI
+import MelloKit
 
 /// Owns only the transient input. The saved credential stays in Keychain.
 struct CatalogCredentialSettings: View {

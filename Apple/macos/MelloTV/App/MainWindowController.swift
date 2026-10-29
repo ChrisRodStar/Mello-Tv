@@ -1,5 +1,6 @@
 import Cocoa
 import SwiftUI
+import MelloKit
 
 @MainActor
 final class MainWindowController: NSWindowController, NSWindowDelegate {

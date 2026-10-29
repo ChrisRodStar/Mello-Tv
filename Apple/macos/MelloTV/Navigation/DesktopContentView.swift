@@ -1,4 +1,5 @@
 import SwiftUI
+import MelloKit
 
 struct DesktopContentView: View {
     @Binding var destination: DesktopDestination

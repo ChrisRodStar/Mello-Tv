@@ -1,5 +1,6 @@
 import Cocoa
 import SwiftUI
+import MelloKit
 
 /// The Mac companion owns onboarding. The viewing client stays in the browser.
 @MainActor

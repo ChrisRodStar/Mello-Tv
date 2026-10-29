@@ -1,5 +1,6 @@
 import Combine
 import Foundation
+import MelloKit
 
 /// Exactly one mode is selected, so the app always has a way to reopen its window.
 enum AppPresentation: String, CaseIterable, Identifiable {

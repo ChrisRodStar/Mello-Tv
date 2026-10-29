@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import MelloKit
 
 private enum SettingsSection: String, CaseIterable, Identifiable {
     case general = "General"

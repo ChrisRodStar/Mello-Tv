@@ -1,4 +1,5 @@
 import SwiftUI
+import MelloKit
 
 /// Shared page geometry keeps the composition centered inside the content pane.
 struct DesktopPage<Content: View>: View {
