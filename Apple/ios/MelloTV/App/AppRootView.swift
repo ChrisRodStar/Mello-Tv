@@ -1,4 +1,5 @@
 import SwiftUI
+import MelloKit
 
 struct AppRootView: View {
     @Environment(\.scenePhase) private var scenePhase

@@ -1,4 +1,5 @@
 import SwiftUI
+import MelloKit
 
 struct CatalogView: View {
     @State private var store: CatalogStore

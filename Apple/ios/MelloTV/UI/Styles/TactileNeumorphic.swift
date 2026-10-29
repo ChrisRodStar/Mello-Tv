@@ -1,94 +1,6 @@
 import SwiftUI
 import UIKit
-
-// MARK: - Appearance Mode
-
-enum AppearanceMode: String, CaseIterable, Identifiable, Codable {
-    case system = "System"
-    case light = "Light"
-    case dark = "Dark"
-
-    var id: String { rawValue }
-
-    var iconName: String {
-        switch self {
-        case .system: "circle-half"
-        case .light: "sun"
-        case .dark: "moon"
-        }
-    }
-
-    var colorScheme: ColorScheme? {
-        switch self {
-        case .system: nil
-        case .light: .light
-        case .dark: .dark
-        }
-    }
-}
-
-// MARK: - FamilyStream Theme (Titanium Pro Studio Palette)
-
-enum MelloTVTheme {
-    // Core Surfaces: #eceae5 (Warm Alabaster Ceramic) <-> #121316 (Deep Obsidian Titanium)
-    static let background = Color.dynamic(lightHex: "eceae5", darkHex: "121316")
-    static let sunken = Color.dynamic(lightHex: "e1ded7", darkHex: "0d0e10")
-    static let secondaryBackground = Color.dynamic(lightHex: "e7e4dc", darkHex: "1c1d22")
-    static let cardBackground = Color.dynamic(lightHex: "f2f0ea", darkHex: "1a1b20")
-    static let cardHover = Color.dynamic(lightHex: "dedbd3", darkHex: "26282e")
-
-    // Borders & Hairlines
-    static let border = Color.dynamic(lightHex: "d8d4cb", darkHex: "2a2c33")
-    static let subtleBorder = Color.dynamic(
-        light: UIColor(hex: "000000", alpha: 0.05),
-        dark: UIColor(hex: "ffffff", alpha: 0.08)
-    )
-
-    // Typography
-    static let text = Color.dynamic(lightHex: "16171a", darkHex: "f5f5f7")
-    static let textSecondary = Color.dynamic(lightHex: "787673", darkHex: "8e9096")
-    static let muted = Color.dynamic(lightHex: "888682", darkHex: "8e9096")
-    static let mutedSubtle = Color.dynamic(lightHex: "a09d98", darkHex: "63656b")
-
-    // Accent (Precision Sapphire / Studio Blue: #0066cc / #2997ff)
-    static let accent = Color.dynamic(lightHex: "0066cc", darkHex: "2997ff")
-    static let accentGlow = Color.dynamic(
-        light: UIColor(hex: "0066cc", alpha: 0.25),
-        dark: UIColor(hex: "2997ff", alpha: 0.35)
-    )
-}
-
-// MARK: - Color Dynamic Helpers
-
-extension Color {
-    static func dynamic(light: UIColor, dark: UIColor) -> Color {
-        Color(UIColor { trait in
-            trait.userInterfaceStyle == .dark ? dark : light
-        })
-    }
-
-    static func dynamic(lightHex: String, darkHex: String) -> Color {
-        Color(UIColor { trait in
-            let hex = trait.userInterfaceStyle == .dark ? darkHex : lightHex
-            return UIColor(hex: hex)
-        })
-    }
-}
-
-extension UIColor {
-    convenience init(hex: String, alpha: CGFloat = 1.0) {
-        var clean = hex.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        if clean.hasPrefix("#") {
-            clean.remove(at: clean.startIndex)
-        }
-        var rgbValue: UInt64 = 0
-        Scanner(string: clean).scanHexInt64(&rgbValue)
-        let r = CGFloat((rgbValue & 0xFF0000) >> 16) / 255.0
-        let g = CGFloat((rgbValue & 0x00FF00) >> 8) / 255.0
-        let b = CGFloat(rgbValue & 0x0000FF) / 255.0
-        self.init(red: r, green: g, blue: b, alpha: alpha)
-    }
-}
+import MelloKit
 
 // MARK: - UI Button & Touch Target Helpers
 
@@ -333,3 +245,4 @@ extension View {
         modifier(AppleNeumorphicRecessedModifier(cornerRadius: cornerRadius))
     }
 }
+

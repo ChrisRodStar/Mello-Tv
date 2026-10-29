@@ -2,6 +2,7 @@ import Foundation
 import Darwin
 #if canImport(UIKit)
 import UIKit
+import MelloKit
 #endif
 
 struct DiscoveredServer: Identifiable, Hashable, Sendable {

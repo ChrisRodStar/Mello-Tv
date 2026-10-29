@@ -1,4 +1,5 @@
 import SwiftUI
+import MelloKit
 
 struct TitleDetailSheet: View {
     @Environment(\.dismiss) private var dismiss

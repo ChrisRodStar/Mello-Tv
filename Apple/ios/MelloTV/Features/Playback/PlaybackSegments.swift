@@ -1,5 +1,6 @@
 import Foundation
 import CoreFoundation
+import MelloKit
 
 enum PlaybackSegmentKind: String, Sendable {
     case intro

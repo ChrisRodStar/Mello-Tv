@@ -12,7 +12,8 @@ for tool in cargo bun; do
 done
 
 # Keep native UI iteration on Cargo's incremental development build.
-CARGO_OPTIONS=(--locked -p stream-server --target-dir "$ROOT_DIR/target")
+RUST_TARGET_DIR="$ROOT_DIR/Local/build/target"
+CARGO_OPTIONS=(--locked -p stream-server --target-dir "$RUST_TARGET_DIR")
 SERVER_PROFILE=debug
 if [[ "$CONFIGURATION" == Release ]]; then
     CARGO_OPTIONS+=(--release)
@@ -29,7 +30,7 @@ bun run vite build --outDir "$WEB_OUTPUT" --emptyOutDir
 MACOS_DIR="$TARGET_BUILD_DIR/$EXECUTABLE_FOLDER_PATH"
 RESOURCES_DIR="$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH"
 mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
-ditto "$ROOT_DIR/target/$SERVER_PROFILE/stream-server" "$MACOS_DIR/MelloTVServer"
+ditto "$RUST_TARGET_DIR/$SERVER_PROFILE/stream-server" "$MACOS_DIR/MelloTVServer"
 # Replace the generated web folder so removed assets do not survive rebuilds.
 if [[ -d "$RESOURCES_DIR/web" ]]; then
     rm -rf "$RESOURCES_DIR/web"

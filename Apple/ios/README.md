@@ -8,17 +8,14 @@ Native SwiftUI and AVKit client for **Mello TV** (`v0.1.0-alpha.2`), featuring z
 
 ```text
 Apple/ios/
-├── MelloTV.xcodeproj/
+├── MelloTV.xcodeproj/         # Xcode project linked to shared MelloKit
 ├── MelloTV/
 │   ├── App/                   # MelloTVApp entry point, AppRootView, MainTabView
-│   ├── Core/
-│   │   ├── API/               # MelloTVAPI client & wire models
-│   │   ├── Configuration/     # Zero-config ServerAddress discovery & AppLinks
-│   │   └── Persistence/       # Per-server active profile persistence
-│   ├── DesignSystem/
-│   │   ├── Components/        # PosterTile, LandscapeCard, ProfileAvatarView, PhosphorIcon
+│   ├── Services/              # MelloTVAPI HTTP client & Bonjour ServerAddress discovery
+│   ├── UI/
+│   │   ├── Components/        # PosterTile, LandscapeCard, ProfileAvatarView
 │   │   ├── Effects/           # Metal HeroSatin shader backdrop
-│   │   └── Theme/             # MelloTVTheme colors, typography & button styles
+│   │   └── Styles/            # Tactile neumorphic materials & surface button styles
 │   ├── Features/
 │   │   ├── Catalog/           # Home, Movies, TV shelves & 3D FeaturedCarouselView
 │   │   ├── Onboarding/        # First-launch 3-step WelcomeOnboardingView
@@ -27,7 +24,7 @@ Apple/ios/
 │   │   ├── Profiles/          # WhoIsWatchingView, ProfileEditorView & taste OnboardingView
 │   │   ├── Search/            # Live catalog & TMDB discovery SearchView
 │   │   └── TitleDetails/      # TitleDetailSheet & EpisodeRowView
-│   └── Resources/             # Info.plist, Assets.xcassets & AppIcon.icon
+│   └── Resources/             # Info.plist, Assets.xcassets, AppIcon.icon & PrivacyInfo.xcprivacy
 └── tools/                     # Offline playback reliability checks & timing scripts
 ```
 

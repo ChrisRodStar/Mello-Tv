@@ -1,6 +1,7 @@
 import SwiftUI
 import CoreMotion
 import Observation
+import MelloKit
 
 /// Only this background reads motion; catalog content never redraws for tilt updates.
 struct HeroSatinBackdrop: View {

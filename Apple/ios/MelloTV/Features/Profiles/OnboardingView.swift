@@ -1,4 +1,5 @@
 import SwiftUI
+import MelloKit
 
 struct OnboardingView: View {
     @Bindable var profileStore: ProfileStore

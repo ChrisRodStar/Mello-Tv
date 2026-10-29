@@ -1,4 +1,5 @@
 import SwiftUI
+import MelloKit
 
 struct PosterTile: View {
     let title: MediaTitle

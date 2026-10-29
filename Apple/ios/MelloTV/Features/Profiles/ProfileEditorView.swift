@@ -1,4 +1,5 @@
 import SwiftUI
+import MelloKit
 
 struct ProfileEditorView: View {
     @Bindable var profileStore: ProfileStore

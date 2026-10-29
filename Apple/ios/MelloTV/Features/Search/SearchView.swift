@@ -1,5 +1,6 @@
 import Observation
 import SwiftUI
+import MelloKit
 
 struct SearchShelf: Identifiable, Sendable {
     let id: String

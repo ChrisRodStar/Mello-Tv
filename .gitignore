@@ -6,6 +6,7 @@
 /Local/
 /data/
 .local/
+**/ios-old
 
 # Dependencies and generated build output
 node_modules/

@@ -13,11 +13,11 @@ stage = pathlib.Path(sys.argv[1]).resolve()
 stage.mkdir(parents=True, exist_ok=False)
 for folder in ('MelloTV', 'MelloTV.xcodeproj'):
     shutil.copytree(root / folder, stage / folder)
-api = stage / 'MelloTV/Core/API/MelloTVAPI.swift'
+api = stage / 'MelloTV/Services/MelloTVAPI.swift'
 source = api.read_text().replace('let configuration = URLSessionConfiguration.ephemeral',
     'let configuration = URLSessionConfiguration.ephemeral\n        configuration.protocolClasses = [SimulatorPlaybackFixture.self]', 1)
 api.write_text(source + '\n' + (root / 'tools/SimulatorPlaybackFixture.swift').read_text())
-address = stage / 'MelloTV/Core/Configuration/ServerAddress.swift'
+address = stage / 'MelloTV/Services/ServerAddress.swift'
 address.write_text(address.read_text().replace('http://127.0.0.1:8080', 'https://fixture.invalid'))
 for relative in ('Features/Playback/PlayerView.swift', 'Features/Playback/PreparedPlaybackService.swift'):
     path = stage / 'MelloTV' / relative

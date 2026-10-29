@@ -2,6 +2,7 @@ import Foundation
 import Network
 import AVFoundation
 import OSLog
+import MelloKit
 
 private let preparationLog = Logger(subsystem: Bundle.main.bundleIdentifier ?? "com.tinymellow.mellotv", category: "Preparation")
 

@@ -1,4 +1,5 @@
 import Foundation
+import MelloKit
 
 private actor SegmentFixture {
     var requests: [URLRequest] = []

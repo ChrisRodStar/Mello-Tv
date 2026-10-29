@@ -1,4 +1,5 @@
 import SwiftUI
+import MelloKit
 
 struct ProfileAvatarView: View {
     let name: String

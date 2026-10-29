@@ -4,6 +4,7 @@ import Combine
 import MediaPlayer
 import Observation
 import OSLog
+import MelloKit
 
 private let playbackLog = Logger(subsystem: Bundle.main.bundleIdentifier ?? "com.tinymellow.mellotv", category: "Playback")
 

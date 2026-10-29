@@ -1,4 +1,5 @@
 import SwiftUI
+import MelloKit
 
 struct ContinueWatchingShelf: View {
     let items: [WatchProgress]

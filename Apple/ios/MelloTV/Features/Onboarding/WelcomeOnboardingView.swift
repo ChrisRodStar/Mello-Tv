@@ -1,4 +1,5 @@
 import SwiftUI
+import MelloKit
 
 struct WelcomeOnboardingView: View {
     @Bindable var profileStore: ProfileStore
@@ -281,14 +282,14 @@ struct WelcomeOnboardingView: View {
             emblem("heart", compact: compact)
             introduction("A little independent TV.", detail: "Mello TV is made independently, with care. Thanks for making it part of your downtime.")
             VStack(alignment: .leading, spacing: 20) {
-                Text("If you'd like to support future updates, you can buy the creator a coffee. It's always optional.")
+                Text("Mello TV is open source. You can view the code, report issues, and star the project on GitHub.")
                     .font(.subheadline)
                     .foregroundStyle(MelloTVTheme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
                     .lineSpacing(3)
-                Button { openURL(AppLinks.buyMeACoffeeURL) } label: {
+                Button { openURL(AppLinks.githubURL) } label: {
                     HStack(spacing: 10) {
-                        Text("Support Mello TV").font(.subheadline.weight(.semibold))
+                        Text("View on GitHub").font(.subheadline.weight(.semibold))
                         PhosphorIcon("caret-right", size: 16)
                     }
                     .frame(maxWidth: .infinity, minHeight: 52)

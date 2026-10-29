@@ -1,5 +1,6 @@
 import Foundation
 import AVFoundation
+import MelloKit
 
 // Coalesce repeated skips while AVPlayer finishes its current seek. Requests
 // accumulate from the user's latest target, not the player's stale position.

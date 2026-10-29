@@ -1,4 +1,5 @@
 import Foundation
+import MelloKit
 
 enum ResumePlaybackHelper {
     static func resolveResumeRequest(

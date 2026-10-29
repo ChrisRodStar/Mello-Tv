@@ -14,16 +14,13 @@
 		A10000000000000000000002 /* AppRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000002 /* AppRootView.swift */; };
 		A10000000000000000000004 /* MainTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000006 /* MainTabView.swift */; };
 		A10000000000000000000005 /* MelloTVAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000007 /* MelloTVAPI.swift */; };
-		A10000000000000000000006 /* APIModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000008 /* APIModels.swift */; };
-		A10000000000000000000007 /* ServerAddress.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000009 /* ServerAddress.swift */; };
-		A10000000000000000000008 /* MelloTVTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000000A /* MelloTVTheme.swift */; };
-		A10000000000000000000009 /* PosterTile.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000000B /* PosterTile.swift */; };
+				A10000000000000000000007 /* ServerAddress.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000009 /* ServerAddress.swift */; };
+				A10000000000000000000009 /* PosterTile.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000000B /* PosterTile.swift */; };
 		A1000000000000000000000A /* CatalogView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000000C /* CatalogView.swift */; };
 		A1000000000000000000000B /* CatalogStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000000D /* CatalogStore.swift */; };
 		A1000000000000000000000C /* SearchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000000E /* SearchView.swift */; };
 		A1000000000000000000000D /* TitleDetailSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000000F /* TitleDetailSheet.swift */; };
-		A10000000000000000000010 /* ProfilePersistence.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000011 /* ProfilePersistence.swift */; };
-		A10000000000000000000011 /* ProfileAvatarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000012 /* ProfileAvatarView.swift */; };
+				A10000000000000000000011 /* ProfileAvatarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000012 /* ProfileAvatarView.swift */; };
 		A10000000000000000000012 /* LandscapeCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000013 /* LandscapeCard.swift */; };
 		A10000000000000000000013 /* FeaturedCarouselView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000014 /* FeaturedCarouselView.swift */; };
 		A10000000000000000000014 /* EpisodeRowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000015 /* EpisodeRowView.swift */; };
@@ -39,34 +36,32 @@
 		A1000000000000000000001E /* PlaybackProgressTracker.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000001F /* PlaybackProgressTracker.swift */; };
 		A1000000000000000000001F /* ResumePlaybackHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000020 /* ResumePlaybackHelper.swift */; };
 		A10000000000000000000020 /* PlayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000021 /* PlayerView.swift */; };
-		A10000000000000000000098 /* PhosphorIcon.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000098 /* PhosphorIcon.swift */; };
-		A10000000000000000000099 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000099 /* Assets.xcassets */; };
+				A10000000000000000000099 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000099 /* Assets.xcassets */; };
 		A1000000000000000000009A /* AppIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000009A /* AppIcon.icon */; };
 		A1000000000000000000009B /* PlaybackTiming.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000009B /* PlaybackTiming.swift */; };
-		A1000000000000000000009C /* AppLinks.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000009C /* AppLinks.swift */; };
-		A1000000000000000000009D /* WelcomeOnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000009D /* WelcomeOnboardingView.swift */; };
+				A1000000000000000000009D /* WelcomeOnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000009D /* WelcomeOnboardingView.swift */; };
+		F10000000000000000000002 /* TactileNeumorphic.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000001 /* TactileNeumorphic.swift */; };
+		F10000000000000000000004 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000003 /* PrivacyInfo.xcprivacy */; };
+		E10000000000000000000003 /* MelloKit in Frameworks */ = {isa = PBXBuildFile; productRef = E10000000000000000000002 /* MelloKit */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		C20000000000000000000001 /* PlaybackSegments.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaybackSegments.swift; sourceTree = "<group>"; };
-        B20000000000000000000001 /* HeroSatinBackdrop.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MelloTV/DesignSystem/Effects/HeroSatinBackdrop.swift; sourceTree = SOURCE_ROOT; };
-        B20000000000000000000002 /* HeroSatin.metal */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.metal; path = MelloTV/DesignSystem/Effects/HeroSatin.metal; sourceTree = SOURCE_ROOT; };
+        B20000000000000000000001 /* HeroSatinBackdrop.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HeroSatinBackdrop.swift; sourceTree = "<group>"; };
+        B20000000000000000000002 /* HeroSatin.metal */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.metal; path = HeroSatin.metal; sourceTree = "<group>"; };
 		A20000000000000000000001 /* MelloTVApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MelloTVApp.swift; sourceTree = "<group>"; };
 		A20000000000000000000002 /* AppRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppRootView.swift; sourceTree = "<group>"; };
 		A20000000000000000000003 /* MelloTV.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MelloTV.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A20000000000000000000004 /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
 		A20000000000000000000006 /* MainTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainTabView.swift; sourceTree = "<group>"; };
 		A20000000000000000000007 /* MelloTVAPI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MelloTVAPI.swift; sourceTree = "<group>"; };
-		A20000000000000000000008 /* APIModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIModels.swift; sourceTree = "<group>"; };
 		A20000000000000000000009 /* ServerAddress.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerAddress.swift; sourceTree = "<group>"; };
-		A2000000000000000000000A /* MelloTVTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MelloTVTheme.swift; sourceTree = "<group>"; };
 		A2000000000000000000000B /* PosterTile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PosterTile.swift; sourceTree = "<group>"; };
 		A2000000000000000000000C /* CatalogView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CatalogView.swift; sourceTree = "<group>"; };
 		A2000000000000000000000D /* CatalogStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CatalogStore.swift; sourceTree = "<group>"; };
 		A2000000000000000000000E /* SearchView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchView.swift; sourceTree = "<group>"; };
 		A2000000000000000000000F /* TitleDetailSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TitleDetailSheet.swift; sourceTree = "<group>"; };
 		A20000000000000000000010 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
-		A20000000000000000000011 /* ProfilePersistence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfilePersistence.swift; sourceTree = "<group>"; };
 		A20000000000000000000012 /* ProfileAvatarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileAvatarView.swift; sourceTree = "<group>"; };
 		A20000000000000000000013 /* LandscapeCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LandscapeCard.swift; sourceTree = "<group>"; };
 		A20000000000000000000014 /* FeaturedCarouselView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeaturedCarouselView.swift; sourceTree = "<group>"; };
@@ -83,19 +78,36 @@
 		A2000000000000000000001F /* PlaybackProgressTracker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaybackProgressTracker.swift; sourceTree = "<group>"; };
 		A20000000000000000000020 /* ResumePlaybackHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResumePlaybackHelper.swift; sourceTree = "<group>"; };
 		A20000000000000000000021 /* PlayerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerView.swift; sourceTree = "<group>"; };
-		A20000000000000000000098 /* PhosphorIcon.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhosphorIcon.swift; sourceTree = "<group>"; };
 		A20000000000000000000099 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A2000000000000000000009A /* AppIcon.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = AppIcon.icon; sourceTree = "<group>"; };
 		A2000000000000000000009B /* PlaybackTiming.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaybackTiming.swift; sourceTree = "<group>"; };
-		A2000000000000000000009C /* AppLinks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppLinks.swift; sourceTree = "<group>"; };
 		A2000000000000000000009D /* WelcomeOnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WelcomeOnboardingView.swift; sourceTree = "<group>"; };
+		F10000000000000000000001 /* TactileNeumorphic.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TactileNeumorphic.swift; sourceTree = "<group>"; };
+		F10000000000000000000003 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 /* End PBXFileReference section */
+
+
+/* Begin XCLocalSwiftPackageReference section */
+		E10000000000000000000001 /* XCLocalSwiftPackageReference "../Packages/MelloKit" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = "../Packages/MelloKit";
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		E10000000000000000000002 /* MelloKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = E10000000000000000000001 /* XCLocalSwiftPackageReference "../Packages/MelloKit" */;
+			productName = MelloKit;
+		};
+/* End XCSwiftPackageProductDependency section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		A50000000000000000000002 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				E10000000000000000000003 /* MelloKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -105,8 +117,6 @@
 		A30000000000000000000001 = {
 			isa = PBXGroup;
 			children = (
-                B20000000000000000000001 /* HeroSatinBackdrop.swift */,
-                B20000000000000000000002 /* HeroSatin.metal */,
 				A30000000000000000000002 /* MelloTV */,
 				A20000000000000000000004 /* README.md */,
 				A30000000000000000000003 /* Products */,
@@ -117,8 +127,8 @@
 			isa = PBXGroup;
 			children = (
 				A30000000000000000000014 /* App */,
-				A30000000000000000000004 /* Core */,
-				A30000000000000000000008 /* DesignSystem */,
+				A30000000000000000000004 /* Services */,
+				A30000000000000000000008 /* UI */,
 				A3000000000000000000000B /* Features */,
 				A30000000000000000000013 /* Resources */,
 			);
@@ -133,49 +143,23 @@
 			name = Products;
 			sourceTree = "<group>";
 		};
-		A30000000000000000000004 /* Core */ = {
-			isa = PBXGroup;
-			children = (
-				A30000000000000000000005 /* API */,
-				A30000000000000000000006 /* Configuration */,
-				A30000000000000000000007 /* Persistence */,
-			);
-			path = Core;
-			sourceTree = "<group>";
-		};
-		A30000000000000000000005 /* API */ = {
+		A30000000000000000000004 /* Services */ = {
 			isa = PBXGroup;
 			children = (
 				A20000000000000000000007 /* MelloTVAPI.swift */,
-				A20000000000000000000008 /* APIModels.swift */,
-			);
-			path = API;
-			sourceTree = "<group>";
-		};
-		A30000000000000000000006 /* Configuration */ = {
-			isa = PBXGroup;
-			children = (
 				A20000000000000000000009 /* ServerAddress.swift */,
-				A2000000000000000000009C /* AppLinks.swift */,
 			);
-			path = Configuration;
+			path = Services;
 			sourceTree = "<group>";
 		};
-		A30000000000000000000007 /* Persistence */ = {
-			isa = PBXGroup;
-			children = (
-				A20000000000000000000011 /* ProfilePersistence.swift */,
-			);
-			path = Persistence;
-			sourceTree = "<group>";
-		};
-		A30000000000000000000008 /* DesignSystem */ = {
+		A30000000000000000000008 /* UI */ = {
 			isa = PBXGroup;
 			children = (
 				A30000000000000000000009 /* Components */,
-				A3000000000000000000000A /* Theme */,
+				D10000000000000000000001 /* Effects */,
+				D10000000000000000000002 /* Styles */,
 			);
-			path = DesignSystem;
+			path = UI;
 			sourceTree = "<group>";
 		};
 		A30000000000000000000009 /* Components */ = {
@@ -184,17 +168,25 @@
 				A2000000000000000000000B /* PosterTile.swift */,
 				A20000000000000000000012 /* ProfileAvatarView.swift */,
 				A20000000000000000000013 /* LandscapeCard.swift */,
-				A20000000000000000000098 /* PhosphorIcon.swift */,
 			);
 			path = Components;
 			sourceTree = "<group>";
 		};
-		A3000000000000000000000A /* Theme */ = {
+		D10000000000000000000001 /* Effects */ = {
 			isa = PBXGroup;
 			children = (
-				A2000000000000000000000A /* MelloTVTheme.swift */,
+				B20000000000000000000001 /* HeroSatinBackdrop.swift */,
+				B20000000000000000000002 /* HeroSatin.metal */,
 			);
-			path = Theme;
+			path = Effects;
+			sourceTree = "<group>";
+		};
+		D10000000000000000000002 /* Styles */ = {
+			isa = PBXGroup;
+			children = (
+				F10000000000000000000001 /* TactileNeumorphic.swift */,
+			);
+			path = Styles;
 			sourceTree = "<group>";
 		};
 		A3000000000000000000000B /* Features */ = {
@@ -287,6 +279,7 @@
 				A20000000000000000000010 /* Info.plist */,
 				A20000000000000000000099 /* Assets.xcassets */,
 				A2000000000000000000009A /* AppIcon.icon */,
+				F10000000000000000000003 /* PrivacyInfo.xcprivacy */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
@@ -317,6 +310,9 @@
 			dependencies = (
 			);
 			name = MelloTV;
+			packageProductDependencies = (
+				E10000000000000000000002 /* MelloKit */,
+			);
 			productName = MelloTV;
 			productReference = A20000000000000000000003 /* MelloTV.app */;
 			productType = "com.apple.product-type.application";
@@ -335,6 +331,9 @@
 					};
 				};
 			};
+			packageReferences = (
+				E10000000000000000000001 /* XCLocalSwiftPackageReference "../Packages/MelloKit" */,
+			);
 			buildConfigurationList = A60000000000000000000001 /* Build configuration list for PBXProject "MelloTV" */;
 			compatibilityVersion = "Xcode 14.0";
 			developmentRegion = en;
@@ -360,6 +359,7 @@
 			files = (
 				A10000000000000000000099 /* Assets.xcassets in Resources */,
 				A1000000000000000000009A /* AppIcon.icon in Resources */,
+				F10000000000000000000004 /* PrivacyInfo.xcprivacy in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -376,19 +376,14 @@
 				A10000000000000000000002 /* AppRootView.swift in Sources */,
 				A10000000000000000000004 /* MainTabView.swift in Sources */,
 				A10000000000000000000005 /* MelloTVAPI.swift in Sources */,
-				A10000000000000000000006 /* APIModels.swift in Sources */,
 				A10000000000000000000007 /* ServerAddress.swift in Sources */,
-				A1000000000000000000009C /* AppLinks.swift in Sources */,
-				A10000000000000000000008 /* MelloTVTheme.swift in Sources */,
 				A10000000000000000000009 /* PosterTile.swift in Sources */,
 				A1000000000000000000000A /* CatalogView.swift in Sources */,
 				A1000000000000000000000B /* CatalogStore.swift in Sources */,
 				A1000000000000000000000C /* SearchView.swift in Sources */,
 				A1000000000000000000000D /* TitleDetailSheet.swift in Sources */,
-				A10000000000000000000010 /* ProfilePersistence.swift in Sources */,
 				A10000000000000000000011 /* ProfileAvatarView.swift in Sources */,
 				A10000000000000000000012 /* LandscapeCard.swift in Sources */,
-				A10000000000000000000098 /* PhosphorIcon.swift in Sources */,
 				A10000000000000000000013 /* FeaturedCarouselView.swift in Sources */,
 				A10000000000000000000014 /* EpisodeRowView.swift in Sources */,
 				A10000000000000000000015 /* ProfileStore.swift in Sources */,
@@ -406,6 +401,7 @@
 				A1000000000000000000001E /* PlaybackProgressTracker.swift in Sources */,
 				A1000000000000000000001F /* ResumePlaybackHelper.swift in Sources */,
 				A10000000000000000000020 /* PlayerView.swift in Sources */,
+				F10000000000000000000002 /* TactileNeumorphic.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -1,4 +1,5 @@
 import SwiftUI
+import MelloKit
 
 struct ProfilePageView: View {
     @Bindable var profileStore: ProfileStore
@@ -429,17 +430,16 @@ struct ProfilePageView: View {
             .accessibilityValue(appearanceMode.rawValue)
 
             Button {
-                openURL(AppLinks.buyMeACoffeeURL)
+                openURL(AppLinks.githubURL)
             } label: {
                 HStack(spacing: 10) {
-                    Image(systemName: "cup.and.saucer.fill")
-                        .font(.system(size: 14, weight: .semibold))
+                    PhosphorIcon("star", size: 14, weight: .bold)
                         .foregroundStyle(Color(red: 1.0, green: 0.84, blue: 0.1))
-                    Text("Buy Me a Coffee")
+                    Text("GitHub Project")
                         .font(.subheadline.weight(.medium))
                         .foregroundStyle(MelloTVTheme.text)
                     Spacer(minLength: 8)
-                    Text("Support Mello TV")
+                    Text("Star on GitHub")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(Color(red: 1.0, green: 0.84, blue: 0.1))
                     PhosphorIcon("caret-right", size: 11, weight: .bold)
@@ -450,7 +450,7 @@ struct ProfilePageView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Buy Me a Coffee, Support Mello TV")
+            .accessibilityLabel("GitHub Project, Star on GitHub")
 
             Button {
                 openURL(URL(string: "https://www.themoviedb.org/")!)

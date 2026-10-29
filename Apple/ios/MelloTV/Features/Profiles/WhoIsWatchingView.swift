@@ -1,4 +1,5 @@
 import SwiftUI
+import MelloKit
 
 struct WhoIsWatchingView: View {
     @Bindable var profileStore: ProfileStore

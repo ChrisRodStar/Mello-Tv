@@ -1,5 +1,6 @@
 import Foundation
 import AVFoundation
+import MelloKit
 private final class PrivateAPIDelegate: NSObject, URLSessionTaskDelegate, Sendable {
     func urlSession(_ session: URLSession, task: URLSessionTask,
                     willPerformHTTPRedirection response: HTTPURLResponse,

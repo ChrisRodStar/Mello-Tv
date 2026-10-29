@@ -1,4 +1,5 @@
 import SwiftUI
+import MelloKit
 
 /// A 3D showroom stage hero carousel inspired by multi-car showroom platforms.
 /// Four visible depth layers with gentle, centered perspective and graduated lighting.

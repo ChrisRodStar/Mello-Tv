@@ -1,6 +1,7 @@
 import Foundation
 import AVFoundation
 import SwiftUI
+import MelloKit
 
 // Compile this harness with the production API, preparation service and models.
 // Every HTTP request is intercepted: no household server or provider is used.

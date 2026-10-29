@@ -1,5 +1,6 @@
 import Foundation
 import OSLog
+import MelloKit
 
 // Diagnostic context only: never used for playback identity or authorization.
 // Fixed stage/action vocabulary and numeric fields keep grants, URLs, profile

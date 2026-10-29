@@ -1,4 +1,5 @@
 import SwiftUI
+import MelloKit
 
 /// Shared Continue Watching poster. Artwork plays; the info control opens details.
 struct LandscapeCard: View {

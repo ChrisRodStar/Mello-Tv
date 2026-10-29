@@ -1,5 +1,6 @@
 import SwiftUI
 import OSLog
+import MelloKit
 
 @main
 struct MelloTVApp: App {
