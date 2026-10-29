@@ -104,4 +104,15 @@ final class MelloKitTests: XCTestCase {
         XCTAssertEqual(AppearanceMode.light.iconName, "sun")
         XCTAssertEqual(AppearanceMode.dark.iconName, "moon")
     }
+
+    func testThemeTokens() {
+        // Verify iOS-standardized surfaces and tokens
+        XCTAssertNotNil(MelloTVTheme.background)
+        XCTAssertNotNil(MelloTVTheme.card)
+        XCTAssertNotNil(MelloTVTheme.cardBackground)
+        XCTAssertNotNil(MelloTVTheme.border)
+        XCTAssertNotNil(MelloTVTheme.text)
+        XCTAssertNotNil(MelloTVTheme.accent)
+        XCTAssertNotNil(MelloTVTheme.accentGlow)
+    }
 }

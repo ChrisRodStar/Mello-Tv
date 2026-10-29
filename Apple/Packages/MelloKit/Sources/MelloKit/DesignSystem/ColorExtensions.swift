@@ -33,16 +33,21 @@ public extension Color {
         )
     }
 
-    static func dynamic(lightHex: String, darkHex: String) -> Color {
+    static func dynamic(
+        lightHex: String,
+        lightAlpha: CGFloat = 1.0,
+        darkHex: String,
+        darkAlpha: CGFloat = 1.0
+    ) -> Color {
         #if canImport(AppKit)
         return Color(nsColor: NSColor(name: nil, dynamicProvider: { appearance in
             let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-            return NSColor(hex: isDark ? darkHex : lightHex)
+            return NSColor(hex: isDark ? darkHex : lightHex, alpha: isDark ? darkAlpha : lightAlpha)
         }))
         #elseif canImport(UIKit)
         return Color(uiColor: UIColor { traitCollection in
             let isDark = traitCollection.userInterfaceStyle == .dark
-            return UIColor(hex: isDark ? darkHex : lightHex)
+            return UIColor(hex: isDark ? darkHex : lightHex, alpha: isDark ? darkAlpha : lightAlpha)
         })
         #else
         return Color(hex: lightHex)
