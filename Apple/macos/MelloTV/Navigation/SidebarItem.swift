@@ -36,3 +36,4 @@ final class SidebarNavigationModel: ObservableObject {
 
 typealias DesktopDestination = SidebarItem
 typealias DesktopNavigation = SidebarNavigationModel
+

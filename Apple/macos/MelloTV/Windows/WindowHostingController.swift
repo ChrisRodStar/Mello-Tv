@@ -31,3 +31,4 @@ final class WindowHostingController<Content: View>: NSViewController {
 }
 
 typealias WindowContentController = WindowHostingController
+

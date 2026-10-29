@@ -50,3 +50,4 @@ __pycache__/
 # Local deployment tooling
 /deploy/
 /Local/
+**/MelloTV-old/

@@ -16,3 +16,4 @@ enum WindowConfiguration {
 }
 
 typealias WindowSizing = WindowConfiguration
+
