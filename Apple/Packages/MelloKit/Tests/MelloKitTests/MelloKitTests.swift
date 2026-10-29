@@ -115,4 +115,68 @@ final class MelloKitTests: XCTestCase {
         XCTAssertNotNil(MelloTVTheme.accent)
         XCTAssertNotNil(MelloTVTheme.accentGlow)
     }
+
+    func testUpdateReadinessDecoding() throws {
+        let json = #"{"safe_to_restart": true}"#.data(using: .utf8)!
+        let readiness = try JSONDecoder().decode(UpdateReadiness.self, from: json)
+        XCTAssertTrue(readiness.safeToRestart)
+
+        let blockedJson = #"{"safe_to_restart": false}"#.data(using: .utf8)!
+        let blocked = try JSONDecoder().decode(UpdateReadiness.self, from: blockedJson)
+        XCTAssertFalse(blocked.safeToRestart)
+    }
+
+    func testProfilePersistence() {
+        let url = URL(string: "http://192.168.1.50:8080")!
+        let expectedKey = "family-stream.active-profile.v3.192.168.1.50:8080"
+        XCTAssertEqual(ProfilePersistence.storageKey(for: url), expectedKey)
+
+        ProfilePersistence.setActiveProfileID("test-profile-123", for: url)
+        XCTAssertEqual(ProfilePersistence.activeProfileID(for: url), "test-profile-123")
+
+        ProfilePersistence.setActiveProfileID(nil, for: url)
+        XCTAssertNil(ProfilePersistence.activeProfileID(for: url))
+    }
+
+    func testAPIError() {
+        let busyError = APIError.service(status: 503, code: "playback_busy", message: "Playback is busy")
+        XCTAssertTrue(busyError.isRetryablePlayback)
+        XCTAssertFalse(busyError.isExpiredPlayback)
+
+        let expiredError = APIError.service(status: 401, code: "session_expired", message: "Session expired")
+        XCTAssertTrue(expiredError.isExpiredPlayback)
+        XCTAssertFalse(expiredError.isRetryablePlayback)
+
+        let connError = APIError.connection("Failed to reach server")
+        XCTAssertTrue(connError.isRetryablePlayback)
+        XCTAssertEqual(connError.errorDescription, "Failed to reach server")
+
+        let notFoundError = APIError.serverStatus(404)
+        XCTAssertEqual(notFoundError.errorDescription, "This item isn’t cached yet. Try again shortly.")
+    }
+
+    func testTimeFormatting() {
+        // Uptime
+        XCTAssertEqual(TimeFormatting.formatUptime(45), "45s")
+        XCTAssertEqual(TimeFormatting.formatUptime(125), "2m 5s")
+        XCTAssertEqual(TimeFormatting.formatUptime(3665), "1h 1m")
+        XCTAssertEqual(TimeFormatting.formatUptime(90000), "1d 1h")
+
+        // Duration
+        XCTAssertEqual(TimeFormatting.formatDuration(0), "0:00")
+        XCTAssertEqual(TimeFormatting.formatDuration(65), "1:05")
+        XCTAssertEqual(TimeFormatting.formatDuration(3665), "1:01:05")
+
+        // Remaining
+        XCTAssertEqual(TimeFormatting.formatRemaining(position: 100, duration: 200), "2m")
+        XCTAssertEqual(TimeFormatting.formatRemaining(position: 200, duration: 200), "<1m")
+        XCTAssertEqual(TimeFormatting.formatRemaining(position: 0, duration: 7200), "2h 0m")
+    }
+
+    func testPhosphorWeights() {
+        XCTAssertEqual(PhosphorWeight.allCases.count, 3)
+        XCTAssertEqual(PhosphorWeight.regular.rawValue, "regular")
+        XCTAssertEqual(PhosphorWeight.bold.rawValue, "bold")
+        XCTAssertEqual(PhosphorWeight.fill.rawValue, "fill")
+    }
 }
