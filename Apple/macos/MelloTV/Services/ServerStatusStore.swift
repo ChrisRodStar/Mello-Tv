@@ -9,6 +9,8 @@ final class ServerStatusStore: ObservableObject {
     @Published private(set) var isRefreshing = false
     @Published private(set) var error: String?
     @Published private(set) var activeStreams: Int?
+    @Published private(set) var watching: [WatchingActivity]?
+    @Published private(set) var profileNames: [String: String] = [:]
     @Published private(set) var userCount: Int?
     private let port: Int
     private var monitor: Task<Void, Never>?
@@ -32,7 +34,9 @@ final class ServerStatusStore: ObservableObject {
         startupBeganAt = isRunning ? Date() : nil
         snapshot = nil
         error = nil
+        watching = nil
         activeStreams = nil
+        profileNames = [:]
         userCount = nil
         if monitor != nil {
             stop()
@@ -48,7 +52,7 @@ final class ServerStatusStore: ObservableObject {
                 await self.refresh()
                 // A launched process may still be opening its HTTP listener.
                 // Recover promptly instead of leaving the dashboard disconnected for 15 seconds.
-                let interval: UInt64 = self.isReachable || !self.serverIsRunning ? 15_000_000_000 : 1_000_000_000
+                let interval: UInt64 = self.isReachable || !self.serverIsRunning ? 5_000_000_000 : 1_000_000_000
                 do { try await Task.sleep(nanoseconds: interval) }
                 catch { return }
             }
@@ -76,6 +80,7 @@ final class ServerStatusStore: ObservableObject {
             guard !Task.isCancelled, generation == serverGeneration else { return }
             guard isListening else { throw URLError(.cannotConnectToHost) }
             async let activity = fetchPlaybackActivity()
+            async let streams = fetchActiveStreams()
             async let profiles = fetchUserCount()
             let url = AppLinks.clientURL(port: port).appendingPathComponent("api/v1/status")
             let request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 6)
@@ -86,13 +91,17 @@ final class ServerStatusStore: ObservableObject {
             decoder.keyDecodingStrategy = .convertFromSnakeCase
             snapshot = try decoder.decode(ServerSnapshot.self, from: data)
             error = nil
-            let (streamCount, profileCount) = await (activity, profiles)
+            let (sessions, profileReply, streamCount) = await (activity, profiles, streams)
             guard !Task.isCancelled, generation == serverGeneration else { return }
+            watching = sessions
             activeStreams = streamCount
-            userCount = profileCount
+            userCount = profileReply?.profiles.count
+            profileNames = Dictionary(profileReply?.profiles.map { ($0.id, $0.name) } ?? [], uniquingKeysWith: { first, _ in first })
         } catch {
             guard !Task.isCancelled, generation == serverGeneration else { return }
+            watching = nil
             activeStreams = nil
+            profileNames = [:]
             userCount = nil
             if hasConnected {
                 self.error = "Lost connection to the local server."
@@ -104,42 +113,60 @@ final class ServerStatusStore: ObservableObject {
         }
     }
 
-    private func fetchUserCount() async -> Int? {
+    private func fetchUserCount() async -> ProfileCountReply? {
         let url = AppLinks.clientURL(port: port).appendingPathComponent("api/v1/profiles")
         let request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 3)
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
             guard !Task.isCancelled, (response as? HTTPURLResponse)?.statusCode == 200 else { return nil }
-            return try JSONDecoder().decode(ProfileCountReply.self, from: data).profiles.count
+            return try JSONDecoder().decode(ProfileCountReply.self, from: data)
         } catch { return nil }
     }
 
-    private func fetchPlaybackActivity() async -> Int? {
+    private func fetchActiveStreams() async -> Int? {
         let url = AppLinks.clientURL(port: port).appendingPathComponent("api/v1/update-readiness")
         let request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 3)
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
             guard !Task.isCancelled, (response as? HTTPURLResponse)?.statusCode == 200 else { return nil }
-            let activity = try JSONDecoder().decode(PlaybackActivity.self, from: data)
-            return activity.activeStreams >= 0 ? activity.activeStreams : nil
-        } catch {
-            // Missing activity must not make an otherwise available server look offline.
-            return nil
-        }
+            let reply = try JSONDecoder().decode(RelayActivity.self, from: data)
+            return reply.activeStreams >= 0 ? reply.activeStreams : nil
+        } catch { return nil }
+    }
+
+    private func fetchPlaybackActivity() async -> [WatchingActivity]? {
+        let url = AppLinks.clientURL(port: port).appendingPathComponent("api/v1/playback-activity")
+        let request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 3)
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard !Task.isCancelled, (response as? HTTPURLResponse)?.statusCode == 200 else { return nil }
+            let decoder = JSONDecoder()
+            decoder.keyDecodingStrategy = .convertFromSnakeCase
+            return try decoder.decode([WatchingActivity].self, from: data)
+        } catch { return nil }
     }
 }
 
 private struct ProfileCountReply: Decodable {
-    struct Identity: Decodable { let id: String }
+    struct Identity: Decodable { let id: String; let name: String }
     let profiles: [Identity]
 }
 
-private struct PlaybackActivity: Decodable {
+private struct RelayActivity: Decodable {
     let activeStreams: Int
+    enum CodingKeys: String, CodingKey { case activeStreams = "active_streams" }
+}
 
-    enum CodingKeys: String, CodingKey {
-        case activeStreams = "active_streams"
-    }
+struct WatchingActivity: Decodable, Identifiable {
+    let sessionId: String
+    let profileId: String
+    let title: String
+    let season: Int?
+    let episode: Int?
+    let state: String
+    let positionSeconds: Double
+    let durationSeconds: Double?
+    var id: String { sessionId }
 }
 
 private enum LocalServerListener {

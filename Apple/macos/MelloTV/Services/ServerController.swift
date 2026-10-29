@@ -2,10 +2,17 @@ import Cocoa
 
 @MainActor
 final class ServerController {
+    static let keepAwakeKey = "mellotv.native.keepAwake"
     let port: Int
     let state = ServerProcessState()
     var onStateChange: ((Bool) -> Void)?
     private var serverProcess: Process?
+    private var intentionalStopProcess: Process?
+    private var restartGeneration = 0
+    private var consecutiveFailures = 0
+    private var launchedAt: Date?
+    private var awakeActivity: NSObjectProtocol?
+    private var preferencesObserver: NSObjectProtocol?
     // The write end stays in the app. Even Xcode's force-stop closes it,
     // allowing the child to detect owner death without an app termination callback.
     private var serverLifetimePipe: Pipe?
@@ -21,20 +28,30 @@ final class ServerController {
         let paths = ServerPaths()
         dataDirectoryURL = paths.dataDirectory
         logsDirectoryURL = paths.logsDirectory
+        preferencesObserver = NotificationCenter.default.addObserver(forName: UserDefaults.didChangeNotification,
+            object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in self?.updateAwakeActivity() }
+        }
     }
 
     private func setRunning(_ running: Bool) {
         state.isRunning = running
+        updateAwakeActivity()
         if running { startBonjourBroadcast() } else { stopBonjourBroadcast() }
         onStateChange?(running)
     }
 
     func restart() {
-        stop(waitTimeout: 2)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in self?.start() }
+        guard stopAndConfirm(waitTimeout: 2) else { return }
+        let generation = restartGeneration
+        state.isRestarting = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+            guard let self, self.restartGeneration == generation else { return }
+            self.start()
+        }
     }
 
-    func toggle() { if isRunning { stop() } else { start() } }
+    func toggle() { if isRunning || state.isRestarting { stop() } else { start() } }
 
     func openDataDirectory() {
         NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: dataDirectoryURL.path)
@@ -109,6 +126,13 @@ final class ServerController {
     }
     
     func start() {
+        restartGeneration += 1
+        consecutiveFailures = 0
+        state.isRestarting = false
+        startProcess()
+    }
+
+    private func startProcess() {
         guard serverProcess?.isRunning != true else { return }
         
         guard let serverBinary = locateServerBinary() else {
@@ -118,6 +142,7 @@ final class ServerController {
             alert.informativeText = "Could not find the Mello TV server inside the app bundle or workspace."
             alert.alertStyle = .critical
             alert.runModal()
+            state.message = "Server binary missing. Reinstall Mello TV."
             setRunning(false)
             return
         }
@@ -172,6 +197,28 @@ final class ServerController {
                 try? self.logFileHandle?.close()
                 self.logFileHandle = nil
                 self.setRunning(false)
+                if self.intentionalStopProcess === proc {
+                    self.intentionalStopProcess = nil
+                    return
+                }
+                if let launchedAt = self.launchedAt, Date().timeIntervalSince(launchedAt) >= 300 {
+                    self.consecutiveFailures = 0
+                }
+                self.consecutiveFailures += 1
+                let attempt = self.consecutiveFailures
+                guard attempt <= 3 else {
+                    self.state.message = "Server stopped after repeated unexpected exits. Open logs for details."
+                    return
+                }
+                let delay = pow(2.0, Double(attempt - 1))
+                self.state.isRestarting = true
+                self.state.message = "Server stopped unexpectedly. Restarting (\(attempt) of 3)…"
+                let generation = self.restartGeneration
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                    guard let self, self.restartGeneration == generation else { return }
+                    self.state.isRestarting = false
+                    self.startProcess()
+                }
             }
         }
         
@@ -179,6 +226,8 @@ final class ServerController {
             try process.run()
             self.serverProcess = process
             self.serverLifetimePipe = lifetimePipe
+            self.launchedAt = Date()
+            self.state.message = nil
             self.setRunning(true)
             NSLog("Mello TV: server process launched (PID \(process.processIdentifier))")
         } catch {
@@ -187,39 +236,68 @@ final class ServerController {
             try? logFileHandle?.close()
             logFileHandle = nil
             NSLog("Mello TV: failed to run the server: \(error)")
+            state.message = "Could not start the server. Open logs for details."
             setRunning(false)
         }
     }
     
     func stop(waitTimeout: TimeInterval = 2.0) {
+        _ = stopAndConfirm(waitTimeout: waitTimeout)
+    }
+
+    /// Returns true only after the child has exited; callers restoring data must
+    /// leave the data untouched if this returns false.
+    @discardableResult
+    func stopAndConfirm(waitTimeout: TimeInterval = 2.0) -> Bool {
+        restartGeneration += 1
+        consecutiveFailures = 0
+        state.message = nil
+        state.isRestarting = false
         guard let process = serverProcess, process.isRunning else {
+            serverProcess = nil
+            intentionalStopProcess = nil
             closeServerLifetimePipe()
+            try? logFileHandle?.close()
+            logFileHandle = nil
             setRunning(false)
-            return
+            return true
         }
-        
+        intentionalStopProcess = process
         let pid = process.processIdentifier
         NSLog("Mello TV: stopping server PID \(pid)")
-        
         kill(pid, SIGTERM)
-        
-        let deadline = Date().addingTimeInterval(waitTimeout)
-        while process.isRunning && Date() < deadline {
-            usleep(100_000) // 100ms
-        }
-        
+        let deadline = Date().addingTimeInterval(max(0, waitTimeout))
+        while process.isRunning && Date() < deadline { usleep(100_000) }
         if process.isRunning {
             NSLog("Mello TV: process did not exit in time, sending SIGKILL")
             kill(pid, SIGKILL)
+            let killDeadline = Date().addingTimeInterval(2)
+            while process.isRunning && Date() < killDeadline { usleep(100_000) }
         }
-        
-        self.serverProcess = nil
+        guard !process.isRunning else {
+            state.message = "The server could not be stopped. Try again before restoring data."
+            return false
+        }
+        serverProcess = nil
+        intentionalStopProcess = nil
         closeServerLifetimePipe()
         try? logFileHandle?.close()
-        self.logFileHandle = nil
+        logFileHandle = nil
         setRunning(false)
+        return true
     }
-    
+
+    private func updateAwakeActivity() {
+        let shouldStayAwake = state.isRunning && UserDefaults.standard.bool(forKey: Self.keepAwakeKey)
+        if shouldStayAwake && awakeActivity == nil {
+            awakeActivity = ProcessInfo.processInfo.beginActivity(options: .idleSystemSleepDisabled,
+                reason: "Keep the Mello TV server available")
+        } else if !shouldStayAwake, let awakeActivity {
+            ProcessInfo.processInfo.endActivity(awakeActivity)
+            self.awakeActivity = nil
+        }
+    }
+
     private func closeServerLifetimePipe() {
         try? serverLifetimePipe?.fileHandleForWriting.close()
         serverLifetimePipe = nil

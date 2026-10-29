@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import MelloKit
 
 struct OverviewView: View {
@@ -15,6 +16,7 @@ struct OverviewView: View {
     private var ready: Bool { online && catalogUsable && mediaReady }
 
     @Environment(\.colorScheme) private var colorScheme
+    @State private var showingWatching = false
 
     var body: some View {
         GeometryReader { viewport in
@@ -59,7 +61,7 @@ struct OverviewView: View {
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(MelloTVTheme.textSecondary)
                 Spacer()
-                if process.isRunning { serverControls }
+                if process.isRunning || process.isRestarting { serverControls }
             }
 
             VStack(alignment: .leading, spacing: compact ? 22 : 28) {
@@ -83,6 +85,21 @@ struct OverviewView: View {
             .padding(.horizontal, compact ? 4 : 8)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
 
+            if let sessions = model.watching, let first = sessions.first, online {
+                Button { showingWatching = true } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: "play.rectangle")
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Watching now · iPhone").font(.system(size: 10, weight: .medium)).foregroundStyle(MelloTVTheme.textSecondary)
+                            Text(activityDescription(first)).font(.system(size: 12, weight: .medium)).foregroundStyle(MelloTVTheme.text).lineLimit(1)
+                        }
+                        Spacer()
+                        if sessions.count > 1 { Text("+\(sessions.count - 1)").foregroundStyle(MelloTVTheme.textSecondary) }
+                    }.contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .popover(isPresented: $showingWatching) { watchingPopover(sessions) }
+            }
             systemRail
         }
         .padding(compact ? 26 : 34)
@@ -112,7 +129,7 @@ struct OverviewView: View {
 
     private var serverControls: some View {
         Button(action: actions.toggleServer) {
-            Label("Stop server", systemImage: "power")
+            Label(process.isRestarting ? "Cancel restart" : "Stop server", systemImage: "power")
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(MelloTVTheme.textSecondary)
                 .padding(.horizontal, 13)
@@ -126,7 +143,7 @@ struct OverviewView: View {
 
     @ViewBuilder
     private var primaryControl: some View {
-        if !process.isRunning {
+        if !process.isRunning && !process.isRestarting {
             overviewAction("Start server", symbol: "power", action: actions.toggleServer)
         } else if online {
             if !mediaReady || model.snapshot?.catalogStatus == "unavailable" {
@@ -220,13 +237,16 @@ struct OverviewView: View {
     }
 
     private var statusLabel: String {
-        if !process.isRunning { return "Server stopped" }
+        if process.isRestarting { return "Restarting server" }
+        if !process.isRunning { return process.message == nil ? "Server stopped" : "Server needs attention" }
         if model.isStarting { return "Starting server" }
         if online { return "Running on this Mac" }
         return model.hasConnected ? "Connection lost" : "Server not ready"
     }
 
     private var headline: String {
+        if process.isRestarting { return "Restarting\nyour server." }
+        if !process.isRunning && process.message != nil { return "Your server\nneeds attention." }
         if !process.isRunning { return "Your cinema,\non pause." }
         if model.isStarting { return "Starting up\nyour cinema." }
         if !online { return model.hasConnected ? "Let's reconnect\nyour cinema." : "Your server\nisn't ready." }
@@ -235,6 +255,8 @@ struct OverviewView: View {
     }
 
     private var detail: String {
+        if let message = process.message { return message }
+        if process.isRestarting { return "The server will start again shortly." }
         if !process.isRunning { return "Start your server to watch on your iPhone or in the web player." }
         if model.isStarting { return "Starting the server and getting your library ready." }
         if !online { return model.error ?? "Waiting for the local server." }
@@ -262,6 +284,39 @@ struct OverviewView: View {
         guard mediaReady else { return "Unavailable" }
         guard let count = model.activeStreams else { return "Unavailable" }
         return count == 0 ? "Idle" : "\(count) stream\(count == 1 ? "" : "s")"
+    }
+
+    private func activityDescription(_ activity: WatchingActivity) -> String {
+        let profile = model.profileNames[activity.profileId] ?? "iPhone"
+        let episode = activity.season.flatMap { season in activity.episode.map { " · S\(season) E\($0)" } } ?? ""
+        let status = activity.state.capitalized
+        return "\(profile) · \(activity.title)\(episode) · \(status)"
+    }
+
+    private func watchingPopover(_ sessions: [WatchingActivity]) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Watching now").font(.headline)
+            Text("Reported by Mello TV on iPhone").font(.caption).foregroundStyle(.secondary)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    ForEach(sessions) { activity in
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(activityDescription(activity)).font(.callout)
+                            Text(activityProgress(activity)).font(.caption).foregroundStyle(.secondary)
+                        }.frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+            }.frame(maxHeight: 240)
+        }.padding(16).frame(width: 330)
+    }
+
+    private func activityProgress(_ activity: WatchingActivity) -> String {
+        func clock(_ seconds: Double) -> String {
+            let value = Int(max(0, min(seconds, 864000)))
+            return value >= 3600 ? String(format: "%d:%02d:%02d", value / 3600, value / 60 % 60, value % 60)
+                : String(format: "%d:%02d", value / 60, value % 60)
+        }
+        return clock(activity.positionSeconds) + (activity.durationSeconds.map { " / " + clock($0) } ?? "")
     }
 
     private var libraryStatus: String {
@@ -313,5 +368,37 @@ struct OverviewPressStyle: ButtonStyle {
             .opacity(configuration.isPressed ? 0.78 : 1)
             .scaleEffect(configuration.isPressed && !reduceMotion ? 0.98 : 1)
             .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: configuration.isPressed)
+    }
+}
+
+/// A deliberately small report: no logs, addresses, profile names or credentials.
+struct ServerDiagnosticsButton: View {
+    @ObservedObject var process: ServerProcessState
+    let snapshot: ServerSnapshot?
+    @State private var presented = false
+    @State private var copied = false
+
+    private var report: String {
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Unknown"
+        let state = process.isRestarting ? "Restarting" : (process.isRunning ? "Running" : "Stopped")
+        let catalog = snapshot?.catalogStatus ?? "Unknown"
+        let media = snapshot.map { $0.media.configured ? "Available" : "Unavailable" } ?? "Unknown"
+        return "Mello TV \(version)\nmacOS \(ProcessInfo.processInfo.operatingSystemVersionString)\nServer: \(state)\nCatalog: \(catalog)\nPlayback engine: \(media)\n"
+    }
+
+    var body: some View {
+        Button("Diagnostics") { presented = true }
+            .popover(isPresented: $presented) {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Server diagnostics").font(.headline)
+                    Text(report).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
+                    Text("Excludes logs, addresses, profiles and credentials.").font(.caption).foregroundStyle(.secondary)
+                    Button(copied ? "Copied" : "Copy report") {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(report, forType: .string)
+                        copied = true
+                    }
+                }.padding(16).frame(width: 340, alignment: .leading)
+            }
     }
 }
