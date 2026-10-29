@@ -30,6 +30,7 @@ struct DesktopSidebarView: View {
                 ) {
                     NSWorkspace.shared.open(AppLinks.buyMeACoffeeURL)
                 }
+                .keyboardShortcut("4", modifiers: .command)
                 .help("Support Mello TV on Buy Me a Coffee")
 
                 SidebarRowButton(
@@ -38,6 +39,7 @@ struct DesktopSidebarView: View {
                     expanded: expanded,
                     action: actions.showWelcome
                 )
+                .keyboardShortcut("5", modifiers: .command)
 
                 Divider()
                     .overlay(MelloTVTheme.border)

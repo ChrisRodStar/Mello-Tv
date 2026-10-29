@@ -19,7 +19,7 @@ enum DesktopDestination: String, CaseIterable, Identifiable {
         case .overview: return "1"
         case .providers: return "2"
         case .network: return "3"
-        case .settings: return "4"
+        case .settings: return "6"
         }
     }
 }

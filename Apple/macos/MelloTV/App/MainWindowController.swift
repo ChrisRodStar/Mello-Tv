@@ -32,7 +32,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         sidebarButton.isBordered = false
         sidebarButton.bezelStyle = .regularSquare
         sidebarButton.contentTintColor = .secondaryLabelColor
-        sidebarButton.toolTip = "Toggle sidebar (⌃⌘S)"
+        sidebarButton.toolTip = "Toggle sidebar (⌘S)"
         sidebarButton.setAccessibilityLabel("Toggle sidebar")
         sidebarButton.frame = NSRect(x: 6, y: 0, width: 32, height: 28)
 

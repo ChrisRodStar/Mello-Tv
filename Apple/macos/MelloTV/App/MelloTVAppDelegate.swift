@@ -101,6 +101,8 @@ final class MelloTVAppDelegate: NSObject, NSApplicationDelegate {
     @objc private func showOverview() { mainWindow.present(destination: .overview) }
     @objc private func showProviders() { mainWindow.present(destination: .providers) }
     @objc private func showNetwork() { mainWindow.present(destination: .network) }
+    @objc private func showSupport() { NSWorkspace.shared.open(AppLinks.buyMeACoffeeURL) }
+    @objc private func showWelcome() { welcomeWindow.present() }
     @objc private func showSettings() { mainWindow.present(destination: .settings) }
     @objc private func toggleSidebar() { mainWindow.toggleSidebar() }
     @objc private func refreshStatus() { mainWindow.present() }
@@ -135,10 +137,12 @@ final class MelloTVAppDelegate: NSObject, NSApplicationDelegate {
         add("Overview", action: #selector(showOverview), key: "1", to: viewMenu)
         add("Providers", action: #selector(showProviders), key: "2", to: viewMenu)
         add("Network", action: #selector(showNetwork), key: "3", to: viewMenu)
-        add("Settings", action: #selector(showSettings), key: "4", to: viewMenu)
+        add("Support", action: #selector(showSupport), key: "4", to: viewMenu)
+        add("Welcome guide", action: #selector(showWelcome), key: "5", to: viewMenu)
+        add("Settings", action: #selector(showSettings), key: "6", to: viewMenu)
         viewMenu.addItem(.separator())
         let sidebar = add("Toggle Sidebar", action: #selector(toggleSidebar), key: "s", to: viewMenu)
-        sidebar.keyEquivalentModifierMask = [.command, .control]
+        sidebar.keyEquivalentModifierMask = .command
         add("Refresh Status", action: #selector(refreshStatus), key: "r", to: viewMenu)
         viewMenu.addItem(.separator())
         add("Open Website", action: #selector(openWebsite), key: "", to: viewMenu)
