@@ -1,27 +1,10 @@
-# Operating System Files
+# macOS metadata
 .DS_Store
-Thumbs.db
 
-# Environment and Secrets
-.env
-.env.*
-!.env.example
-!.env.sample
-!.env.template
-*.pem
-*.key
-secrets/
-*.secret
-
-# SQLite Databases & Local State
-*.sqlite
-*.sqlite-wal
-*.sqlite-shm
-*.sqlite-journal
-*.db
-*.db-wal
-*.db-shm
-*.db-journal
+# Local tooling and server state
+/deploy/
+/Local/
+/data/
 .local/
 
 # Dependencies and generated build output
@@ -35,13 +18,3 @@ target/
 DerivedData/
 xcuserdata/
 *.xcuserstate
-
-# Logs & Temp
-*.log
-tmp/
-__pycache__/
-*.pyc
-
-# Local deployment tooling
-/deploy/
-/Local/
