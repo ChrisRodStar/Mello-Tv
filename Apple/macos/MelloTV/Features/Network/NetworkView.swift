@@ -1,4 +1,5 @@
 import AppKit
+import CoreImage
 import Darwin
 import Network
 import SwiftUI
@@ -85,6 +86,7 @@ struct NetworkView: View {
     @StateObject private var status = NetworkStatusService()
     @State private var copiedAddress: String?
     @State private var copyGeneration = UUID()
+    @State private var qrAddress: NetworkAddress?
     @Environment(\.colorScheme) private var colorScheme
 
     private var addresses: [NetworkAddress] {
@@ -160,7 +162,13 @@ struct NetworkView: View {
             catch { return }
             copiedAddress = nil
         }
-        .onChange(of: online) { _ in copiedAddress = nil }
+        .onChange(of: online) { isOnline in
+            copiedAddress = nil
+            if !isOnline { qrAddress = nil }
+        }
+        .sheet(item: $qrAddress) { address in
+            AddressQRSheet(address: address)
+        }
     }
 
     private func introduction(compact: Bool) -> some View {
@@ -266,6 +274,20 @@ struct NetworkView: View {
             .buttonStyle(OverviewPressStyle())
             .accessibilityLabel("Copy \(address.kind) address")
             Button {
+                qrAddress = address
+            } label: {
+                Label("QR code", systemImage: "qrcode")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(MelloTVTheme.text)
+                    .padding(.horizontal, 12).frame(height: 32)
+                    .background(MelloTVTheme.cardHover, in: RoundedRectangle(cornerRadius: 10))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 10).strokeBorder(MelloTVTheme.subtleBorder, lineWidth: 1)
+                    }
+            }
+            .buttonStyle(OverviewPressStyle())
+            .accessibilityLabel("Show QR code for \(address.kind) address")
+            Button {
                 NSWorkspace.shared.open(address.url)
             } label: {
                 Image(systemName: "arrow.up.right")
@@ -308,4 +330,43 @@ struct NetworkView: View {
         .padding(.horizontal, 4)
     }
 
+}
+
+private struct AddressQRSheet: View {
+    let address: NetworkAddress
+    @Environment(\.dismiss) private var dismiss
+
+    private var qrImage: NSImage? {
+        guard let filter = CIFilter(name: "CIQRCodeGenerator") else { return nil }
+        filter.setValue(Data(address.id.utf8), forKey: "inputMessage")
+        filter.setValue("M", forKey: "inputCorrectionLevel")
+        guard let output = filter.outputImage?.transformed(by: CGAffineTransform(scaleX: 10, y: 10)),
+              let image = CIContext().createCGImage(output, from: output.extent) else { return nil }
+        return NSImage(cgImage: image, size: NSSize(width: 220, height: 220))
+    }
+
+    var body: some View {
+        VStack(spacing: 18) {
+            Text("Connect to Mello TV").font(.headline)
+            if let qrImage {
+                Image(nsImage: qrImage)
+                    .interpolation(.none)
+                    .resizable()
+                    .frame(width: 220, height: 220)
+                    .padding(16)
+                    .background(.white, in: RoundedRectangle(cornerRadius: 12))
+                    .accessibilityLabel("QR code for \(address.id)")
+            } else {
+                Text("QR code unavailable. Use the address below instead.")
+                    .font(.callout).foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+            Text(address.id).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
+            Text("Scan with your device’s camera to open this address in a browser. In the Mello TV app, enter the address when connecting.")
+                .font(.callout).foregroundStyle(.secondary)
+                .multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
+            Button("Done") { dismiss() }.keyboardShortcut(.defaultAction)
+        }
+        .padding(28).frame(width: 360)
+    }
 }
