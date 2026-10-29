@@ -148,7 +148,6 @@ struct NetworkView: View {
                                     radius: 18, y: 12)
                     }
                     thisMac
-                    connectionHelp
                 }
                 .padding(compact ? 26 : 34)
                 .frame(maxWidth: 960, alignment: .leading)
@@ -309,20 +308,4 @@ struct NetworkView: View {
         .padding(.horizontal, 4)
     }
 
-    private var connectionHelp: some View {
-        DisclosureGroup("Device can’t find your server?") {
-            VStack(alignment: .leading, spacing: 9) {
-                Text("At home, check that both devices use the same network. Guest Wi-Fi and VPN settings can prevent devices from reaching this Mac.")
-                Text("You can also enter an address manually in Mello TV’s server setup. Use the home address on your network, or the Tailscale address when away.")
-                Text("These are addresses reported by the server; availability from another device depends on that device’s connection and this Mac’s firewall settings.")
-            }
-            .font(.system(size: 11)).lineSpacing(3)
-            .fixedSize(horizontal: false, vertical: true)
-            .padding(.top, 10)
-        }
-        .font(.system(size: 11))
-        .foregroundStyle(MelloTVTheme.textSecondary)
-        .tint(MelloTVTheme.textSecondary)
-        .padding(.horizontal, 4)
-    }
 }
