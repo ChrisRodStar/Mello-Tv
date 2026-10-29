@@ -1,9 +1,12 @@
 use super::{DiscoveryCoordinator, DiscoveryError, DiscoveryProvider};
 use crate::prober::ProbeOptions;
-use chrono::Utc;
-use futures_util::{StreamExt, stream};
+use chrono::{DateTime, Utc};
+use futures_util::{StreamExt, future::BoxFuture, stream::FuturesUnordered};
 use semver::Version;
-use std::{sync::Arc, sync::atomic::Ordering, time::Duration};
+use std::{
+    sync::{Arc, atomic::Ordering},
+    time::{Duration, SystemTime},
+};
 use stream_core::{
     ports::media::ProviderHealth,
     providers::{
@@ -59,11 +62,24 @@ impl DiscoveryCoordinator {
         }
         let cancel = CancellationToken::new();
         let _cancel_on_drop = cancel.clone().drop_guard();
-        let reports = stream::iter(providers)
-            .map(|provider| self.check_health_sample(provider, cancel.child_token()))
-            .buffer_unordered(5)
-            .collect::<Vec<_>>()
-            .await;
+        let mut pending: FuturesUnordered<BoxFuture<'static, ProviderHealth>> =
+            FuturesUnordered::new();
+        let mut reports = Vec::with_capacity(providers.len());
+        for provider in providers {
+            let coordinator = self.clone();
+            let child = cancel.child_token();
+            pending.push(Box::pin(async move {
+                coordinator.check_health_sample(provider, child).await
+            }));
+            if pending.len() == 5
+                && let Some(report) = pending.next().await
+            {
+                reports.push(report);
+            }
+        }
+        while let Some(report) = pending.next().await {
+            reports.push(report);
+        }
         if self.inner.closed.load(Ordering::Acquire) {
             return Err(DiscoveryError::Closed);
         }
@@ -158,11 +174,12 @@ impl DiscoveryCoordinator {
                 Ok(Err(_)) => detail = "The provider could not resolve reference media.",
             }
         }
+        let checked_at: DateTime<Utc> = SystemTime::now().into();
         ProviderHealth {
             id: provider.id().to_string(),
             version: provider.version().to_string(),
             working,
-            checked_at: Utc::now().timestamp(),
+            checked_at: checked_at.timestamp(),
             elapsed_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
             samples_checked,
             detail: detail.into(),
