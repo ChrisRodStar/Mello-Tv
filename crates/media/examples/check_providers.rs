@@ -306,10 +306,11 @@ fn main() {
     let coordinator = stream_media::DiscoveryCoordinator::default_live(shutdown).unwrap();
     let host_rt = tokio::runtime::Runtime::new().unwrap();
     use stream_core::ports::MediaEngine;
-    let health = host_rt.block_on(async {
-        coordinator.check_provider_health().await.unwrap()
-    });
+    let health = host_rt.block_on(async { coordinator.check_provider_health().await.unwrap() });
     for h in health {
-        println!("HEALTH [{}]: working={}, detail={}", h.id, h.working, h.detail);
+        println!(
+            "HEALTH [{}]: working={}, detail={}",
+            h.id, h.working, h.detail
+        );
     }
 }

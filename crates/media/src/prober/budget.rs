@@ -164,11 +164,9 @@ mod tests {
             )
             .is_err()
         );
-        let prober = super::super::StreamProber::new(
-            transport,
-            super::super::ProbeLimits::default(),
-        )
-        .unwrap();
+        let prober =
+            super::super::StreamProber::new(transport, super::super::ProbeLimits::default())
+                .unwrap();
         let health = prober.health_probe();
         assert_eq!(health.limits.total_playlist_bytes, 2 * 1024 * 1024);
     }
