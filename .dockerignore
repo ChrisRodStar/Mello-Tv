@@ -1,4 +1,4 @@
-# Only build inputs enter the Docker context. Local state and deploy secrets stay out.
+# Only build inputs enter the Docker context. Local state and secrets stay out.
 **
 !Dockerfile
 !Cargo.toml
@@ -6,24 +6,8 @@
 !rust-toolchain.toml
 !crates/
 !crates/**
-!web/
-!web/package.json
-!web/bun.lock
-!web/index.html
-!web/tsconfig.json
-!web/vite.config.ts
-!web/src/
-!web/src/**
-!web/public/
-!web/public/**
-!docker/
-!docker/entrypoint.sh
 **/target
-**/node_modules
-**/dist
 **/.env*
-**/*.db*
-**/*.sqlite*
 **/*.pem
 **/*.key
 **/*.secret

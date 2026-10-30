@@ -874,7 +874,7 @@ fn validate_range(
 mod measurement_tests {
     use super::*;
     use bytes::Bytes;
-    use http::{HeaderMap, StatusCode};
+    use reqwest::{StatusCode, header::HeaderMap};
     use url::Url;
 
     fn response(body_bytes: usize, first_chunk_bytes: usize) -> ProbeResult<FetchResponse> {

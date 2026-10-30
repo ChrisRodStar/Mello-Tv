@@ -7,7 +7,7 @@
 
 use async_trait::async_trait;
 use bytes::Bytes;
-use http::StatusCode;
+use reqwest::StatusCode;
 use reqwest::header::HeaderMap;
 use semver::Version;
 use std::{

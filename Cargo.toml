@@ -1,13 +1,10 @@
 [workspace]
 members = [
     "crates/core",
-    "crates/storage",
     "crates/media",
     "crates/server",
     "crates/provider-sdk",
-    "crates/provider-runtime",
     "crates/provider-codecs",
-    "crates/update",
     "crates/provider-adapters",
 ]
 resolver = "3"
@@ -30,8 +27,6 @@ tokio = { version = "1.54.1", features = ["macros", "rt-multi-thread", "sync", "
 reqwest = { version = "0.13.5", default-features = false, features = ["rustls", "json", "socks", "stream", "http2"] }
 axum = { version = "0.8.9", default-features = false, features = ["http1", "json", "tokio"] }
 tracing = "0.1.44"
-rusqlite = { version = "0.41.0", default-features = false, features = ["bundled", "cache", "limits"] }
-aes-gcm = { version = "0.11.1", features = ["zeroize"] }
 getrandom = "0.4.3"
 zeroize = "1.9.1"
 bytes = "1.12.1"
@@ -42,13 +37,9 @@ sha2 = "0.11.1"
 aes = { version = "0.9.3", features = ["zeroize"] }
 cbc = { version = "0.2.1", features = ["alloc", "zeroize"] }
 rc4 = { version = "0.2.0", features = ["zeroize"] }
+aes-gcm = { version = "0.11.1", features = ["zeroize"] }
 chacha20 = { version = "0.10.2", features = ["zeroize"] }
-http = "1.5.0"
-wasmtime = { version = "50.0.0", default-features = false, features = ["async", "component-model", "cranelift", "runtime", "std"] }
-wat = "1.262.0"
 regex = "1.13.1"
-tough = { version = "0.24.0", default-features = false }
-tempfile = "3.27.0"
 crypto_secretbox = { version = "0.1.1", default-features = false, features = ["alloc", "salsa20"] }
 subtle = { version = "2.6.1", default-features = false }
 socket2 = "0.6"

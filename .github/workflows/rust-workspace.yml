@@ -14,9 +14,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  macos-workspace:
-    name: Rust (macOS)
-    runs-on: macos-latest
+  workspace:
+    name: Rust (Linux)
+    runs-on: ubuntu-latest
     env:
       CARGO_TERM_COLOR: always
       RUSTFLAGS: -Dwarnings
@@ -33,8 +33,5 @@ jobs:
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: Rust contracts and unit tests
         run: cargo test --workspace --locked
-      - name: Mac update readiness checks
-        if: runner.os == 'macOS'
-        run: |
-          swiftc Apple/macos/MelloTV/Services/Updates/UpdateReadinessProbe.swift Apple/macos/Tests/UpdateReadinessProbeTests.swift -o "$RUNNER_TEMP/update-readiness-tests"
-          "$RUNNER_TEMP/update-readiness-tests"
+      - name: Docker image builds
+        run: docker build --tag mello-jellyfin:ci .

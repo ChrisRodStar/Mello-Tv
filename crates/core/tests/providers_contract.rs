@@ -473,11 +473,4 @@ fn duplicate_identity_fields_are_rejected_across_contract_boundaries() {
     ] {
         assert!(serde_json::from_str::<ProviderTitle>(wire).is_err());
     }
-    // A flattened catalog identity must also reject ambiguous duplicate keys.
-    for wire in [
-        r#"{"type":"movie","type":"tv","id":100,"title":"Example","overview":"","rating":0,"details":true}"#,
-        r#"{"type":"movie","id":100,"id":200,"title":"Example","overview":"","rating":0,"details":true}"#,
-    ] {
-        assert!(serde_json::from_str::<stream_core::catalog::Title>(wire).is_err());
-    }
 }

@@ -29,7 +29,7 @@ use crate::{
     discovery::{
         DiscoveryCoordinator, DiscoveryError, DiscoveryLimits, DiscoveryProvider, ProviderCatalog,
     },
-    network::HttpClient,
+    network::{EgressMode, HttpClient, TransportConfig},
     prober::{ProbeLimits, StreamProber},
 };
 
@@ -203,8 +203,14 @@ pub struct NativeProviders {
 }
 
 impl NativeProviders {
-    pub fn new() -> Result<Self, DiscoveryError> {
-        let client = reqwest::Client::builder()
+    pub fn new(egress: &EgressMode) -> Result<Self, DiscoveryError> {
+        let mut builder = reqwest::Client::builder();
+        if let Some(endpoint) = egress.proxy() {
+            builder = builder.proxy(
+                reqwest::Proxy::all(endpoint.url().as_str()).map_err(|_| DiscoveryError::Closed)?,
+            );
+        }
+        let client = builder
             .redirect(reqwest::redirect::Policy::limited(5))
             .tcp_nodelay(true)
             .tcp_keepalive(Duration::from_secs(60))
@@ -297,10 +303,17 @@ impl ProviderCatalog for NativeProviders {
 }
 
 impl DiscoveryCoordinator {
-    pub fn default_live(shutdown: CancellationToken) -> Result<Self, DiscoveryError> {
-        let catalog = NativeProviders::new()?;
+    pub fn default_live(
+        shutdown: CancellationToken,
+        egress: EgressMode,
+    ) -> Result<Self, DiscoveryError> {
+        let catalog = NativeProviders::new(&egress)?;
         catalog.spawn_prewarm(shutdown);
-        let transport = HttpClient::new().map_err(|_| DiscoveryError::Closed)?;
+        let transport = HttpClient::with_config(TransportConfig {
+            egress,
+            ..TransportConfig::default()
+        })
+        .map_err(|_| DiscoveryError::Closed)?;
         let probe_limits = ProbeLimits {
             total_sample_bytes: 16 * 1024 * 1024,
             source_timeout: Duration::from_secs(6),

@@ -1,95 +1,146 @@
-<p align="center">
-  <img src="docs/assets/banner.svg" alt="Mello TV — Movies and TV on your own server" width="100%">
-</p>
+# mello-jellyfin
 
-<div align="center">
+Watch on-demand streams inside Jellyfin. Mello keeps a folder of `.strm`
+files that Jellyfin treats as a normal Movies/Shows library. When you press
+play, Mello finds a working source right then and relays it to Jellyfin.
 
-[![Version](https://img.shields.io/badge/version-v0.1.0--alpha.3-e50914?style=for-the-badge)](https://github.com/ChrisRodStar/Mello-Tv/releases)
-[![Stars](https://img.shields.io/github/stars/ChrisRodStar/Mello-Tv?style=for-the-badge&color=gold)](https://github.com/ChrisRodStar/Mello-Tv/stargazers)
-[![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20iOS%20%7C%20Web%20%7C%20Docker-blue?style=for-the-badge)](#get-started)
-[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-Donate-yellow?style=for-the-badge&logo=buy-me-a-coffee)](https://buymeacoffee.com/chrissinclair)
-
-</div>
-
-### Why I Built Melo TV
-
-I built Mello TV because free movie sites suck. You sit down to watch one episode before bed. Ten minutes later, you've closed six tabs, dodged three fake download buttons, and somehow won an iPhone you never asked for. The episode still hasn't started. I wanted to watch a show, not fight the website. So I built Mello TV. It finds the videos and plays them right in the app. Run it on your Mac or with Docker, open it on your iPhone or in your browser, and pick something to watch.
-
-<div align="center">
-
-## Get started
-
-</div>
-
-### Mac
-
-1. Download the Mac app from [Releases](https://github.com/ChrisRodStar/Mello-Tv/releases).
-2. Drag **Mello TV** into your Applications folder and open it.
-3. Open **http://localhost:8080** and create a profile.
-
-### iPhone
-
-Download the iPhone app from [Releases](https://github.com/ChrisRodStar/Mello-Tv/releases) and sideload it onto your phone. Open it while connected to the same Wi-Fi as your server.
-
-### Docker
-
-Install and start Docker, then download or clone this repository. Use this `compose.yaml` in the project folder:
-
-```yaml
-services:
-  mello:
-    image: mello-tv:local
-    build: .
-    ports:
-      - "8080:8080"
-    volumes:
-      - mello-data:/data
-    restart: unless-stopped
-    init: true
-    read_only: true
-    tmpfs:
-      - /tmp:rw,noexec,nosuid,size=64m,mode=1777
-    logging:
-      driver: local
-      options:
-        max-size: "10m"
-        max-file: "3"
-    stop_grace_period: 30s
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-
-volumes:
-  mello-data:
+```
+Jellyfin app ──play──▶ Jellyfin ──opens .strm──▶ Mello /play/... ──finds a source──▶ provider sites
+     ▲                                              │
+     └──────────── video via Mello /stream/... ◀────┘
 ```
 
-Start Mello TV:
+- **No transcoding in Mello.** It only passes bytes through. Jellyfin handles
+  transcoding when a client needs it.
+- **Library sync.** You choose titles (by TMDB ID, from TMDB lists, or from
+  trending/popular collections). Mello writes the `.strm` tree, adds new
+  episodes as they air, removes what you drop, and can tell Jellyfin to rescan.
+- **Artwork and metadata** come from Jellyfin's own TMDB scraper, using the
+  `[tmdbid-…]` tag in each folder name.
+
+## Quick start (Docker on a Proxmox LXC or VM)
 
 ```sh
-docker compose up -d --build --wait
+git clone <this repo> mello && cd mello
+cp .env.example .env        # set MELLO_PUBLIC_URL and a TMDB key at minimum
+docker compose up -d --build
+docker compose exec mello cat /data/api-key   # your admin API key
 ```
 
-Open **http://localhost:8080**. On another device, use `http://SERVER-IP:8080`.
+The compose file also starts Jellyfin on port 8096. In Jellyfin, add:
 
-Your profiles, watch history, and saved titles stay in the `mello-data` volume when you update the container.
+| Library | Content type | Folder              |
+|---------|--------------|---------------------|
+| Movies  | Movies       | `/media/mello/movies` |
+| Shows   | Shows        | `/media/mello/shows`  |
 
-[More Docker options →](docs/DOCKER.md)
+If you already run Jellyfin, remove its service from `compose.yaml`, point
+`/library` at a host folder, and add that folder to your existing Jellyfin.
 
-> Run a VPN on the computer hosting Mello TV. Use your home network, or Tailscale when you're away.
+### Recommended Jellyfin settings for these libraries
 
----
+Opening a `.strm` file starts a real stream lookup, so turn off anything
+that opens every file in the background:
 
-<div align="center">
+- Library → **Trickplay image extraction**: off
+- Library → **Chapter image extraction**: off
+- Intro/credit detection plugins: exclude these libraries
 
-### Support Mello TV
+## Adding titles
 
-If you're using this and want to help support the project, drop a star on the repo or buy me a coffee!
+All API calls need the admin key, sent as `Authorization: Bearer <key>`
+(or `?key=<key>`).
 
-<br/>
+```sh
+KEY=$(docker compose exec mello cat /data/api-key)
+API=http://localhost:8080/api
 
-[![Buy Me A Coffee](https://img.buymeacoffee.com/button-api/?text=Buy%20me%20a%20coffee&emoji=☕&slug=chrissinclair&button_colour=FFDD00&font_colour=000000&font_family=Cookie&outline_colour=000000&coffee_colour=ffffff)](https://buymeacoffee.com/chrissinclair)
+curl -H "Authorization: Bearer $KEY" "$API/search?q=severance"   # find TMDB IDs
+curl -X POST   -H "Authorization: Bearer $KEY" $API/library/tv/95396     # add a show
+curl -X POST   -H "Authorization: Bearer $KEY" $API/library/movie/27205  # add a movie
+curl -X DELETE -H "Authorization: Bearer $KEY" $API/library/movie/27205  # remove
+curl           -H "Authorization: Bearer $KEY" $API/library              # list
+curl -X POST   -H "Authorization: Bearer $KEY" $API/library/sync         # sync now
+curl           -H "Authorization: Bearer $KEY" $API/status               # health and last sync
+```
 
-<sub>For personal home use. Metadata and posters provided by <a href="https://www.themoviedb.org">TMDB</a>.</sub>
+Changes are synced within a few seconds. Two hands-off options:
 
-</div>
+- `MELLO_TMDB_LISTS=12345,67890`: mirror public TMDB lists, which you can
+  edit from the TMDB app.
+- `MELLO_AUTO_LISTS=trending_movies:40,popular_tv:20`: keep rolling
+  collections.
+
+## Testing playback without Jellyfin
+
+```sh
+curl -H "Authorization: Bearer $KEY" $API/resolve/movie/27205
+curl -H "Authorization: Bearer $KEY" $API/resolve/tv/1399/1/1
+```
+
+The response shows which provider and quality were picked, plus a
+`stream_url` you can open in VLC.
+
+## Configuration
+
+Set these in `.env` (see `.env.example`).
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `MELLO_PUBLIC_URL` | `http://localhost:8080` | Base URL written into `.strm` files. Must be reachable by Jellyfin, and by Jellyfin apps if they direct-play. |
+| `TMDB_API_KEY` / `TMDB_READ_ACCESS_TOKEN` | – | Needed for library sync and search. |
+| `MELLO_API_KEY` | generated into `data/api-key` | Admin key for `/api`. |
+| `MELLO_MAX_HEIGHT` | `1080` | Highest quality to look for. |
+| `MELLO_AUDIO_LANGUAGES` | – | Preferred audio languages, e.g. `en`. |
+| `MELLO_PROXY` | – | `socks5://` or `http://` proxy for provider and stream traffic (e.g. a gluetun VPN container). |
+| `MELLO_AUTO_LISTS` | – | See above. |
+| `MELLO_TMDB_LISTS` | – | See above. |
+| `MELLO_SYNC_INTERVAL_HOURS` | `6` | Automatic re-sync interval. |
+| `MELLO_INCLUDE_SPECIALS` | `false` | Include Season 00. |
+| `JELLYFIN_URL` / `JELLYFIN_API_KEY` | – | Trigger a Jellyfin library scan after changes. |
+| `MELLO_HOST` / `MELLO_PORT` | `0.0.0.0` / `8080` | Listen address. |
+| `MELLO_DATA_DIR` / `MELLO_LIBRARY_DIR` | `./data` / `./library` | State and `.strm` output. |
+| `RUST_LOG` | `info` | Use `debug` to see each request. |
+
+## Security
+
+- **Two keys.** The `.strm` files hold a *play key*, which can only start
+  playback. The admin key, used for library changes and search, is never written
+  to disk outside `data/api-key`. Each playback gets its own random stream
+  token.
+- **The relay can only reach public internet addresses.** Playlist URIs and
+  redirects pointing at your LAN, localhost or cloud metadata IPs are refused.
+  Provider cookies are only sent to the site they belong to.
+- **Don't port-forward Mello.** Use your LAN or Tailscale. Set
+  `MELLO_BIND_ADDRESS` in `.env` to bind a single interface.
+- **Logs record paths only.** Keys and tokens in query strings are never logged.
+
+## Hardware
+
+Mello itself needs very little: 1 vCPU, ~256–512 MB RAM, and almost no disk.
+Building the image needs ~3–4 GB RAM. Bandwidth is the real limit: each stream
+passes through Mello, about 5–25 Mbps depending on quality. If Jellyfin has to
+transcode, give it CPU or pass an Intel iGPU through (`/dev/dri`).
+
+## Troubleshooting
+
+- **"no playable source"**: none of the providers had the title right now.
+  Failures are remembered for 60 s, so wait a minute before retrying.
+  `RUST_LOG=debug` shows per-provider detail.
+- **Plays in the browser but not on a TV app**: that app is trying to
+  direct-play `MELLO_PUBLIC_URL` and can't reach it. Use an address the app's
+  network can see.
+- **Nothing shows in Jellyfin**: check `GET /api/status` → `last_sync.failures`,
+  and make sure Jellyfin can read the library folder (`PUID`/`PGID`).
+
+## Development
+
+```sh
+cargo test --workspace
+cargo clippy --workspace --all-targets -- -D warnings
+TMDB_API_KEY=... cargo run -p stream-server
+```
+
+Crates: `server` (HTTP, library sync), `media` (provider racing, stream
+probing, relay), `provider-adapters` / `provider-codecs` (per-site logic),
+`core` (shared types).
