@@ -144,8 +144,12 @@ transcode, give it CPU or pass an Intel iGPU through (`/dev/dri`).
 - **Plays in the browser but not on a TV app**: that app is trying to
   direct-play `MELLO_PUBLIC_URL` and can't reach it. Use an address the app's
   network can see.
-- **Nothing shows in Jellyfin**: check `GET /api/status` → `last_sync.failures`,
-  and make sure Jellyfin can read the library folder (`PUID`/`PGID`).
+- **Nothing shows in Jellyfin**: `movies/` and `shows/` exist from the first
+  start but stay empty until you add titles (admin page, `POST /api/library/...`,
+  or `MELLO_AUTO_LISTS` / `MELLO_TMDB_LISTS`); the log says "the library is
+  empty" when that is the cause. Otherwise check `GET /api/status` →
+  `last_sync.failures` (a missing TMDB key shows up there), and make sure
+  Jellyfin can read the library folder (`PUID`/`PGID`).
 
 ## Development
 

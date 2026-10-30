@@ -140,7 +140,11 @@ impl Library {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => LibraryFile::default(),
             Err(e) => return Err(e),
         };
-        tokio::fs::create_dir_all(&config.library_dir).await?;
+        // Create both roots up front so they can be added to Jellyfin before
+        // the first title is synced.
+        for folder in ["movies", "shows"] {
+            tokio::fs::create_dir_all(config.library_dir.join(folder)).await?;
+        }
         let http = reqwest::Client::builder()
             .timeout(Duration::from_secs(15))
             .build()
@@ -330,6 +334,12 @@ impl Library {
                 .filter(|key| !manual_keys.contains(*key))
                 .cloned()
                 .collect();
+        }
+        if wanted.is_empty() && complete {
+            tracing::warn!(
+                "the library is empty: add titles on the admin page or with \
+                 POST /api/library/{{movie|tv}}/{{id}}, or set MELLO_AUTO_LISTS / MELLO_TMDB_LISTS"
+            );
         }
         let mut plan: BTreeMap<String, PlannedItem> = BTreeMap::new();
         let mut failed: BTreeSet<String> = BTreeSet::new();
@@ -872,6 +882,18 @@ mod tests {
         // Playing a manual title changes nothing.
         library.note_played(Kind::Movie, 27205).await;
         assert_eq!(library.entries().movies.len(), 1);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn library_roots_exist_before_any_title_is_added()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let data = tempfile::tempdir()?;
+        let root = tempfile::tempdir()?;
+        let config = test_config(data.path(), root.path());
+        let _library = Library::open(&config, Tmdb::new(None, None)?, "playkey").await?;
+        assert!(root.path().join("movies").is_dir());
+        assert!(root.path().join("shows").is_dir());
         Ok(())
     }
 
