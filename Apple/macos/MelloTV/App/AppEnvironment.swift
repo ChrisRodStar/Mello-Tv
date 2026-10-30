@@ -4,6 +4,7 @@ import Foundation
 struct AppEnvironment {
     let preferences: AppPreferences
     let updater: AppUpdateService
+    let backups: HouseholdBackupCoordinator
     let openSettings: () -> Void
     let openDashboard: () -> Void
     let toggleServer: () -> Void

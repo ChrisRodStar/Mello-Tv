@@ -15,6 +15,7 @@ struct SidebarView: View {
             VStack(alignment: .leading, spacing: 20) {
                 sidebarSection("Server") {
                     destinationButton(.overview)
+                    destinationButton(.users)
                     destinationButton(.providers)
                     destinationButton(.network)
                 }
@@ -31,7 +32,7 @@ struct SidebarView: View {
                 ) {
                     NSWorkspace.shared.open(AppLinks.buyMeACoffeeURL)
                 }
-                .keyboardShortcut("4", modifiers: .command)
+                .keyboardShortcut("5", modifiers: .command)
                 .help("Support Mello TV on Buy Me a Coffee")
 
                 SidebarRowButton(
@@ -40,7 +41,7 @@ struct SidebarView: View {
                     expanded: expanded,
                     action: actions.showWelcome
                 )
-                .keyboardShortcut("5", modifiers: .command)
+                .keyboardShortcut("6", modifiers: .command)
 
                 Divider()
                     .overlay(MelloTVTheme.border)

@@ -19,6 +19,8 @@ struct PlayerView: View {
     @State private var playbackQuality: PlaybackQuality = .automatic
     @State private var nextPreparation = NextEpisodePreparation()
     @State private var activePreparation: PreparedNextEpisode?
+    @State private var playbackSettings = ProfilePlaybackSettings()
+    @State private var settingsLoaded = false
 
     init(request: PlaybackRequest, onDismiss: @escaping () -> Void) {
         let timedRequest = request.timing == nil ? request.traced(.presentation) : request
@@ -29,16 +31,29 @@ struct PlayerView: View {
 
     var body: some View {
         ZStack {
-            PlaybackSessionView(request: activeRequest, playbackSpeed: $playbackSpeed, playbackQuality: $playbackQuality,
+            if settingsLoaded { PlaybackSessionView(request: activeRequest, settings: playbackSettings, playbackSpeed: $playbackSpeed, playbackQuality: $playbackQuality,
                             nextPreparation: nextPreparation, preparedEpisode: activePreparation,
                             onDismiss: onDismiss, onPlayEpisode: { next in
                                 activePreparation = nextPreparation.claim(for: next)
                                 activeRequest = next
                             })
-                .id(activeRequest.id)
+                .id(activeRequest.id) } else { ProgressView().tint(.white) }
         }
         .background { PlaybackLandscapeLock().allowsHitTesting(false) }
         .preferredColorScheme(.dark)
+        .task {
+            do {
+                playbackSettings = try await MelloTVAPI(baseURL: ServerAddress.baseURL).playbackSettings(profileID: request.profileID)
+            } catch {
+                var fallback = ProfilePlaybackSettings()
+                // Do not autoplay when the saved preference could not be read.
+                fallback.autoplayNext = false
+                playbackSettings = fallback
+            }
+            guard !Task.isCancelled else { return }
+            playbackQuality = PlaybackQuality(rawValue: playbackSettings.maxHeight) ?? .automatic
+            settingsLoaded = true
+        }
         .onDisappear { nextPreparation.cancel() }
     }
 }
@@ -46,6 +61,7 @@ struct PlayerView: View {
 @MainActor
 private struct PlaybackSessionView: View {
     let request: PlaybackRequest
+    let settings: ProfilePlaybackSettings
     @Binding var playbackSpeed: Float
     @Binding var playbackQuality: PlaybackQuality
     let nextPreparation: NextEpisodePreparation
@@ -891,7 +907,7 @@ private struct PlaybackSessionView: View {
                     .buttonStyle(.plain)
                     .animation(reduceMotion ? nil : .linear(duration: 1), value: nextEpisodeCountdownProgress)
                     .accessibilityLabel("Play next episode")
-                    .accessibilityValue(episodePrompt.hasNaturallyEarnedCountdown
+                    .accessibilityValue(settings.autoplayNext && episodePrompt.hasNaturallyEarnedCountdown
                         ? "Automatically playing in \(episodePrompt.secondsRemaining) seconds" : "")
                 }
             }
@@ -913,7 +929,7 @@ private struct PlaybackSessionView: View {
     }
 
     private var nextEpisodeCountdownProgress: CGFloat {
-        guard episodePrompt.hasNaturallyEarnedCountdown else { return 0 }
+        guard settings.autoplayNext, episodePrompt.hasNaturallyEarnedCountdown else { return 0 }
         return CGFloat(EpisodePromptState.countdownLength - episodePrompt.secondsRemaining)
             / CGFloat(EpisodePromptState.countdownLength)
     }
@@ -975,13 +991,13 @@ private struct PlaybackSessionView: View {
                       isPlaybackSceneActive, hasStartedPlayback, errorMessage == nil else { return }
                 guard episodePrompt.isVisible, (isPlaying || isAtNaturalEnd), !isLocked, activePanel == nil,
                       !isSeeking, seekQueue.pendingTarget == nil, !isAdjusting else { continue }
-                if isAtNaturalEnd, episodePrompt.hasNaturallyEarnedCountdown,
+                if settings.autoplayNext, isAtNaturalEnd, episodePrompt.hasNaturallyEarnedCountdown,
                    episodePrompt.secondsRemaining == 0 {
                     guard let nextEpisodeCandidate else { return }
                     playPreparedNext(nextEpisodeCandidate)
                     return
                 }
-                if episodePrompt.tick(), isAtNaturalEnd {
+                if settings.autoplayNext, episodePrompt.tick(), isAtNaturalEnd {
                     continue
                 }
             }
@@ -1688,6 +1704,7 @@ private struct PlaybackSessionView: View {
             subtitleGroup = subtitles
             if let audio {
                 let matching = audioTrackPreference.flatMap { preference in audio.options.first { trackPreferenceKey($0) == preference } }
+                    ?? audio.options.first { !settings.audioLanguage.isEmpty && $0.extendedLanguageTag?.lowercased().hasPrefix(settings.audioLanguage.lowercased()) == true }
                 if let matching {
                     item.select(matching, in: audio)
                     selectedAudio = matching
@@ -1699,11 +1716,12 @@ private struct PlaybackSessionView: View {
                 }
             }
             if let subtitles {
-                if subtitleOffSelected, subtitles.allowsEmptySelection {
+                if (subtitleOffSelected || (!settings.subtitlesEnabled && subtitleTrackPreference == nil)), subtitles.allowsEmptySelection {
                     item.select(nil, in: subtitles)
                     selectedSubtitle = nil
-                } else if let preference = subtitleTrackPreference,
-                          let matching = subtitles.options.first(where: { trackPreferenceKey($0) == preference }) {
+                } else if let matching = subtitleTrackPreference.flatMap({ preference in subtitles.options.first { trackPreferenceKey($0) == preference } })
+                            ?? subtitles.options.first(where: { settings.subtitlesEnabled && !settings.subtitleLanguage.isEmpty && $0.extendedLanguageTag?.lowercased().hasPrefix(settings.subtitleLanguage.lowercased()) == true })
+                            ?? (settings.subtitlesEnabled ? (item.currentMediaSelection.selectedMediaOption(in: subtitles) ?? subtitles.options.first) : nil) {
                     item.select(matching, in: subtitles)
                     selectedSubtitle = matching
                 } else {

@@ -3,6 +3,7 @@ import SwiftUI
 /// Sidebar destination item for macOS navigation.
 enum SidebarItem: String, CaseIterable, Identifiable {
     case overview = "Overview"
+    case users = "Users"
     case providers = "Providers"
     case network = "Network"
     case settings = "Settings"
@@ -14,6 +15,7 @@ enum SidebarItem: String, CaseIterable, Identifiable {
         case .overview: return "house"
         case .providers: return "square.stack.3d.up"
         case .network: return "network"
+        case .users: return "person.2"
         case .settings: return "gearshape"
         }
     }
@@ -21,9 +23,10 @@ enum SidebarItem: String, CaseIterable, Identifiable {
     var shortcut: KeyEquivalent {
         switch self {
         case .overview: return "1"
-        case .providers: return "2"
-        case .network: return "3"
-        case .settings: return "6"
+        case .providers: return "3"
+        case .network: return "4"
+        case .users: return "2"
+        case .settings: return "7"
         }
     }
 }

@@ -14,6 +14,8 @@ struct ProfilePageView: View {
     @State private var selectedTitleForDetails: MediaTitle?
     @State private var playbackRequest: PlaybackRequest?
     @State private var showPreferenceSetup = false
+    @State private var showPlaybackSettings = false
+    @State private var showRecommendationChoices = false
     @State private var resumeTask: Task<Void, Never>?
     @State private var resolvingItem: ProfileProgressID?
     @State private var selectedCollection: ProfileCollection = .continueWatching
@@ -67,6 +69,12 @@ struct ProfilePageView: View {
                 playbackRequest = nil
                 Task { await refreshLibrary() }
             })
+        }
+        .sheet(isPresented: $showRecommendationChoices) {
+            if let profile = profileStore.activeProfile { RecommendationChoicesEditor(profileID: profile.id) }
+        }
+        .sheet(isPresented: $showPlaybackSettings) {
+            if let profile = profileStore.activeProfile { PlaybackSettingsEditor(profileID: profile.id) }
         }
         .fullScreenCover(isPresented: $showPreferenceSetup) {
             if let profile = profileStore.activeProfile {
@@ -147,6 +155,12 @@ struct ProfilePageView: View {
                     }
                     .buttonStyle(.plain)
                     .accessibilityHint("Edit favorite titles and genres for recommendations")
+                    Button("Recommendation choices") { showRecommendationChoices = true }
+                        .font(.caption.weight(.medium)).foregroundStyle(MelloTVTheme.textSecondary)
+                        .frame(minHeight: 44)
+                    Button("Playback settings") { showPlaybackSettings = true }
+                        .font(.caption.weight(.medium)).foregroundStyle(MelloTVTheme.textSecondary)
+                        .frame(minHeight: 44)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -1000,4 +1014,125 @@ private struct ProfileHistoryDay: Identifiable {
     let date: Date?
     let items: [WatchProgress]
     var id: String { date.map { String($0.timeIntervalSince1970) } ?? "undated" }
+}
+
+private struct PlaybackSettingsEditor: View {
+    let profileID: String
+    @Environment(\.dismiss) private var dismiss
+    @State private var settings = ProfilePlaybackSettings()
+    @State private var originalSettings: ProfilePlaybackSettings?
+    @State private var loaded = false
+    @State private var saving = false
+    @State private var error: String?
+    private let api = MelloTVAPI(baseURL: ServerAddress.baseURL)
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Languages") {
+                    TextField("Audio language code (e.g. en)", text: $settings.audioLanguage)
+                        .textInputAutocapitalization(.never).autocorrectionDisabled()
+                    Toggle("Subtitles by default", isOn: $settings.subtitlesEnabled)
+                    TextField("Subtitle language code (e.g. en)", text: $settings.subtitleLanguage)
+                        .textInputAutocapitalization(.never).autocorrectionDisabled()
+                        .disabled(!settings.subtitlesEnabled)
+                }
+                Section("Playback") {
+                    Toggle("Autoplay next episode", isOn: $settings.autoplayNext)
+                    Picker("Default quality", selection: $settings.maxHeight) {
+                        Text("Auto").tag(0)
+                        Text("1080p").tag(1080)
+                        Text("720p").tag(720)
+                        Text("480p").tag(480)
+                        Text("360p").tag(360)
+                    }
+                }
+                if let error { Text(error).foregroundStyle(.red) }
+            }
+            .disabled(!loaded || saving)
+            .navigationTitle("Playback settings")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") { Task { await save() } }.disabled(!loaded || saving)
+                }
+            }
+            .task { do { let saved = try await api.playbackSettings(profileID: profileID); settings = saved; originalSettings = saved; loaded = true }
+                catch { self.error = "Couldn’t load playback settings. Reopen to try again." } }
+        }
+    }
+    private func save() async {
+        saving = true
+        defer { saving = false }
+        do {
+            if settings != originalSettings {
+                guard try await api.playbackSettings(profileID: profileID) == originalSettings else {
+                    self.error = "Playback settings changed on another device. Reopen to review them."
+                    return
+                }
+                try await api.savePlaybackSettings(settings, profileID: profileID)
+            }
+            dismiss()
+        } catch { self.error = "Couldn’t save settings. Check the language codes and try again." }
+    }
+}
+
+private struct RecommendationChoicesEditor: View {
+    let profileID: String
+    @Environment(\.dismiss) private var dismiss
+    @State private var choices: RecommendationChoices?
+    @State private var error: String?
+    @State private var busy = false
+    private let api = MelloTVAPI(baseURL: ServerAddress.baseURL)
+    var body: some View {
+        NavigationStack {
+            List {
+                Text("Your likes, viewing history, and these choices shape recommendations. Remove a choice to let it influence suggestions again.")
+                    .font(.footnote).foregroundStyle(.secondary)
+                if let choices {
+                    ForEach(RecommendationChoice.allCases) { choice in
+                        Section(choice.label) {
+                            let titles = choices.titles(for: choice)
+                            if titles.isEmpty { Text("None").foregroundStyle(.secondary) }
+                            ForEach(titles) { title in
+                                HStack {
+                                    Text(title.title)
+                                    Spacer()
+                                    Button("Remove") { Task { await remove(title, choice: choice) } }
+                                        .buttonStyle(.borderless)
+                                        .disabled(busy)
+                                }
+                            }
+                        }
+                    }
+                } else if error == nil { ProgressView() }
+                if let error { Text(error).foregroundStyle(.red) }
+            }
+            .navigationTitle("Recommendation choices")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+            .task { await load() }
+        }
+    }
+    private func load() async {
+        do { choices = try await api.recommendationChoices(profileID: profileID); error = nil }
+        catch { self.error = "Couldn’t load recommendation choices." }
+    }
+    private func remove(_ title: MediaTitle, choice: RecommendationChoice) async {
+        guard !busy else { return }
+        busy = true
+        defer { busy = false }
+        do {
+            try await api.setRecommendationChoice(profileID: profileID, title: title, choice: choice, enabled: false)
+            var info: [String: Any] = ["profileID": profileID, "titleID": title.id,
+                                       "choice": choice.rawValue, "enabled": false]
+            if choice == .favorites {
+                info["favoriteTitle"] = title
+                info["favoriteEnabled"] = false
+            }
+            NotificationCenter.default.post(name: .melloTVRecommendationsChanged, object: nil, userInfo: info)
+            await load()
+        } catch { self.error = "Couldn’t remove this choice. Try again." }
+    }
 }

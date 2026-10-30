@@ -4,7 +4,7 @@
 
 <div align="center">
 
-[![Version](https://img.shields.io/badge/version-v0.1.0--alpha.3-e50914?style=for-the-badge)](https://github.com/ChrisRodStar/Mello-Tv/releases)
+[![Version](https://img.shields.io/badge/version-v0.2.0-e50914?style=for-the-badge)](https://github.com/ChrisRodStar/Mello-Tv/releases)
 [![Stars](https://img.shields.io/github/stars/ChrisRodStar/Mello-Tv?style=for-the-badge&color=gold)](https://github.com/ChrisRodStar/Mello-Tv/stargazers)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20iOS%20%7C%20Web%20%7C%20Docker-blue?style=for-the-badge)](#get-started)
 [![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-Donate-yellow?style=for-the-badge&logo=buy-me-a-coffee)](https://buymeacoffee.com/chrissinclair)

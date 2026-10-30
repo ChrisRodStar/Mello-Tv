@@ -142,7 +142,8 @@ mod tests {
     }
 
     #[test]
-    fn probe_limits_accept_sixteen_mib_but_keep_an_explicit_upper_bound() {
+    fn probe_limits_accept_sixteen_mib_but_keep_an_explicit_upper_bound()
+    -> Result<(), super::super::ProbeConfigError> {
         let transport = Arc::new(NoTransport);
         assert!(
             super::super::StreamProber::new(
@@ -156,7 +157,7 @@ mod tests {
         );
         assert!(
             super::super::StreamProber::new(
-                transport,
+                transport.clone(),
                 super::super::ProbeLimits {
                     total_sample_bytes: 16 * 1024 * 1024 + 1,
                     ..super::super::ProbeLimits::default()
@@ -164,5 +165,10 @@ mod tests {
             )
             .is_err()
         );
+        let prober =
+            super::super::StreamProber::new(transport, super::super::ProbeLimits::default())?;
+        let health = prober.health_probe();
+        assert_eq!(health.limits.total_playlist_bytes, 2 * 1024 * 1024);
+        Ok(())
     }
 }

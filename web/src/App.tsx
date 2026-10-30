@@ -237,6 +237,7 @@ export function App({ resolvePlayback }: { resolvePlayback?: PlaybackResolver } 
           resolvePlayback={resolvePlayback}
           initialPlayback={initialPlayback}
           onClose={handleCloseDetails}
+          onSelect={handleSelect}
         />
       )}
     </div>

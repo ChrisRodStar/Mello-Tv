@@ -19,6 +19,7 @@ pub struct ServerConfig {
     pub db_path: PathBuf,
     pub static_dir: Option<PathBuf>,
     pub exit_on_stdin_close: bool,
+    pub validate_data: bool,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -60,6 +61,7 @@ impl ServerConfig {
             });
 
         let mut exit_on_stdin_close = false;
+        let mut validate_data = false;
         let mut args = std::env::args().skip(1);
         while let Some(arg) = args.next() {
             match arg.as_str() {
@@ -76,10 +78,14 @@ impl ServerConfig {
                         "      --host <HOST>          Host address to bind to [default: 0.0.0.0]"
                     );
                     println!("      --exit-on-stdin-close  Shut down when the launching app exits");
+                    println!(
+                        "      --validate-data        Validate databases and encryption key, then exit"
+                    );
                     println!("  -h, --help                 Print help");
                     std::process::exit(0);
                 }
                 "--exit-on-stdin-close" => exit_on_stdin_close = true,
+                "--validate-data" => validate_data = true,
                 "--port" | "-p" => {
                     if let Some(val) = args.next() {
                         port = val.parse::<u16>()?;
@@ -144,6 +150,7 @@ impl ServerConfig {
             db_path,
             static_dir,
             exit_on_stdin_close,
+            validate_data,
         })
     }
 }
@@ -208,6 +215,39 @@ fn bind_ipv6_listener(port: u16) -> std::io::Result<tokio::net::TcpListener> {
     tokio::net::TcpListener::from_std(std_listener)
 }
 
+/// Shared with the Mac restore coordinator's exclusive flock. The handle stays
+/// alive until all server work has shut down; a restore never replaces live files.
+fn lock_household_directory(directory: &std::path::Path) -> std::io::Result<std::fs::File> {
+    let path = directory.join(".household.lock");
+    if let Ok(metadata) = std::fs::symlink_metadata(&path)
+        && (!metadata.is_file() || metadata.file_type().is_symlink())
+    {
+        return Err(std::io::Error::other(
+            "Household lock must be a regular file",
+        ));
+    }
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true).write(true).create(true).truncate(false);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let file = options.open(path)?;
+    file.try_lock_shared().map_err(|error| match error {
+        std::fs::TryLockError::WouldBlock => std::io::Error::other(
+            "Household data is being restored. Try again after restore finishes.",
+        ),
+        std::fs::TryLockError::Error(error) => error,
+    })?;
+    if directory.join(".restore-in-progress").exists() {
+        return Err(std::io::Error::other(
+            "An interrupted household restore needs recovery in the Mac app before the server can start.",
+        ));
+    }
+    Ok(file)
+}
+
 async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let _ = tracing_subscriber::fmt()
         .with_env_filter(
@@ -225,7 +265,18 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         "loaded server configuration"
     );
 
+    if config.validate_data
+        && (!config.db_path.join("accounts.db").is_file()
+            || !config.db_path.join("catalog.db").is_file()
+            || std::fs::metadata(config.db_path.join("api-encryption"))?.len() != 32)
+    {
+        return Err(std::io::Error::other(
+            "A complete household backup and matching encryption key are required",
+        )
+        .into());
+    }
     tokio::fs::create_dir_all(&config.db_path).await?;
+    let _household_lock = lock_household_directory(&config.db_path)?;
 
     let catalog_db = config.db_path.join("catalog.db");
     let catalog = CatalogStore::open(catalog_db).await?;
@@ -245,6 +296,12 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     let accounts_db = config.db_path.join("accounts.db");
     let accounts = AccountStore::open(accounts_db, key).await?;
+
+    if config.validate_data {
+        accounts.shutdown().await?;
+        catalog.shutdown().await?;
+        return Ok(());
+    }
 
     let household_id = accounts.select_household(None).await?;
     tracing::info!(%household_id, "household account selected");

@@ -5,6 +5,7 @@ import MelloKit
 private enum SettingsSection: String, CaseIterable, Identifiable {
     case general = "General"
     case server = "Server"
+    case backups = "Backups"
     case updates = "Updates"
     case about = "About"
     var id: Self { self }
@@ -13,6 +14,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         switch self {
         case .general: return "slider.horizontal.3"
         case .server: return "server.rack"
+        case .backups: return "externaldrive"
         case .updates: return "arrow.triangle.2.circlepath"
         case .about: return "info.circle"
         }
@@ -26,19 +28,20 @@ struct SettingsView: View {
     let snapshot: ServerSnapshot?
     let actions: AppActions
     @State private var section = SettingsSection.general
+    @AppStorage("mellotv.native.keepAwake") private var keepAwake = false
     @Namespace private var segmentAnimation
     @Environment(\.colorScheme) private var colorScheme
 
     private var appVersion: String {
         Bundle.main.object(forInfoDictionaryKey: "MelloTVReleaseVersion") as? String
             ?? Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
-            ?? "0.1.0-alpha.3"
+            ?? "0.2.0"
     }
 
     var body: some View {
         VStack(spacing: 20) {
             segmentedPicker
-                .frame(maxWidth: 500)
+                .frame(maxWidth: 620)
 
             Group {
                 switch section {
@@ -46,6 +49,10 @@ struct SettingsView: View {
                     generalSection
                 case .server:
                     serverSection
+                case .backups:
+                    SettingsCard {
+                        HouseholdBackupSettings(coordinator: actions.backups)
+                    }
                 case .updates:
                     updatesSection
                 case .about:
@@ -167,6 +174,19 @@ struct SettingsView: View {
                 SettingsDivider()
 
                 SettingsItemRow(
+                    icon: "moon.zzz",
+                    iconColor: MelloTVTheme.accent,
+                    title: "Keep Mac Awake",
+                    subtitle: "Prevent automatic system sleep while your server runs"
+                ) {
+                    Toggle("Keep Mac awake", isOn: $keepAwake)
+                        .toggleStyle(.switch)
+                        .labelsHidden()
+                }
+
+                SettingsDivider()
+
+                SettingsItemRow(
                     icon: "info.circle",
                     iconColor: MelloTVTheme.muted,
                     title: "App Version",
@@ -252,10 +272,13 @@ struct SettingsView: View {
                     icon: "doc.text.magnifyingglass",
                     iconColor: Color(red: 0.95, green: 0.58, blue: 0.15),
                     title: "Diagnostics & Logs",
-                    subtitle: "View live backend request traces and errors"
+                    subtitle: "Review server status or open the detailed log"
                 ) {
-                    Button("Open Logs…", action: actions.openLogs)
-                        .buttonStyle(SecondaryGlassButtonStyle())
+                    HStack(spacing: 10) {
+                        ServerDiagnosticsButton(process: process, snapshot: snapshot)
+                        Button("Open Logs…", action: actions.openLogs)
+                            .buttonStyle(SecondaryGlassButtonStyle())
+                    }
                 }
 
                 SettingsDivider()

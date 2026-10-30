@@ -10,7 +10,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
     private var hasPresented = false
 
     init(port: Int, process: ServerProcessState, actions: AppActions) {
-        self.model = ServerStatusStore(port: port)
+        self.model = ServerStatusStore(port: port, isServerRunning: process.isRunning)
         let window = NSWindow(
             contentRect: NSRect(origin: .zero, size: WindowSizing.mainFrame),
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
@@ -79,7 +79,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         onVisibilityChange?(false)
     }
 
-    func serverStateChanged() {
+    func serverStateChanged(isRunning: Bool) {
+        model.serverStateChanged(isRunning: isRunning)
         if window?.isVisible == true { model.refreshNow() }
     }
 

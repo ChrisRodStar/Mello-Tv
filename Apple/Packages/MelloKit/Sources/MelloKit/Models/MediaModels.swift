@@ -87,11 +87,13 @@ public struct CatalogSection: Codable, Hashable, Identifiable, Sendable {
     public let id: String
     public let heading: String
     public let titles: [MediaTitle]
+    public let reason: String?
 
-    public init(id: String, heading: String, titles: [MediaTitle]) {
+    public init(id: String, heading: String, titles: [MediaTitle], reason: String? = nil) {
         self.id = id
         self.heading = heading
         self.titles = titles
+        self.reason = reason
     }
 }
 

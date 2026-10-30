@@ -6,16 +6,30 @@ import MelloKit
 final class MelloTVAppDelegate: NSObject, NSApplicationDelegate {
     private let server = ServerController(port: 8080)
     private let preferences = AppPreferences()
+    private var startupReady = false
+    private lazy var backups: HouseholdBackupCoordinator = {
+        let server = self.server
+        return HouseholdBackupCoordinator(
+            dataDirectoryURL: server.dataDirectoryURL,
+            isServerRunning: { server.isRunning },
+            stopServer: { server.stopAndConfirm(waitTimeout: 3) },
+            startServer: { server.start() }
+        )
+    }()
     private var isMainWindowOpen = false
     private var isWelcomeWindowOpen = false
     private lazy var updater = AppUpdateService(port: server.port, isServerRunning: { [weak self] in self?.server.isRunning == true })
     private lazy var actions: AppActions = AppActions(
         preferences: preferences,
         updater: updater,
+        backups: backups,
         openSettings: { [weak self] in self?.mainWindow.present(destination: .settings) },
         openDashboard: { [weak self] in self?.mainWindow.present() },
-        toggleServer: { [weak self] in self?.server.toggle() },
-        restartServer: { [weak self] in self?.server.restart() },
+        toggleServer: { [weak self] in self?.toggleServerAfterRecovery() },
+        restartServer: { [weak self] in
+            guard let self, self.startupReady, !self.backups.busy else { return }
+            self.server.restart()
+        },
         openWebsite: { [weak self] in self?.openWebsite() },
         openLogs: { [weak self] in self?.server.openLogs() },
         openData: { [weak self] in self?.server.openDataDirectory() },
@@ -44,9 +58,18 @@ final class MelloTVAppDelegate: NSObject, NSApplicationDelegate {
         _ = applyPresentation(preferences.presentation)
         server.onStateChange = { [weak self] running in
             self?.menuBar.update(running: running)
-            self?.mainWindow.serverStateChanged()
+            self?.mainWindow.serverStateChanged(isRunning: running)
         }
-        server.start()
+        Task { [weak self] in
+            guard let self else { return }
+            guard await self.backups.recoverInterruptedRestore() else {
+                self.server.state.message = "Backup recovery needs attention. Open Settings > Backups before starting the server."
+                return
+            }
+            self.startupReady = true
+            self.server.start()
+            self.backups.startAutomaticSchedule()
+        }
         updater.start()
         presentMainWindow()
     }
@@ -63,6 +86,17 @@ final class MelloTVAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) { stopServer(waitTimeout: 3) }
+
+    private func toggleServerAfterRecovery() {
+        guard !backups.busy else { return }
+        if startupReady { server.toggle(); return }
+        Task { [weak self] in
+            guard let self, await self.backups.recoverInterruptedRestore() else { return }
+            self.startupReady = true
+            self.server.start()
+            self.backups.startAutomaticSchedule()
+        }
+    }
 
     func stopServer(waitTimeout: TimeInterval) { server.stop(waitTimeout: waitTimeout) }
 
@@ -104,6 +138,7 @@ final class MelloTVAppDelegate: NSObject, NSApplicationDelegate {
     @objc private func showOverview() { mainWindow.present(destination: .overview) }
     @objc private func showProviders() { mainWindow.present(destination: .providers) }
     @objc private func showNetwork() { mainWindow.present(destination: .network) }
+    @objc private func showUsers() { mainWindow.present(destination: .users) }
     @objc private func showSupport() { NSWorkspace.shared.open(AppLinks.buyMeACoffeeURL) }
     @objc private func showWelcome() { welcomeWindow.present() }
     @objc private func showSettings() { mainWindow.present(destination: .settings) }
@@ -113,7 +148,7 @@ final class MelloTVAppDelegate: NSObject, NSApplicationDelegate {
     @objc private func showAbout() {
         let release = Bundle.main.object(forInfoDictionaryKey: "MelloTVReleaseVersion") as? String
             ?? Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
-            ?? "0.1.0-alpha.3"
+            ?? "0.2.0"
         let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "3"
         NSApp.orderFrontStandardAboutPanel(options: [.applicationVersion: release, .version: build])
     }
@@ -138,11 +173,12 @@ final class MelloTVAppDelegate: NSObject, NSApplicationDelegate {
         let viewItem = NSMenuItem()
         let viewMenu = NSMenu(title: "View")
         add("Overview", action: #selector(showOverview), key: "1", to: viewMenu)
-        add("Providers", action: #selector(showProviders), key: "2", to: viewMenu)
-        add("Network", action: #selector(showNetwork), key: "3", to: viewMenu)
-        add("Support", action: #selector(showSupport), key: "4", to: viewMenu)
-        add("Welcome guide", action: #selector(showWelcome), key: "5", to: viewMenu)
-        add("Settings", action: #selector(showSettings), key: "6", to: viewMenu)
+        add("Users", action: #selector(showUsers), key: "2", to: viewMenu)
+        add("Providers", action: #selector(showProviders), key: "3", to: viewMenu)
+        add("Network", action: #selector(showNetwork), key: "4", to: viewMenu)
+        add("Support", action: #selector(showSupport), key: "5", to: viewMenu)
+        add("Welcome guide", action: #selector(showWelcome), key: "6", to: viewMenu)
+        add("Settings", action: #selector(showSettings), key: "7", to: viewMenu)
         viewMenu.addItem(.separator())
         let sidebar = add("Toggle Sidebar", action: #selector(toggleSidebar), key: "s", to: viewMenu)
         sidebar.keyEquivalentModifierMask = .command

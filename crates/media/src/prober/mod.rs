@@ -185,6 +185,21 @@ impl StreamProber {
         })
     }
 
+    /// Small independent health samples share normal probe admission capacity.
+    pub(crate) fn health_probe(&self) -> Self {
+        let mut limits = self.limits.clone();
+        limits.samples_per_variant = 1;
+        limits.total_sample_bytes = 2 * 1024 * 1024;
+        limits.total_playlist_bytes = 2 * 1024 * 1024;
+        limits.max_variants = 1;
+        limits.source_timeout = Duration::from_secs(4);
+        Self {
+            transport: self.transport.clone(),
+            slots: self.slots.clone(),
+            limits,
+        }
+    }
+
     pub async fn probe_all(
         &self,
         candidates: Vec<CandidateStream>,

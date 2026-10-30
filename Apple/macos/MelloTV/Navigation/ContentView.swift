@@ -15,9 +15,12 @@ struct ContentView: View {
             case .overview:
                 OverviewView(model: model, process: process, actions: actions, destination: $destination)
             case .providers:
-                ProvidersView(providers: model.snapshot?.media.providers ?? [], online: process.isRunning && model.isReachable)
+                ProvidersView(providers: model.snapshot?.media.providers ?? [], online: process.isRunning && model.isReachable, starting: model.isStarting, port: port)
             case .network:
-                NetworkView(port: port, endpoints: process.isRunning && model.isReachable ? model.snapshot?.endpoints ?? [] : [])
+                NetworkView(port: port, endpoints: model.snapshot?.endpoints ?? [],
+                            online: process.isRunning && model.isReachable, starting: model.isStarting)
+            case .users:
+                UsersView(online: process.isRunning && model.isReachable, starting: model.isStarting, port: port)
             case .settings:
                 SettingsView(preferences: actions.preferences, updater: actions.updater, process: process, snapshot: model.snapshot, actions: actions)
             }

@@ -1,9 +1,10 @@
-import { lazy, Suspense, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 
 import type { Episode, Title } from '../../model';
 
 import { useProfileLibrary } from '../../hooks/useProfileLibrary';
 import { useTitleDetails } from '../../hooks/useTitleDetails';
+import { loadCatalog } from '../../lib/catalog';
 import type { PlaybackRequest, PlaybackResolver } from '../../lib/playback';
 import { Icon } from '../common/Icon';
 import { EpisodeList } from './EpisodeList';
@@ -11,7 +12,7 @@ import { EpisodeList } from './EpisodeList';
 const loadPlayback = () => import('../playback/PlaybackView');
 const PlaybackView = lazy(() => loadPlayback().then((m) => ({ default: m.PlaybackView })));
 
-type DetailTab = 'episodes' | 'about';
+type DetailTab = 'episodes' | 'about' | 'related';
 
 export function TitleDetails({
   title,
@@ -19,17 +20,22 @@ export function TitleDetails({
   profileId,
   resolvePlayback,
   initialPlayback,
+  onSelect,
 }: {
   title: Title;
   onClose: () => void;
   profileId: string;
   resolvePlayback?: PlaybackResolver;
   initialPlayback?: PlaybackRequest;
+  onSelect?: (title: Title) => void;
 }) {
   const { details, season, setSeason, episodes, metadataError, episodeError, retry } =
     useTitleDetails(title);
   const library = useProfileLibrary(profileId);
   const [selectedTab, setSelectedTab] = useState<DetailTab>('episodes');
+
+  const [suggestions, setSuggestions] = useState<Title[] | null>(null);
+  const [loadingSuggestions, setLoadingSuggestions] = useState(false);
 
   const savedProgress = library.progress.find(
     (item) => item.title.id === title.id && item.title.type === title.type,
@@ -65,12 +71,65 @@ export function TitleDetails({
     }
   }, [library.ready, details, savedProgress, title.type, setSeason, initialPlayback]);
 
-  const resumeEpisode =
-    savedProgress && savedProgress.season === season
-      ? episodes?.find(
-          (item) => item.number === savedProgress.episode + (savedProgress.completed ? 1 : 0),
-        )
-      : undefined;
+  // Load suggestions / related titles
+  useEffect(() => {
+    let active = true;
+    const controller = new AbortController();
+    async function fetchRelated() {
+      setLoadingSuggestions(true);
+      try {
+        const catalog = await loadCatalog(profileId, title.type, controller.signal);
+        if (!active) return;
+        const candidates = catalog.titles.filter(
+          (t) => t.id !== title.id && Boolean(t.posterUrl),
+        );
+        setSuggestions(candidates.slice(0, 18));
+      } catch {
+        if (active && !controller.signal.aborted) {
+          setSuggestions([]);
+        }
+      } finally {
+        if (active) setLoadingSuggestions(false);
+      }
+    }
+    void fetchRelated();
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [profileId, title.id, title.type]);
+
+  const isEpisodeWatched = useCallback(
+    (epNum: number) =>
+      library.progress.some(
+        (p) =>
+          p.title.id === title.id &&
+          p.title.type === 'tv' &&
+          p.season === season &&
+          p.episode === epNum &&
+          p.completed,
+      ),
+    [library.progress, title.id, title.type, season],
+  );
+
+  const resumeEpisode = (() => {
+    if (!episodes || episodes.length === 0) return undefined;
+    let targetNumber: number;
+    if (savedProgress && savedProgress.season === season) {
+      targetNumber = isEpisodeWatched(savedProgress.episode)
+        ? savedProgress.episode + 1
+        : savedProgress.episode;
+    } else {
+      targetNumber = episodes[0]?.number ?? 1;
+    }
+    const candidate = episodes.find((e) => e.number === targetNumber) ?? episodes[0];
+    if (!candidate || !isEpisodeWatched(candidate.number)) return candidate;
+    return (
+      episodes.find((e) => e.number >= candidate.number && !isEpisodeWatched(e.number)) ??
+      episodes.find((e) => !isEpisodeWatched(e.number)) ??
+      candidate
+    );
+  })();
 
   const [playback, setPlayback] = useState<PlaybackRequest | null>(initialPlayback ?? null);
   const playButton = useRef<HTMLButtonElement>(null);
@@ -89,7 +148,7 @@ export function TitleDetails({
     void loadPlayback().catch(() => {});
   }
 
-  function play(episode?: Episode) {
+  function play(episode?: Episode, startFromBeginning = false) {
     const progress = library.progress.find(
       (p) =>
         p.title.id === title.id &&
@@ -101,7 +160,7 @@ export function TitleDetails({
       title: title.title,
       profileId,
       catalogTitle: title,
-      ...(progress?.completed ? { startAt: 0 } : {}),
+      ...(startFromBeginning || progress?.completed ? { startAt: 0 } : {}),
     };
     if (title.type === 'movie') setPlayback({ ...base, type: 'movie' });
     else if (episode && season !== null)
@@ -123,14 +182,24 @@ export function TitleDetails({
     };
   }, []);
 
-  const playButtonTitle =
-    savedProgress &&
-    !savedProgress.completed &&
-    (title.type === 'movie' || resumeEpisode)
-      ? 'Resume'
-      : resumeEpisode && savedProgress?.completed
-        ? 'Next Episode'
-        : 'Play';
+  const playButtonTitle = (() => {
+    if (savedProgress) {
+      if (title.type === 'tv') {
+        if (savedProgress.season === season && resumeEpisode) {
+          if (
+            resumeEpisode.number === savedProgress.episode &&
+            !isEpisodeWatched(savedProgress.episode)
+          ) {
+            return 'Resume';
+          }
+          return resumeEpisode.number > savedProgress.episode ? 'Next Episode' : 'Play';
+        }
+        return 'Play';
+      }
+      if (!savedProgress.completed) return 'Resume';
+    }
+    return 'Play';
+  })();
 
   const playbackLabel =
     title.type === 'tv' && season !== null
@@ -160,6 +229,46 @@ export function TitleDetails({
       {title.overview && <p className="detail-overview">{title.overview}</p>}
       {metadataLine && <p className="detail-metadata-line">{metadataLine}</p>}
       {genresLine && <p className="detail-genres">{genresLine}</p>}
+    </div>
+  );
+
+  const suggestionsSection = (
+    <div className="detail-suggestions-section">
+      {loadingSuggestions ? (
+        <p className="metadata-status" role="status">
+          Finding {title.type === 'movie' ? 'movies' : 'TV shows'}…
+        </p>
+      ) : suggestions && suggestions.length > 0 ? (
+        <div className="detail-suggestions-grid">
+          {suggestions.map((item) => (
+            <button
+              key={`${item.type}-${item.id}`}
+              type="button"
+              className="detail-suggestion-card"
+              onClick={() => onSelect?.(item)}
+              aria-label={`${item.title}${item.year ? `, ${item.year}` : ''}`}
+            >
+              <div className="detail-suggestion-poster">
+                {item.posterUrl ? (
+                  <img src={item.posterUrl} alt="" loading="lazy" decoding="async" />
+                ) : (
+                  <div className="detail-suggestion-poster-placeholder">
+                    <Icon
+                      name={item.type === 'movie' ? 'film-slate' : 'television-simple'}
+                    />
+                  </div>
+                )}
+              </div>
+              <span className="detail-suggestion-title">{item.title}</span>
+              {item.year && <span className="detail-suggestion-year">{item.year}</span>}
+            </button>
+          ))}
+        </div>
+      ) : (
+        <p className="metadata-status">
+          More {title.type === 'movie' ? 'movies' : 'TV shows'} will appear as the catalog updates.
+        </p>
+      )}
     </div>
   );
 
@@ -243,6 +352,14 @@ export function TitleDetails({
 
                 <button
                   type="button"
+                  className="detail-glass-circle-button ellipsis-button"
+                  aria-label="Options"
+                >
+                  <Icon name="ellipsis" />
+                </button>
+
+                <button
+                  type="button"
                   className="detail-glass-circle-button close-button"
                   onClick={onClose}
                   aria-label="Close title details"
@@ -322,6 +439,15 @@ export function TitleDetails({
                       >
                         About
                       </button>
+                      <button
+                        type="button"
+                        role="tab"
+                        aria-selected={selectedTab === 'related'}
+                        className={`detail-tab-pill${selectedTab === 'related' ? ' is-active' : ''}`}
+                        onClick={() => setSelectedTab('related')}
+                      >
+                        Related
+                      </button>
                     </div>
                   </div>
 
@@ -382,16 +508,22 @@ export function TitleDetails({
                             )}
                             onPlay={play}
                             onPreload={preloadEpisode}
+                            onRewatch={(ep) => play(ep, true)}
                           />
                         )}
                       </section>
                     ) : null
-                  ) : (
+                  ) : selectedTab === 'about' ? (
                     aboutSection
+                  ) : (
+                    suggestionsSection
                   )}
                 </>
               ) : (
-                aboutSection
+                <>
+                  {aboutSection}
+                  {suggestionsSection}
+                </>
               )}
             </div>
           </>

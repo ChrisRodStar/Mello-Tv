@@ -8,13 +8,41 @@ final class ServerStatusStore: ObservableObject {
     @Published private(set) var snapshot: ServerSnapshot?
     @Published private(set) var isRefreshing = false
     @Published private(set) var error: String?
-    @Published private(set) var lastRefreshed: Date?
+    @Published private(set) var activeStreams: Int?
+    @Published private(set) var watching: [WatchingActivity]?
+    @Published private(set) var profileNames: [String: String] = [:]
+    @Published private(set) var userCount: Int?
     private let port: Int
     private var monitor: Task<Void, Never>?
+    private var serverIsRunning: Bool
+    private var startupBeganAt: Date?
+    private var serverGeneration: UInt64 = 0
 
-    init(port: Int) { self.port = port }
+    init(port: Int, isServerRunning: Bool = false) {
+        self.port = port
+        serverIsRunning = isServerRunning
+        startupBeganAt = isServerRunning ? Date() : nil
+    }
 
-    var isReachable: Bool { snapshot != nil && error == nil }
+    var hasConnected: Bool { snapshot != nil }
+    var isStarting: Bool { serverIsRunning && !hasConnected && error == nil }
+    var isReachable: Bool { serverIsRunning && hasConnected && error == nil }
+
+    func serverStateChanged(isRunning: Bool) {
+        serverGeneration &+= 1
+        serverIsRunning = isRunning
+        startupBeganAt = isRunning ? Date() : nil
+        snapshot = nil
+        error = nil
+        watching = nil
+        activeStreams = nil
+        profileNames = [:]
+        userCount = nil
+        if monitor != nil {
+            stop()
+            start()
+        }
+    }
 
     func start() {
         guard monitor == nil else { return }
@@ -24,7 +52,7 @@ final class ServerStatusStore: ObservableObject {
                 await self.refresh()
                 // A launched process may still be opening its HTTP listener.
                 // Recover promptly instead of leaving the dashboard disconnected for 15 seconds.
-                let interval: UInt64 = self.isReachable ? 15_000_000_000 : 1_000_000_000
+                let interval: UInt64 = self.isReachable || !self.serverIsRunning ? 5_000_000_000 : 1_000_000_000
                 do { try await Task.sleep(nanoseconds: interval) }
                 catch { return }
             }
@@ -41,30 +69,105 @@ final class ServerStatusStore: ObservableObject {
     }
 
     private func refresh() async {
-        guard !isRefreshing else { return }
+        guard serverIsRunning, !isRefreshing else { return }
+        let generation = serverGeneration
         isRefreshing = true
         defer { isRefreshing = false }
         do {
             // Process launch precedes listener readiness. Probe the loopback socket
             // before creating a URLSession task, which logs expected refusals as errors.
             let isListening = await LocalServerListener.isListening(port: port)
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, generation == serverGeneration else { return }
             guard isListening else { throw URLError(.cannotConnectToHost) }
+            async let activity = fetchPlaybackActivity()
+            async let streams = fetchActiveStreams()
+            async let profiles = fetchUserCount()
             let url = AppLinks.clientURL(port: port).appendingPathComponent("api/v1/status")
             let request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 6)
             let (data, response) = try await URLSession.shared.data(for: request)
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, generation == serverGeneration else { return }
             guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw URLError(.badServerResponse) }
             let decoder = JSONDecoder()
             decoder.keyDecodingStrategy = .convertFromSnakeCase
             snapshot = try decoder.decode(ServerSnapshot.self, from: data)
             error = nil
-            lastRefreshed = Date()
+            let (sessions, profileReply, streamCount) = await (activity, profiles, streams)
+            guard !Task.isCancelled, generation == serverGeneration else { return }
+            watching = sessions
+            activeStreams = streamCount
+            userCount = profileReply?.profiles.count
+            profileNames = Dictionary(profileReply?.profiles.map { ($0.id, $0.name) } ?? [], uniquingKeysWith: { first, _ in first })
         } catch {
-            guard !Task.isCancelled else { return }
-            self.error = "Couldn't reach the local server."
+            guard !Task.isCancelled, generation == serverGeneration else { return }
+            watching = nil
+            activeStreams = nil
+            profileNames = [:]
+            userCount = nil
+            if hasConnected {
+                self.error = "Lost connection to the local server."
+            } else if let startupBeganAt, Date().timeIntervalSince(startupBeganAt) >= 30 {
+                self.error = "The server is taking longer than expected to start. Open the logs for details."
+            }
+            // A refused connection before the first successful status response
+            // is normal startup, not a lost connection.
         }
     }
+
+    private func fetchUserCount() async -> ProfileCountReply? {
+        let url = AppLinks.clientURL(port: port).appendingPathComponent("api/v1/profiles")
+        let request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 3)
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard !Task.isCancelled, (response as? HTTPURLResponse)?.statusCode == 200 else { return nil }
+            return try JSONDecoder().decode(ProfileCountReply.self, from: data)
+        } catch { return nil }
+    }
+
+    private func fetchActiveStreams() async -> Int? {
+        let url = AppLinks.clientURL(port: port).appendingPathComponent("api/v1/update-readiness")
+        let request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 3)
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard !Task.isCancelled, (response as? HTTPURLResponse)?.statusCode == 200 else { return nil }
+            let reply = try JSONDecoder().decode(RelayActivity.self, from: data)
+            return reply.activeStreams >= 0 ? reply.activeStreams : nil
+        } catch { return nil }
+    }
+
+    private func fetchPlaybackActivity() async -> [WatchingActivity]? {
+        let url = AppLinks.clientURL(port: port).appendingPathComponent("api/v1/playback-activity")
+        let request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 3)
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard !Task.isCancelled, (response as? HTTPURLResponse)?.statusCode == 200 else { return nil }
+            let decoder = JSONDecoder()
+            decoder.keyDecodingStrategy = .convertFromSnakeCase
+            return try decoder.decode([WatchingActivity].self, from: data)
+        } catch { return nil }
+    }
+}
+
+private struct ProfileCountReply: Decodable {
+    struct Identity: Decodable { let id: String; let name: String }
+    let profiles: [Identity]
+}
+
+private struct RelayActivity: Decodable {
+    let activeStreams: Int
+    enum CodingKeys: String, CodingKey { case activeStreams = "active_streams" }
+}
+
+struct WatchingActivity: Decodable, Identifiable {
+    let sessionId: String
+    let profileId: String
+    let title: String
+    let device: String?
+    let season: Int?
+    let episode: Int?
+    let state: String
+    let positionSeconds: Double
+    let durationSeconds: Double?
+    var id: String { sessionId }
 }
 
 private enum LocalServerListener {

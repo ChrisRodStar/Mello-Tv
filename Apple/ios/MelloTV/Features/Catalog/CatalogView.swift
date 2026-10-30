@@ -139,6 +139,18 @@ struct CatalogView: View {
                 }
             )
         }
+        .onReceive(NotificationCenter.default.publisher(for: .melloTVRecommendationsChanged)) { notification in
+            guard let changedProfile = notification.userInfo?["profileID"] as? String,
+                  changedProfile == profileID,
+                  let titleID = notification.userInfo?["titleID"] as? String,
+                  let choice = notification.userInfo?["choice"] as? String,
+                  let enabled = notification.userInfo?["enabled"] as? Bool else { return }
+            if enabled && ["hidden", "watched", "favorites"].contains(choice) {
+                store.removeRecommendation(titleID)
+            } else if !enabled {
+                Task { await store.load(force: true) }
+            }
+        }
         .onDisappear(perform: cancelResume)
     }
 
@@ -426,6 +438,10 @@ private struct PanoramicShelf: View {
                 .foregroundStyle(MelloTVTheme.text)
                 .padding(.horizontal, 16)
 
+            if let reason = section.reason, reason == "liked" || reason == "watched" {
+                Text(reason == "liked" ? "Based on a title you liked" : "Based on a title you watched")
+                    .font(.caption).foregroundStyle(MelloTVTheme.muted).padding(.horizontal, 16)
+            }
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(alignment: .top, spacing: 14) {
                     ForEach(section.titles) { title in
@@ -660,6 +676,10 @@ private struct CatalogShelf: View {
                 .foregroundStyle(MelloTVTheme.text)
                 .padding(.horizontal, 16)
 
+            if let reason = section.reason, reason == "liked" || reason == "watched" {
+                Text(reason == "liked" ? "Based on a title you liked" : "Based on a title you watched")
+                    .font(.caption).foregroundStyle(MelloTVTheme.muted).padding(.horizontal, 16)
+            }
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(alignment: .top, spacing: 14) {
                     ForEach(section.titles) { title in

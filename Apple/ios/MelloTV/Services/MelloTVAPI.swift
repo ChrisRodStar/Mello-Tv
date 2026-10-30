@@ -93,7 +93,7 @@ struct MelloTVAPI: Sendable {
             URLQueryItem(name: "type", value: category?.rawValue ?? "all"),
             URLQueryItem(name: "topic", value: topic),
         ])
-        let sections = reply.sections.map { CatalogSection(id: $0.id, heading: $0.heading, titles: $0.titles.map(\.view)) }
+        let sections = reply.sections.map { CatalogSection(id: $0.id, heading: $0.heading, titles: $0.titles.map(\.view), reason: $0.reason) }
         let featured = reply.featured.map(\.view)
         var seen = Set<String>()
         let titles = (featured + sections.flatMap(\.titles)).filter { seen.insert($0.id).inserted }
@@ -134,7 +134,7 @@ struct MelloTVAPI: Sendable {
         let reply: HomePageReply = try await request("profiles/\(profileID)/home", query: [
             URLQueryItem(name: "type", value: category?.rawValue ?? "all"), URLQueryItem(name: "shelf", value: id),
         ])
-        return reply.sections.first(where: { $0.id == id }).map { CatalogSection(id: $0.id, heading: $0.heading, titles: $0.titles.map(\.view)) }
+        return reply.sections.first(where: { $0.id == id }).map { CatalogSection(id: $0.id, heading: $0.heading, titles: $0.titles.map(\.view), reason: $0.reason) }
     }
 
     func recommendationChoices(profileID: String) async throws -> RecommendationChoices {
@@ -276,6 +276,18 @@ struct MelloTVAPI: Sendable {
         throw APIError.serverMessage("Episodes are still being added. Try again shortly.")
     }
 
+    func playbackSettings(profileID: String) async throws -> ProfilePlaybackSettings {
+        try await request("profiles/\(profileID)/playback-settings")
+    }
+
+    func savePlaybackSettings(_ settings: ProfilePlaybackSettings, profileID: String) async throws {
+        let _: ProfilePlaybackSettings = try await request("profiles/\(profileID)/playback-settings", method: "PUT", body: [
+            "audio_language": settings.audioLanguage, "subtitle_language": settings.subtitleLanguage,
+            "subtitles_enabled": settings.subtitlesEnabled, "autoplay_next": settings.autoplayNext,
+            "max_height": settings.maxHeight
+        ])
+    }
+
     func profiles() async throws -> [Profile] {
         let reply: ProfilesReply = try await request("profiles")
         var profiles = reply.profiles
@@ -293,9 +305,13 @@ struct MelloTVAPI: Sendable {
         return try await profiles()
     }
 
+    func updateProfileIdentity(_ profile: Profile) async throws -> [Profile] {
+        let _: Profile = try await request("profiles/\(profile.id)", method: "PUT", body: ["name": profile.name, "color": profile.color])
+        return try await profiles()
+    }
+
     func updateProfile(_ profile: Profile) async throws -> [Profile] {
         let path = "profiles/\(profile.id)"
-        let _: Profile = try await request(path, method: "PUT", body: ["name": profile.name, "color": profile.color])
         guard profile.preferences.likedTitles.count <= 50 else {
             throw APIError.serverMessage("Choose up to 50 favorites and try again.")
         }
@@ -538,6 +554,14 @@ struct MelloTVAPI: Sendable {
         let _: EmptyReply = try await request("profiles/\(playback.profileID)/playback/\(source.id)", method: "DELETE")
     }
 
+    func putPlaybackActivity(sessionID: String, body: [String: Any]) async throws {
+        let _: EmptyReply = try await request("playback-activity/\(sessionID)", method: "PUT", body: body)
+    }
+
+    func deletePlaybackActivity(sessionID: String) async throws {
+        let _: EmptyReply = try await request("playback-activity/\(sessionID)", method: "DELETE")
+    }
+
     private func authorized(_ reply: WirePlayback, for playback: PlaybackRequest) throws -> AuthorizedPlayback {
         let origin = effectiveBaseURL
         let heights = reply.availableHeights ?? []
@@ -718,7 +742,7 @@ private struct SearchReply: Decodable {
     let reason: String?
 }
 private struct HistoryReply: Decodable { let records: [WireProgress]; let offset: Int; let limit: Int }
-private struct WireShelf: Decodable { let id: String; let heading: String; let titles: [WireTitle] }
+private struct WireShelf: Decodable { let id: String; let heading: String; let titles: [WireTitle]; let reason: String? }
 private struct WireRecommendations: Decodable { let sections: [WireShelf] }
 private struct WireSeasonSummary: Decodable { let season: Int; let name: String; let episodeCount: Int }
 private struct WireTitle: Decodable {

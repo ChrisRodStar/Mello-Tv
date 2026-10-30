@@ -60,7 +60,7 @@ struct AppleNeumorphicSurfaceModifier: ViewModifier {
 
         content
             .background(
-                surfaceGradient(isDark: isDark)
+                surfaceGradient
                     .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
             )
             .overlay(
@@ -76,26 +76,12 @@ struct AppleNeumorphicSurfaceModifier: ViewModifier {
             ))
     }
 
-    private func surfaceGradient(isDark: Bool) -> LinearGradient {
-        if isDark {
-            return LinearGradient(
-                colors: [
-                    Color(hex: "212328"),
-                    Color(hex: "17181c")
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-        } else {
-            return LinearGradient(
-                colors: [
-                    Color(hex: "f7f5f0"),
-                    Color(hex: "e7e4dc")
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-        }
+    private var surfaceGradient: LinearGradient {
+        LinearGradient(
+            colors: [MelloTVTheme.surfaceHighlight, MelloTVTheme.surfaceShade],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
     }
 
     private func bevelGradient(isDark: Bool) -> LinearGradient {
@@ -114,7 +100,7 @@ struct AppleNeumorphicSurfaceModifier: ViewModifier {
                 stops: [
                     .init(color: Color.white.opacity(0.95), location: 0.0),
                     .init(color: Color.white.opacity(0.40), location: 0.45),
-                    .init(color: Color(red: 170/255, green: 165/255, blue: 155/255).opacity(0.25), location: 1.0)
+                    .init(color: MelloTVTheme.border.opacity(0.6), location: 1.0)
                 ],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
@@ -155,9 +141,9 @@ private struct NeumorphicLightingShadows: ViewModifier {
                     x: 0,
                     y: isPressed ? 1.5 : 3.0
                 )
-                // Light Mode: Wide, luxurious warm ambient shadow for genuine 3D float
+                // Neutral ambient shadow keeps the raised surface in the titanium palette.
                 .shadow(
-                    color: Color(red: 75/255, green: 70/255, blue: 60/255).opacity(isPressed ? 0.08 : 0.18),
+                    color: MelloTVTheme.ambientShadow.opacity(isPressed ? 0.08 : 0.18),
                     radius: isPressed ? 6.0 : 12.0,
                     x: 0,
                     y: isPressed ? 3.0 : 7.0
