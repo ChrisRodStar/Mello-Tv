@@ -39,12 +39,16 @@ If you already run Jellyfin, remove its service from `compose.yaml`, point
 
 ### Recommended Jellyfin settings for these libraries
 
-Opening a `.strm` file starts a real stream lookup, so turn off anything
-that opens every file in the background:
+Opening a `.strm` file starts a real stream lookup. Tested with Jellyfin
+10.11.0: library scans and the Trickplay, Chapter Images, Keyframe Extractor
+and Media Segment Scan tasks open **no** `.strm` files, with those options on,
+before and after a title has been played. Only real playback opens one. They
+produce nothing for these libraries either, so leave them off:
 
 - Library → **Trickplay image extraction**: off
 - Library → **Chapter image extraction**: off
-- Intro/credit detection plugins: exclude these libraries
+- Intro/credit detection plugins: exclude these libraries (not tested; a
+  plugin that runs its own ffmpeg on every file would start a lookup per file)
 
 ## Adding titles
 
@@ -69,7 +73,16 @@ Changes are synced within a few seconds. Two hands-off options:
 - `MELLO_TMDB_LISTS=12345,67890`: mirror public TMDB lists, which you can
   edit from the TMDB app.
 - `MELLO_AUTO_LISTS=trending_movies:40,popular_tv:20`: keep rolling
-  collections.
+  collections. A title that drops off its list stays for
+  `MELLO_AUTO_LIST_GRACE_DAYS` (default 14) before it is removed, and a title
+  that gets played is kept for good (it becomes a normal library entry, so
+  Jellyfin keeps its watch history; remove it through the API or admin page).
+
+### Admin page
+
+Open `http://<mello>:8080/admin` on a phone or computer, paste the admin key
+once (it stays in that browser), then search, add, remove and sync. The page
+uses the same `/api` endpoints as the examples below.
 
 ## Testing playback without Jellyfin
 
@@ -96,6 +109,7 @@ Set these in `.env` (see `.env.example`).
 | `MELLO_AUTO_LISTS` | – | See above. |
 | `MELLO_TMDB_LISTS` | – | See above. |
 | `MELLO_SYNC_INTERVAL_HOURS` | `6` | Automatic re-sync interval. |
+| `MELLO_AUTO_LIST_GRACE_DAYS` | `14` | Days a title that dropped off an auto list stays (0–365). |
 | `MELLO_INCLUDE_SPECIALS` | `false` | Include Season 00. |
 | `JELLYFIN_URL` / `JELLYFIN_API_KEY` | – | Trigger a Jellyfin library scan after changes. |
 | `MELLO_HOST` / `MELLO_PORT` | `0.0.0.0` / `8080` | Listen address. |

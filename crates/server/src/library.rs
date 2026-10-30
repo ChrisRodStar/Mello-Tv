@@ -8,6 +8,11 @@
 //!
 //! Jellyfin reads the `[tmdbid-…]` folder tag for metadata. Only folders this
 //! server created (tracked in `sync-state.json`) are ever modified or removed.
+//!
+//! Titles from auto lists (trending, popular, ...) come and go. One that drops
+//! off its list stays for a grace period (`MELLO_AUTO_LIST_GRACE_DAYS`), and
+//! one that gets played is kept for good: it joins the manual entries, so
+//! Jellyfin keeps its watch history until it is removed through the API.
 
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -70,6 +75,9 @@ struct SyncState {
     /// Item key (`movie:27205`) -> folder relative to the library root.
     #[serde(default)]
     items: BTreeMap<String, String>,
+    /// Auto-list item key -> when an auto list last included it.
+    #[serde(default)]
+    auto_seen: BTreeMap<String, DateTime<Utc>>,
 }
 
 #[derive(Clone, Debug, Default, Serialize)]
@@ -82,6 +90,8 @@ pub struct SyncReport {
     pub files_written: usize,
     pub files_removed: usize,
     pub folders_removed: usize,
+    /// Titles kept although they dropped off their auto list (grace period).
+    pub auto_list_grace: usize,
     pub failures: Vec<String>,
     pub jellyfin_refreshed: bool,
 }
@@ -96,6 +106,8 @@ pub struct Library {
     state_path: PathBuf,
     root: PathBuf,
     entries: Mutex<LibraryFile>,
+    /// Keys of titles that are in the library only because of an auto list.
+    auto_only: Mutex<BTreeSet<String>>,
     sync_lock: tokio::sync::Mutex<()>,
     wake: Notify,
     last_report: Mutex<SyncReport>,
@@ -110,6 +122,7 @@ struct SyncSettings {
     play_key: String,
     include_specials: bool,
     auto_lists: Vec<AutoList>,
+    auto_list_grace: Duration,
     tmdb_lists: Vec<u64>,
     interval: Duration,
     jellyfin_url: Option<Url>,
@@ -137,6 +150,7 @@ impl Library {
             state_path,
             root: config.library_dir.clone(),
             entries: Mutex::new(entries),
+            auto_only: Mutex::default(),
             sync_lock: tokio::sync::Mutex::new(()),
             wake: Notify::new(),
             last_report: Mutex::default(),
@@ -146,6 +160,7 @@ impl Library {
                 play_key: play_key.to_owned(),
                 include_specials: config.include_specials,
                 auto_lists: config.auto_lists.clone(),
+                auto_list_grace: config.auto_list_grace,
                 tmdb_lists: config.tmdb_lists.clone(),
                 interval: config.sync_interval,
                 jellyfin_url: config.jellyfin_url.clone(),
@@ -219,6 +234,26 @@ impl Library {
         Ok(removed)
     }
 
+    /// Called when a title starts playing. A title that is only here because
+    /// of an auto list becomes a manual entry, so it never disappears from
+    /// Jellyfin (with its watch history) when it stops trending.
+    pub async fn note_played(&self, kind: Kind, id: i64) {
+        let key = item_key(kind, id);
+        let auto_only = self.auto_only.lock().is_ok_and(|keys| keys.contains(&key));
+        if !auto_only {
+            return;
+        }
+        match self.add(kind, id).await {
+            Ok(entry) => {
+                if let Ok(mut keys) = self.auto_only.lock() {
+                    keys.remove(&key);
+                }
+                tracing::info!(title = %entry.title, %key, "played: kept in the library");
+            }
+            Err(error) => tracing::warn!(%key, %error, "could not keep a played auto-list title"),
+        }
+    }
+
     /// Runs forever: once at start, then on every change and on the interval.
     pub async fn run_sync_loop(self: Arc<Self>, shutdown: tokio_util::sync::CancellationToken) {
         loop {
@@ -260,12 +295,47 @@ impl Library {
             return report;
         }
 
-        let (wanted, complete) = self.wanted(&mut report).await;
+        let previous = self.load_state().await;
+        let (mut wanted, complete, auto_now) = self.wanted(&mut report).await;
+        let now = Utc::now();
+        let mut auto_seen: BTreeMap<String, DateTime<Utc>> =
+            auto_now.iter().map(|key| (key.clone(), now)).collect();
+        let grace = chrono::Duration::from_std(self.settings.auto_list_grace)
+            .unwrap_or_else(|_| chrono::Duration::days(14));
+        for (key, seen) in &previous.auto_seen {
+            if auto_seen.contains_key(key) {
+                continue;
+            }
+            // Dropped off its list: keep it for the grace period (and while a
+            // list failed to load, since then we cannot tell).
+            if (now - *seen < grace || !complete)
+                && let Some(item) = parse_key(key)
+            {
+                if wanted.insert(item) {
+                    report.auto_list_grace += 1;
+                }
+                auto_seen.insert(key.clone(), *seen);
+            }
+        }
+        let manual = self.entries();
+        let manual_keys: BTreeSet<String> = manual
+            .movies
+            .keys()
+            .map(|id| item_key(Kind::Movie, *id))
+            .chain(manual.shows.keys().map(|id| item_key(Kind::Tv, *id)))
+            .collect();
+        if let Ok(mut keys) = self.auto_only.lock() {
+            *keys = auto_seen
+                .keys()
+                .filter(|key| !manual_keys.contains(*key))
+                .cloned()
+                .collect();
+        }
         let mut plan: BTreeMap<String, PlannedItem> = BTreeMap::new();
         let mut failed: BTreeSet<String> = BTreeSet::new();
         let today = Utc::now().date_naive();
         for (kind, id) in wanted {
-            let key = format!("{}:{id}", kind.as_str());
+            let key = item_key(kind, id);
             let planned = match kind {
                 Kind::Movie => self.plan_movie(id).await,
                 Kind::Tv => self.plan_show(id, today).await,
@@ -288,8 +358,10 @@ impl Library {
             }
         }
 
-        let previous = self.load_state().await;
-        let mut next = SyncState::default();
+        let mut next = SyncState {
+            auto_seen,
+            ..SyncState::default()
+        };
         for (key, item) in &plan {
             if let Err(error) = self.write_item(item, &mut report).await {
                 report.failures.push(format!("{key}: {error}"));
@@ -338,9 +410,14 @@ impl Library {
     /// Manual entries plus configured TMDB collections and lists, de-duplicated.
     /// The wanted titles, and whether every list loaded. When a list fails,
     /// the set is incomplete and nothing may be deleted this round.
-    async fn wanted(&self, report: &mut SyncReport) -> (BTreeSet<(Kind, i64)>, bool) {
+    /// Also returns the keys the auto lists included this round.
+    async fn wanted(
+        &self,
+        report: &mut SyncReport,
+    ) -> (BTreeSet<(Kind, i64)>, bool, BTreeSet<String>) {
         let mut complete = true;
         let mut wanted = BTreeSet::new();
+        let mut auto = BTreeSet::new();
         let entries = self.entries();
         wanted.extend(entries.movies.keys().map(|id| (Kind::Movie, *id)));
         wanted.extend(entries.shows.keys().map(|id| (Kind::Tv, *id)));
@@ -351,7 +428,12 @@ impl Library {
                 .collection(list.kind.path(), Some(default_type), list.limit)
                 .await
             {
-                Ok(items) => extend_items(&mut wanted, items),
+                Ok(items) => {
+                    let mut found = BTreeSet::new();
+                    extend_items(&mut found, items);
+                    auto.extend(found.iter().map(|(kind, id)| item_key(*kind, *id)));
+                    wanted.extend(found);
+                }
                 Err(error) => {
                     complete = false;
                     report
@@ -373,7 +455,7 @@ impl Library {
                 }
             }
         }
-        (wanted, complete)
+        (wanted, complete, auto)
     }
 
     fn play_url(&self, path: &str, imdb: Option<&str>) -> String {
@@ -526,6 +608,15 @@ impl Library {
     }
 }
 
+fn item_key(kind: Kind, id: i64) -> String {
+    format!("{}:{id}", kind.as_str())
+}
+
+fn parse_key(key: &str) -> Option<(Kind, i64)> {
+    let (kind, id) = key.split_once(':')?;
+    Some((Kind::parse(kind)?, id.parse().ok()?))
+}
+
 fn extend_items(wanted: &mut BTreeSet<(Kind, i64)>, items: Vec<tmdb::ListItem>) {
     for item in items {
         if let Some(kind) = Kind::parse(&item.media_type) {
@@ -598,6 +689,7 @@ mod tests {
             sync_interval: Duration::from_secs(3600),
             include_specials: false,
             auto_lists: Vec::new(),
+            auto_list_grace: Duration::from_secs(14 * 86_400),
             tmdb_lists: Vec::new(),
             jellyfin_url: None,
             jellyfin_api_key: None,
@@ -688,6 +780,98 @@ mod tests {
         list_down.store(false, std::sync::atomic::Ordering::SeqCst);
         assert!(library.sync().await.failures.is_empty());
         assert!(movie.exists());
+        Ok(())
+    }
+
+    /// `/movie/popular` lists Inception while `listed` is set.
+    async fn mock_tmdb_with_popular(
+        listed: Arc<std::sync::atomic::AtomicBool>,
+    ) -> std::io::Result<String> {
+        use axum::{Json, Router, routing::get};
+        use serde_json::json;
+        let app = Router::new()
+            .route(
+                "/movie/popular",
+                get(move || {
+                    let listed = listed.load(std::sync::atomic::Ordering::SeqCst);
+                    async move {
+                        let results = if listed {
+                            json!([{"id":27205,"title":"Inception"}])
+                        } else {
+                            json!([])
+                        };
+                        Json(json!({"results": results, "total_pages": 1}))
+                    }
+                }),
+            )
+            .route(
+                "/movie/27205",
+                get(|| async {
+                    Json(json!({"title":"Inception","release_date":"2010-07-15","imdb_id":"tt1375666"}))
+                }),
+            );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let address = listener.local_addr()?;
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+        Ok(format!("http://{address}"))
+    }
+
+    #[tokio::test]
+    async fn auto_list_titles_get_a_grace_period_and_played_ones_stay()
+    -> Result<(), Box<dyn std::error::Error>> {
+        use crate::config::{AutoList, AutoListKind};
+        use std::sync::atomic::{AtomicBool, Ordering::SeqCst};
+        let data = tempfile::tempdir()?;
+        let root = tempfile::tempdir()?;
+        let listed = Arc::new(AtomicBool::new(true));
+        let base = mock_tmdb_with_popular(listed.clone()).await?;
+        let mut config = test_config(data.path(), root.path());
+        config.auto_lists = vec![AutoList {
+            kind: AutoListKind::PopularMovies,
+            limit: 20,
+        }];
+        let open = |config: Config| {
+            let base = base.clone();
+            async move {
+                let tmdb = Tmdb::new(Some("test".into()), None)?.with_base(&base);
+                Ok::<_, Box<dyn std::error::Error>>(Library::open(&config, tmdb, "playkey").await?)
+            }
+        };
+        let movie = root.path().join("movies/Inception (2010) [tmdbid-27205]");
+
+        let library = open(config.clone()).await?;
+        assert!(library.sync().await.failures.is_empty());
+        assert!(movie.exists());
+
+        // Drops off the list: kept during the grace period.
+        listed.store(false, SeqCst);
+        let report = library.sync().await;
+        assert_eq!((report.auto_list_grace, report.folders_removed), (1, 0));
+        assert!(movie.exists());
+
+        // Grace period over: removed.
+        config.auto_list_grace = Duration::ZERO;
+        let library = open(config.clone()).await?;
+        let report = library.sync().await;
+        assert_eq!((report.auto_list_grace, report.folders_removed), (0, 1));
+        assert!(!movie.exists());
+
+        // Back on the list and played: it becomes a manual entry and stays
+        // after the list drops it, even with no grace period.
+        listed.store(true, SeqCst);
+        library.sync().await;
+        library.note_played(Kind::Movie, 27205).await;
+        assert!(library.entries().movies.contains_key(&27205));
+        listed.store(false, SeqCst);
+        let report = library.sync().await;
+        assert_eq!(report.folders_removed, 0);
+        assert!(movie.exists());
+
+        // Playing a manual title changes nothing.
+        library.note_played(Kind::Movie, 27205).await;
+        assert_eq!(library.entries().movies.len(), 1);
         Ok(())
     }
 

@@ -79,6 +79,8 @@ pub struct Config {
     pub sync_interval: Duration,
     pub include_specials: bool,
     pub auto_lists: Vec<AutoList>,
+    /// How long a title that dropped off an auto list stays in the library.
+    pub auto_list_grace: Duration,
     pub tmdb_lists: Vec<u64>,
     pub jellyfin_url: Option<Url>,
     pub jellyfin_api_key: Option<String>,
@@ -188,6 +190,14 @@ impl Config {
                 .ok_or(ConfigError::Invalid("MELLO_SYNC_INTERVAL_HOURS", raw))?,
             None => 6,
         };
+        let grace_days = match env("MELLO_AUTO_LIST_GRACE_DAYS") {
+            Some(raw) => raw
+                .parse::<u64>()
+                .ok()
+                .filter(|d| *d <= 365)
+                .ok_or(ConfigError::Invalid("MELLO_AUTO_LIST_GRACE_DAYS", raw))?,
+            None => 14,
+        };
         let auto_lists = match env("MELLO_AUTO_LISTS") {
             Some(raw) => parse_auto_lists(&raw)?,
             None => Vec::new(),
@@ -232,6 +242,7 @@ impl Config {
             include_specials: env("MELLO_INCLUDE_SPECIALS")
                 .is_some_and(|v| matches!(v.as_str(), "1" | "true" | "yes")),
             auto_lists,
+            auto_list_grace: Duration::from_secs(grace_days * 86_400),
             tmdb_lists,
             jellyfin_url,
             jellyfin_api_key: env("JELLYFIN_API_KEY"),

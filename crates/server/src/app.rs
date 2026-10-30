@@ -5,6 +5,8 @@
 //!   URLs inside the `.strm` files.
 //! - `GET /stream/...` (per-session token): the relayed playlist and media.
 //! - `/api/...` (API key): library management, search and diagnostics.
+//! - `GET /admin`: a small page for managing the library from a phone. The
+//!   page itself is public; everything it does goes through `/api`.
 //! - `GET /health`: unauthenticated liveness.
 
 // Handlers return early with a ready-made `Response`; boxing it buys nothing.
@@ -134,6 +136,10 @@ impl AppState {
 pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/health", get(health))
+        .route("/admin", get(admin_page))
+        .route("/admin/", get(admin_page))
+        .route("/admin/admin.js", get(admin_js))
+        .route("/admin/admin.css", get(admin_css))
         .route("/play/movie/{id}", get(play_movie).options(preflight))
         .route(
             "/play/tv/{id}/{season}/{episode}",
@@ -229,6 +235,39 @@ async fn health() -> &'static str {
     "ok"
 }
 
+// ------------------------------------------------------------------ admin
+
+const ADMIN_CSP: &str = "default-src 'none'; script-src 'self'; style-src 'self'; \
+     connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'";
+
+fn admin_asset(content_type: &'static str, body: &'static str) -> Response {
+    let mut response = body.into_response();
+    let headers = response.headers_mut();
+    headers.insert(header::CONTENT_TYPE, HeaderValue::from_static(content_type));
+    headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"));
+    headers.insert(
+        header::CONTENT_SECURITY_POLICY,
+        HeaderValue::from_static(ADMIN_CSP),
+    );
+    headers.insert("x-frame-options", HeaderValue::from_static("DENY"));
+    response
+}
+
+async fn admin_page() -> Response {
+    admin_asset("text/html; charset=utf-8", include_str!("admin/index.html"))
+}
+
+async fn admin_js() -> Response {
+    admin_asset(
+        "text/javascript; charset=utf-8",
+        include_str!("admin/admin.js"),
+    )
+}
+
+async fn admin_css() -> Response {
+    admin_asset("text/css; charset=utf-8", include_str!("admin/admin.css"))
+}
+
 // ---------------------------------------------------------------- playback
 
 #[derive(Deserialize)]
@@ -317,6 +356,12 @@ async fn play(state: AppState, target: Target, query: PlayQuery) -> Response {
             format,
             ..
         }) => {
+            let kind = match target.media_type {
+                MediaType::Movie => Kind::Movie,
+                MediaType::Tv => Kind::Tv,
+            };
+            let library = state.library.clone();
+            tokio::spawn(async move { library.note_played(kind, target.id).await });
             if target.media_type == MediaType::Tv {
                 tokio::spawn(prefetch_next_episode(state.clone(), target, query.imdb));
             }

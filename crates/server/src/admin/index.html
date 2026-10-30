@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mello library</title>
+<link rel="stylesheet" href="/admin/admin.css">
+<script src="/admin/admin.js" defer></script>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Mello library</h1>
+    <p id="status" role="status">Checking…</p>
+  </header>
+
+  <section id="login" hidden>
+    <h2>API key</h2>
+    <p>Run <code>docker compose exec mello cat /data/api-key</code> on the server and paste the key here.
+      It is kept in this browser only.</p>
+    <form id="login-form">
+      <input id="key" type="password" autocomplete="off" required aria-label="API key">
+      <button>Save</button>
+    </form>
+  </section>
+
+  <section id="app" hidden>
+    <form id="search-form" class="row">
+      <input id="q" type="search" placeholder="Search movies and shows" required aria-label="Search">
+      <button>Search</button>
+    </form>
+    <ul id="results" class="list"></ul>
+
+    <div class="row between">
+      <h2>In the library</h2>
+      <button id="sync" class="secondary">Sync now</button>
+    </div>
+    <ul id="library" class="list"></ul>
+    <p class="foot"><button id="logout" class="link">Forget key</button></p>
+  </section>
+</main>
+</body>
+</html>

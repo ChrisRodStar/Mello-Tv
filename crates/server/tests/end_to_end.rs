@@ -421,6 +421,7 @@ async fn harness() -> Result<Option<Harness>, BoxError> {
         sync_interval: Duration::from_secs(3600),
         include_specials: false,
         auto_lists: Vec::new(),
+        auto_list_grace: Duration::from_secs(14 * 86_400),
         tmdb_lists: Vec::new(),
         jellyfin_url: None,
         jellyfin_api_key: None,
