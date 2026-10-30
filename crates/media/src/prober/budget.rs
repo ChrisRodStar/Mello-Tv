@@ -142,7 +142,8 @@ mod tests {
     }
 
     #[test]
-    fn probe_limits_accept_sixteen_mib_but_keep_an_explicit_upper_bound() -> ProbeResult<()> {
+    fn probe_limits_accept_sixteen_mib_but_keep_an_explicit_upper_bound()
+    -> Result<(), super::super::ProbeConfigError> {
         let transport = Arc::new(NoTransport);
         assert!(
             super::super::StreamProber::new(

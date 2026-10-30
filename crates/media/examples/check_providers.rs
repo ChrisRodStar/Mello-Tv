@@ -194,7 +194,7 @@ fn main() {
     host.prewarm();
     println!("ready in {} ms.", prewarm_t0.elapsed().as_millis());
 
-    let targets = vec![
+    let targets = [
         TestTarget {
             label: "Movie (Modern Sci-Fi): Inception (2010)",
             title: ProviderTitle {
