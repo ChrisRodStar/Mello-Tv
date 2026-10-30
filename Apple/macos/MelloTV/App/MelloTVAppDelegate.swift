@@ -148,7 +148,7 @@ final class MelloTVAppDelegate: NSObject, NSApplicationDelegate {
     @objc private func showAbout() {
         let release = Bundle.main.object(forInfoDictionaryKey: "MelloTVReleaseVersion") as? String
             ?? Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
-            ?? "0.1.0-alpha.3"
+            ?? "0.2.0"
         let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "3"
         NSApp.orderFrontStandardAboutPanel(options: [.applicationVersion: release, .version: build])
     }
