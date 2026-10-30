@@ -238,7 +238,7 @@ pub struct HttpClient {
     admitted: Arc<Semaphore>,
     origins: Arc<Mutex<BTreeMap<String, Instant>>>,
     proxy_host: Option<Arc<str>>,
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-fixtures"))]
     pub(super) fixture_origins: Arc<std::collections::BTreeSet<String>>,
 }
 impl fmt::Debug for HttpClient {
@@ -249,6 +249,14 @@ impl fmt::Debug for HttpClient {
 impl HttpClient {
     pub fn new() -> Result<Self, TransportError> {
         Self::with_config(TransportConfig::default())
+    }
+    /// Test hook: lets these exact origins (e.g. a local fake CDN) bypass the
+    /// public-address policy. Compiled only for tests and the opt-in
+    /// `test-fixtures` feature, never into release builds.
+    #[cfg(any(test, feature = "test-fixtures"))]
+    pub fn with_fixture_origins(mut self, origins: impl IntoIterator<Item = String>) -> Self {
+        self.fixture_origins = Arc::new(origins.into_iter().collect());
+        self
     }
     pub fn max_response_bytes(&self) -> usize {
         self.config.max_response_bytes
@@ -310,7 +318,7 @@ impl HttpClient {
             proxy_host: proxy_host.map(Arc::from),
             config: Arc::new(config),
             origins: Arc::default(),
-            #[cfg(test)]
+            #[cfg(any(test, feature = "test-fixtures"))]
             fixture_origins: Arc::default(),
         })
     }
@@ -666,7 +674,7 @@ impl HttpClient {
         Ok(())
     }
     fn destination(&self, raw: &str) -> Result<Url, TransportError> {
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test-fixtures"))]
         if let Ok(url) = Url::parse(raw)
             && self
                 .fixture_origins
@@ -680,7 +688,7 @@ impl HttpClient {
         destination::parse_destination_url(raw)
     }
     fn redirect(&self, from: &Url, raw: &str) -> Result<Url, TransportError> {
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test-fixtures"))]
         if self
             .fixture_origins
             .contains(&from.origin().ascii_serialization())

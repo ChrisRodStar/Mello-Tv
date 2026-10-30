@@ -1780,6 +1780,7 @@ dependencies = [
 name = "stream-server"
 version = "0.1.0-alpha.3"
 dependencies = [
+ "async-trait",
  "axum",
  "chrono",
  "getrandom 0.4.3",

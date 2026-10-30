@@ -204,6 +204,21 @@ impl MediaRelay {
         Some(format)
     }
 
+    /// Time since the session last served a request, if it still exists.
+    pub fn session_idle(&self, session_id: &str) -> Option<Duration> {
+        let map = self.sessions.lock().ok()?;
+        map.get(session_id).map(|s| s.last_used.elapsed())
+    }
+
+    /// Restarts the idle clock, e.g. when a prefetched session is claimed.
+    pub fn touch_session(&self, session_id: &str) {
+        if let Ok(mut map) = self.sessions.lock()
+            && let Some(session) = map.get_mut(session_id)
+        {
+            session.last_used = Instant::now();
+        }
+    }
+
     pub fn has_session(&self, session_id: &str) -> bool {
         self.sessions
             .lock()
@@ -232,10 +247,12 @@ impl MediaRelay {
 
     /// Fetches the session's entry media. If the active source fails before
     /// anything was delivered, the next measured backup is tried automatically.
+    /// `url_base` is prefixed to rewritten playlist URIs (see `HlsManifestRewriter`).
     pub async fn fetch_entry(
         &self,
         session_id: &str,
         token: &str,
+        url_base: &str,
         range_header: Option<&str>,
     ) -> Result<RelayResponse, RelayError> {
         loop {
@@ -261,6 +278,7 @@ impl MediaRelay {
                 .proxy_url(
                     session_id,
                     token,
+                    url_base,
                     &upstream_url,
                     kind,
                     &context,
@@ -299,6 +317,7 @@ impl MediaRelay {
         session_id: &str,
         resource_file: &str,
         token: &str,
+        url_base: &str,
         range_header: Option<&str>,
     ) -> Result<RelayResponse, RelayError> {
         let resource_id = resource_file
@@ -321,6 +340,7 @@ impl MediaRelay {
         self.proxy_url(
             session_id,
             token,
+            url_base,
             &upstream_url,
             kind,
             &context,
@@ -329,10 +349,12 @@ impl MediaRelay {
         .await
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn proxy_url(
         &self,
         session_id: &str,
         token: &str,
+        url_base: &str,
         upstream_url: &str,
         kind: ResourceKind,
         context: &FetchContext,
@@ -403,6 +425,7 @@ impl MediaRelay {
             let rewritten = HlsManifestRewriter::rewrite(
                 &full,
                 &final_url,
+                url_base,
                 session_id,
                 token,
                 playlist_kind,
@@ -550,6 +573,7 @@ mod tests {
             .proxy_url(
                 "s",
                 "t",
+                "",
                 "http://127.0.0.1:9/secret",
                 ResourceKind::Segment,
                 &FetchContext::default(),

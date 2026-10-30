@@ -260,7 +260,7 @@ impl Library {
             return report;
         }
 
-        let wanted = self.wanted(&mut report).await;
+        let (wanted, complete) = self.wanted(&mut report).await;
         let mut plan: BTreeMap<String, PlannedItem> = BTreeMap::new();
         let mut failed: BTreeSet<String> = BTreeSet::new();
         let today = Utc::now().date_naive();
@@ -306,8 +306,9 @@ impl Library {
             if plan.contains_key(key) {
                 continue;
             }
-            if failed.contains(key) {
-                // Keep what Jellyfin already has while TMDB is unavailable.
+            if failed.contains(key) || !complete {
+                // Keep what Jellyfin already has while TMDB is unavailable:
+                // re-creating an item later would lose its watch history.
                 next.items.insert(key.clone(), dir.clone());
             } else if self.remove_managed_dir(dir).await {
                 report.folders_removed += 1;
@@ -335,7 +336,10 @@ impl Library {
     }
 
     /// Manual entries plus configured TMDB collections and lists, de-duplicated.
-    async fn wanted(&self, report: &mut SyncReport) -> BTreeSet<(Kind, i64)> {
+    /// The wanted titles, and whether every list loaded. When a list fails,
+    /// the set is incomplete and nothing may be deleted this round.
+    async fn wanted(&self, report: &mut SyncReport) -> (BTreeSet<(Kind, i64)>, bool) {
+        let mut complete = true;
         let mut wanted = BTreeSet::new();
         let entries = self.entries();
         wanted.extend(entries.movies.keys().map(|id| (Kind::Movie, *id)));
@@ -348,9 +352,12 @@ impl Library {
                 .await
             {
                 Ok(items) => extend_items(&mut wanted, items),
-                Err(error) => report
-                    .failures
-                    .push(format!("list {}: {error}", list.kind.path())),
+                Err(error) => {
+                    complete = false;
+                    report
+                        .failures
+                        .push(format!("list {}: {error}", list.kind.path()));
+                }
             }
         }
         for id in &self.settings.tmdb_lists {
@@ -360,10 +367,13 @@ impl Library {
                 .await
             {
                 Ok(items) => extend_items(&mut wanted, items),
-                Err(error) => report.failures.push(format!("TMDB list {id}: {error}")),
+                Err(error) => {
+                    complete = false;
+                    report.failures.push(format!("TMDB list {id}: {error}"));
+                }
             }
         }
-        wanted
+        (wanted, complete)
     }
 
     fn play_url(&self, path: &str, imdb: Option<&str>) -> String {
@@ -595,9 +605,31 @@ mod tests {
     }
 
     async fn mock_tmdb() -> std::io::Result<String> {
-        use axum::{Json, Router, routing::get};
+        Ok(mock_tmdb_with_list(Arc::default()).await?.0)
+    }
+
+    /// `/list/7` holds Inception until `list_down` is set, then returns 500.
+    async fn mock_tmdb_with_list(
+        list_down: Arc<std::sync::atomic::AtomicBool>,
+    ) -> std::io::Result<(String, Arc<std::sync::atomic::AtomicBool>)> {
+        use axum::{Json, Router, http::StatusCode, response::IntoResponse, routing::get};
         use serde_json::json;
+        let down = list_down.clone();
         let app = Router::new()
+            .route(
+                "/list/7",
+                get(move || {
+                    let down = down.clone();
+                    async move {
+                        if down.load(std::sync::atomic::Ordering::SeqCst) {
+                            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+                        } else {
+                            Json(json!({"items":[{"id":27205,"media_type":"movie","title":"Inception"}],"total_pages":1}))
+                                .into_response()
+                        }
+                    }
+                }),
+            )
             .route(
                 "/movie/27205",
                 get(|| async {
@@ -629,7 +661,34 @@ mod tests {
         tokio::spawn(async move {
             let _ = axum::serve(listener, app).await;
         });
-        Ok(format!("http://{address}"))
+        Ok((format!("http://{address}"), list_down))
+    }
+
+    #[tokio::test]
+    async fn a_failing_list_never_deletes_titles() -> Result<(), Box<dyn std::error::Error>> {
+        let data = tempfile::tempdir()?;
+        let root = tempfile::tempdir()?;
+        let (base, list_down) = mock_tmdb_with_list(Arc::default()).await?;
+        let tmdb = Tmdb::new(Some("test".into()), None)?.with_base(&base);
+        let mut config = test_config(data.path(), root.path());
+        config.tmdb_lists = vec![7];
+        let library = Library::open(&config, tmdb, "playkey").await?;
+        let movie = root.path().join("movies/Inception (2010) [tmdbid-27205]");
+
+        assert!(library.sync().await.failures.is_empty());
+        assert!(movie.exists());
+
+        list_down.store(true, std::sync::atomic::Ordering::SeqCst);
+        let report = library.sync().await;
+        assert_eq!(report.failures.len(), 1, "{:?}", report.failures);
+        assert_eq!(report.folders_removed, 0);
+        assert!(movie.exists(), "a TMDB outage must not delete titles");
+
+        // Once the list loads again, a title really removed from it goes.
+        list_down.store(false, std::sync::atomic::Ordering::SeqCst);
+        assert!(library.sync().await.failures.is_empty());
+        assert!(movie.exists());
+        Ok(())
     }
 
     #[tokio::test]

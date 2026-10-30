@@ -43,12 +43,16 @@ use crate::{
     tmdb::{Tmdb, TmdbError},
 };
 
-/// A resolved session is reused for repeat opens of the same title (Jellyfin
-/// probes a file, then plays it) for this long.
+/// A resolved session is reused for repeat opens of the same title for as
+/// long as it keeps being used. Jellyfin probes a file before playing it, and
+/// restarts its ffmpeg on the `.strm` URL for every seek while remuxing or
+/// transcoding, so a seek an hour in must not trigger a fresh provider search.
 const SESSION_REUSE: Duration = Duration::from_secs(20 * 60);
 /// After a failed resolution, answer immediately instead of re-running all
 /// providers for every retry.
 const FAILURE_BACKOFF: Duration = Duration::from_secs(60);
+/// A next episode resolved ahead of time stays ready this long before use.
+const PREFETCH_HOLD: Duration = Duration::from_secs(2 * 3600);
 
 #[derive(Clone)]
 pub struct AppState {
@@ -73,8 +77,9 @@ enum CachedPlay {
         format: StreamFormat,
         height: Option<i64>,
         provider: String,
-        created: Instant,
         source_expires: Option<chrono::DateTime<Utc>>,
+        /// Resolved ahead of time and not yet played.
+        prefetched: bool,
     },
     Failed {
         at: Instant,
@@ -305,13 +310,16 @@ async fn play(state: AppState, target: Target, query: PlayQuery) -> Response {
     if let Err(response) = target.validate() {
         return response;
     }
-    let mut response = match ensure_session(&state, target, query.imdb).await {
+    let mut response = match ensure_session(&state, target, query.imdb.clone(), false).await {
         Ok(CachedPlay::Ready {
             session_id,
             token,
             format,
             ..
         }) => {
+            if target.media_type == MediaType::Tv {
+                tokio::spawn(prefetch_next_episode(state.clone(), target, query.imdb));
+            }
             let location = entry_path(&session_id, &token, format);
             let mut response = StatusCode::FOUND.into_response();
             if let Ok(value) = HeaderValue::from_str(&location) {
@@ -340,20 +348,27 @@ fn entry_path(session_id: &str, token: &str, format: StreamFormat) -> String {
     format!("/stream/{session_id}/{file}?st={token}")
 }
 
+/// Returns a ready session for `target`, resolving one if needed. Concurrent
+/// callers for the same title share one resolution. `prefetch` marks a
+/// session resolved ahead of time; a normal call claims it for playback.
 async fn ensure_session(
     state: &AppState,
     target: Target,
     imdb: Option<String>,
+    prefetch: bool,
 ) -> Result<CachedPlay, String> {
     let key = target.cache_key();
     let lock = state.title_lock(&key);
     let _guard = lock.lock().await;
 
-    if let Some(cached) = cached_play(state, &key) {
+    if let Some(cached) = cached_play(state, &key, !prefetch) {
         return Ok(cached);
     }
+    if prefetch {
+        tracing::info!(title = %key, "prefetching next episode");
+    }
 
-    let result = resolve(state, target, imdb).await;
+    let result = resolve(state, target, imdb, prefetch).await;
     let entry = match result {
         Ok(entry) => entry,
         Err(reason) => {
@@ -366,7 +381,14 @@ async fn ensure_session(
     };
     if let Ok(mut cache) = state.play_cache.lock() {
         cache.retain(|_, entry| match entry {
-            CachedPlay::Ready { created, .. } => created.elapsed() < SESSION_REUSE,
+            CachedPlay::Ready {
+                session_id,
+                prefetched,
+                ..
+            } => state
+                .relay
+                .session_idle(session_id)
+                .is_some_and(|idle| idle < idle_limit(*prefetched)),
             CachedPlay::Failed { at, .. } => at.elapsed() < FAILURE_BACKOFF,
         });
         cache.insert(key, entry.clone());
@@ -374,24 +396,80 @@ async fn ensure_session(
     Ok(entry)
 }
 
-fn cached_play(state: &AppState, key: &str) -> Option<CachedPlay> {
-    let cache = state.play_cache.lock().ok()?;
-    let entry = cache.get(key)?;
+fn idle_limit(prefetched: bool) -> Duration {
+    if prefetched {
+        PREFETCH_HOLD
+    } else {
+        SESSION_REUSE
+    }
+}
+
+/// A cached entry that is still usable. `claim` marks a prefetched session
+/// as in use, so it falls back to the normal idle window.
+fn cached_play(state: &AppState, key: &str, claim: bool) -> Option<CachedPlay> {
+    let mut cache = state.play_cache.lock().ok()?;
+    let entry = cache.get_mut(key)?;
     match entry {
         CachedPlay::Ready {
             session_id,
-            created,
             source_expires,
+            prefetched,
             ..
         } => {
             let fresh_source = source_expires
                 .is_none_or(|expires| expires > Utc::now() + chrono::Duration::minutes(10));
-            (created.elapsed() < SESSION_REUSE
-                && fresh_source
-                && state.relay.has_session(session_id))
-            .then(|| entry.clone())
+            let active = state
+                .relay
+                .session_idle(session_id)
+                .is_some_and(|idle| idle < idle_limit(*prefetched));
+            if !(active && fresh_source) {
+                return None;
+            }
+            if claim && *prefetched {
+                *prefetched = false;
+                state.relay.touch_session(session_id);
+            }
+            Some(entry.clone())
         }
         CachedPlay::Failed { at, .. } => (at.elapsed() < FAILURE_BACKOFF).then(|| entry.clone()),
+    }
+}
+
+/// Resolves the episode after `current` in the background so Jellyfin's
+/// "next episode" starts without waiting for a provider search.
+async fn prefetch_next_episode(state: AppState, current: Target, imdb: Option<String>) {
+    let (Some(season), Some(episode)) = (current.season, current.episode) else {
+        return;
+    };
+    let mut next = (season, episode + 1);
+    if state.tmdb.configured()
+        && let Ok(details) = state.tmdb.season(current.id, season, false).await
+    {
+        let last = details
+            .episodes
+            .iter()
+            .map(|e| e.episode_number)
+            .max()
+            .unwrap_or(0);
+        if episode >= last {
+            let has_next_season = state
+                .tmdb
+                .show(current.id, false)
+                .await
+                .is_ok_and(|show| show.seasons.iter().any(|s| s.season_number == season + 1));
+            if !has_next_season {
+                return;
+            }
+            next = (season + 1, 1);
+        }
+    }
+    let target = Target {
+        season: Some(next.0),
+        episode: Some(next.1),
+        ..current
+    };
+    if target.validate().is_ok() {
+        let _ = ensure_session(&state, target, imdb, true).await;
     }
 }
 
@@ -399,6 +477,7 @@ async fn resolve(
     state: &AppState,
     target: Target,
     imdb: Option<String>,
+    prefetch: bool,
 ) -> Result<CachedPlay, String> {
     let imdb = match imdb.filter(|id| id.starts_with("tt") && id.len() <= 12) {
         Some(id) => id,
@@ -442,10 +521,15 @@ async fn resolve(
         .resolve_stream(&lookup)
         .await
         .map_err(|e| e.to_string())?;
-    install(state, selection, started)
+    install(state, selection, started, prefetch)
 }
 
-fn install(state: &AppState, selection: Selection, started: Instant) -> Result<CachedPlay, String> {
+fn install(
+    state: &AppState,
+    selection: Selection,
+    started: Instant,
+    prefetched: bool,
+) -> Result<CachedPlay, String> {
     let selected = selection
         .selected
         .as_ref()
@@ -478,8 +562,8 @@ fn install(state: &AppState, selection: Selection, started: Instant) -> Result<C
         format,
         height,
         provider,
-        created: Instant::now(),
         source_expires,
+        prefetched,
     })
 }
 
@@ -516,7 +600,13 @@ async fn stream_entry(
         return StatusCode::FORBIDDEN.into_response();
     };
     let range = headers.get(header::RANGE).and_then(|v| v.to_str().ok());
-    relay_response(state.relay.fetch_entry(&session, &token, range).await)
+    let base = url_base(&state.public_url, &headers);
+    relay_response(
+        state
+            .relay
+            .fetch_entry(&session, &token, &base, range)
+            .await,
+    )
 }
 
 async fn stream_resource(
@@ -529,12 +619,53 @@ async fn stream_resource(
         return StatusCode::FORBIDDEN.into_response();
     };
     let range = headers.get(header::RANGE).and_then(|v| v.to_str().ok());
+    let base = url_base(&state.public_url, &headers);
     relay_response(
         state
             .relay
-            .fetch_resource(&session, &file, &token, range)
+            .fetch_resource(&session, &file, &token, &base, range)
             .await,
     )
+}
+
+/// Absolute base for URLs inside relayed playlists: the address the requester
+/// actually used to reach Mello. Absolute URLs keep working when Jellyfin
+/// proxies a playlist, and each client keeps using the name it can reach
+/// (LAN IP, Tailscale name, ...). Falls back to `MELLO_PUBLIC_URL`.
+fn url_base(public_url: &url::Url, headers: &HeaderMap) -> String {
+    let public = public_url.as_str().trim_end_matches('/').to_owned();
+    let Some(host) = headers
+        .get(header::HOST)
+        .and_then(|value| value.to_str().ok())
+        .filter(|host| valid_host(host))
+    else {
+        return public;
+    };
+    let public_authority = match (public_url.host_str(), public_url.port()) {
+        (Some(h), Some(p)) => format!("{h}:{p}"),
+        (Some(h), None) => h.to_owned(),
+        _ => String::new(),
+    };
+    if host.eq_ignore_ascii_case(&public_authority) {
+        // Same address as configured: keep its scheme and any path prefix.
+        return public;
+    }
+    let scheme = match headers
+        .get("x-forwarded-proto")
+        .and_then(|value| value.to_str().ok())
+    {
+        Some("https") => "https",
+        _ => "http",
+    };
+    format!("{scheme}://{host}")
+}
+
+fn valid_host(host: &str) -> bool {
+    !host.is_empty()
+        && host.len() <= 255
+        && host
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b':' | b'[' | b']'))
 }
 
 fn relay_response(result: Result<RelayResponse, RelayError>) -> Response {
@@ -773,7 +904,7 @@ async fn api_resolve(
         return response;
     }
     let started = Instant::now();
-    match ensure_session(&state, target, None).await {
+    match ensure_session(&state, target, None, false).await {
         Ok(CachedPlay::Ready {
             session_id,
             token,
@@ -796,5 +927,48 @@ async fn api_resolve(
             StatusCode::NOT_FOUND,
             format!("no playable source: {reason}"),
         ),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn headers(host: &str, proto: Option<&str>) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        if let Ok(value) = HeaderValue::from_str(host) {
+            headers.insert(header::HOST, value);
+        }
+        if let Some(proto) = proto.and_then(|p| HeaderValue::from_str(p).ok()) {
+            headers.insert("x-forwarded-proto", proto);
+        }
+        headers
+    }
+
+    #[test]
+    fn playlist_base_follows_the_address_the_client_used() -> Result<(), url::ParseError> {
+        let public = url::Url::parse("https://media.example.com/mello")?;
+        assert_eq!(
+            url_base(&public, &headers("media.example.com", None)),
+            "https://media.example.com/mello"
+        );
+        assert_eq!(
+            url_base(&public, &headers("100.64.1.2:8080", None)),
+            "http://100.64.1.2:8080"
+        );
+        assert_eq!(
+            url_base(&public, &headers("box.tail.ts.net", Some("https"))),
+            "https://box.tail.ts.net"
+        );
+        // Anything odd in Host falls back to the configured address.
+        assert_eq!(
+            url_base(&public, &headers("evil.com/\"x", None)),
+            "https://media.example.com/mello"
+        );
+        assert_eq!(
+            url_base(&public, &HeaderMap::new()),
+            "https://media.example.com/mello"
+        );
+        Ok(())
     }
 }

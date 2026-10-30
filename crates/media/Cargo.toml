@@ -26,5 +26,9 @@ getrandom.workspace = true
 subtle.workspace = true
 tracing.workspace = true
 
+[features]
+# Lets tests point the relay at local fake servers. Never enable in builds.
+test-fixtures = []
+
 [lints]
 workspace = true

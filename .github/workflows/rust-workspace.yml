@@ -31,6 +31,8 @@ jobs:
         run: cargo fmt --all --check
       - name: Check production and test code
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Install ffmpeg (end-to-end playback tests)
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
       - name: Rust contracts and unit tests
         run: cargo test --workspace --locked
       - name: Docker image builds

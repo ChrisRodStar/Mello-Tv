@@ -1,24 +1,15 @@
 //! mello-jellyfin: resolves streams on demand for Jellyfin `.strm` files and
 //! keeps a Jellyfin library folder in sync with a list of wanted titles.
 
-mod app;
-mod auth;
-mod config;
-mod library;
-mod tmdb;
-
-use std::{process::ExitCode, sync::Arc, time::Duration};
+use std::{process::ExitCode, sync::Arc};
 
 use stream_core::ports::MediaEngine;
-use stream_media::{
-    DiscoveryCoordinator, HttpClient, MediaRelay,
-    network::{EgressMode, TransportConfig},
-};
+use stream_media::{DiscoveryCoordinator, HttpClient, MediaRelay, network::EgressMode};
 use tokio_util::sync::CancellationToken;
 use tracing_subscriber::EnvFilter;
 
-use crate::{
-    app::{AppState, AppStateInit},
+use stream_server::{
+    app::{self, AppState, AppStateInit},
     auth::Keys,
     config::Config,
     library::Library,
@@ -48,17 +39,9 @@ async fn shutdown_signal() {
 }
 
 fn relay_client(egress: EgressMode) -> Result<HttpClient, Box<dyn std::error::Error>> {
-    Ok(HttpClient::with_config(TransportConfig {
+    Ok(HttpClient::with_config(stream_server::relay_transport(
         egress,
-        max_in_flight: 128,
-        max_queued: 512,
-        max_origins: 512,
-        max_response_bytes: 64 * 1024 * 1024,
-        max_redirects: 5,
-        request_timeout: Duration::from_secs(30),
-        connect_timeout: Duration::from_secs(6),
-        read_timeout: Duration::from_secs(30),
-    })?)
+    ))?)
 }
 
 async fn run() -> Result<(), Box<dyn std::error::Error>> {

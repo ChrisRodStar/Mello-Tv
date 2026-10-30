@@ -60,12 +60,16 @@ impl ResourceKind {
 pub struct HlsManifestRewriter;
 
 impl HlsManifestRewriter {
-    /// Rewrites every URI in a playlist to a relay path. `playlist_kind` says
-    /// whether this playlist was reached as a subtitle rendition, so its
-    /// segments are labelled as WebVTT.
+    /// Rewrites every URI in a playlist to a relay URL. `url_base` (e.g.
+    /// `http://192.168.1.50:8080`, or empty for root-relative paths) makes the
+    /// URLs absolute so the playlist still works when another server, such as
+    /// Jellyfin, proxies it. `playlist_kind` says whether this playlist was
+    /// reached as a subtitle rendition, so its segments are labelled WebVTT.
+    #[allow(clippy::too_many_arguments)]
     pub fn rewrite<F>(
         manifest_bytes: &[u8],
         base_url: &Url,
+        url_base: &str,
         session_id: &str,
         token: &str,
         playlist_kind: ResourceKind,
@@ -93,6 +97,7 @@ impl HlsManifestRewriter {
         };
         let fragmented = text.contains("#EXT-X-MAP");
         let mut writer = Writer {
+            url_base,
             session_id,
             token,
             fragmented,
@@ -139,6 +144,7 @@ impl HlsManifestRewriter {
 }
 
 struct Writer<'a> {
+    url_base: &'a str,
     session_id: &'a str,
     token: &'a str,
     fragmented: bool,
@@ -146,6 +152,7 @@ struct Writer<'a> {
 
 impl Writer<'_> {
     fn path(&mut self, out: &mut String, rid: &str, kind: ResourceKind, upstream: &Url) {
+        out.push_str(self.url_base);
         out.push_str("/stream/");
         out.push_str(self.session_id);
         out.push_str("/r/");
@@ -248,6 +255,7 @@ mod tests {
         let out = HlsManifestRewriter::rewrite(
             manifest.as_bytes(),
             &base,
+            "",
             "sid",
             "tok",
             kind,
@@ -301,11 +309,29 @@ mod tests {
     }
 
     #[test]
+    fn absolute_base_is_prefixed() {
+        let base = Url::parse("https://cdn.example.com/").unwrap();
+        let out = HlsManifestRewriter::rewrite(
+            b"#EXTM3U\n#EXT-X-MAP:URI=\"i.mp4\"\n#EXTINF:4,\na.ts\n",
+            &base,
+            "http://10.0.0.5:8080",
+            "s",
+            "t",
+            ResourceKind::Playlist,
+            |_, _| "r".into(),
+        )
+        .unwrap();
+        assert!(out.contains("URI=\"http://10.0.0.5:8080/stream/s/r/r.mp4?st=t\""));
+        assert!(out.contains("\nhttp://10.0.0.5:8080/stream/s/r/r.m4s?st=t\n"));
+    }
+
+    #[test]
     fn rejects_non_http_uris() {
         let base = Url::parse("https://cdn.example.com/").unwrap();
         let result = HlsManifestRewriter::rewrite(
             b"#EXTM3U\nfile:///etc/passwd\n",
             &base,
+            "",
             "s",
             "t",
             ResourceKind::Playlist,
