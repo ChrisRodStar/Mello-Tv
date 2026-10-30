@@ -711,18 +711,18 @@ async fn queue_profile_recommendations(
                 ),
             };
             state_for_job.set_catalog_request_status(&job_key, status, reason);
-            if let Some(outcome) = state_for_job.catalog_request_status(&job_key) {
-                if let Ok(value) = serde_json::to_value(outcome) {
-                    let _ = state_for_job
-                        .accounts
-                        .put_profile_metadata(
-                            &state_for_job.household_account_id,
-                            &profile_id,
-                            "recommendation-outcome",
-                            value,
-                        )
-                        .await;
-                }
+            if let Some(outcome) = state_for_job.catalog_request_status(&job_key)
+                && let Ok(value) = serde_json::to_value(outcome)
+            {
+                let _ = state_for_job
+                    .accounts
+                    .put_profile_metadata(
+                        &state_for_job.household_account_id,
+                        &profile_id,
+                        "recommendation-outcome",
+                        value,
+                    )
+                    .await;
             }
             match result {
                 Ok(record) if record.data.sections.is_empty() && preserve_stale => state_for_job.set_catalog_generation_stale(&profile_id, Some("No new matching titles; showing the last saved recommendations.".to_owned())),
