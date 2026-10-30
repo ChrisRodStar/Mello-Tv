@@ -14,6 +14,7 @@ pub struct AppState {
     pub media: Arc<dyn MediaEngine>,
     pub relay: Arc<MediaRelay>,
     pub catalog_worker: Option<Arc<CatalogWorker>>,
+    pub jellyfin: Option<Arc<crate::jellyfin::JellyfinBridge>>,
     catalog_generation: Arc<Mutex<HashMap<String, CatalogGeneration>>>,
     catalog_jobs: Arc<Mutex<HashMap<String, bool>>>,
     catalog_request_status: Arc<Mutex<HashMap<String, CatalogGeneration>>>,
@@ -41,6 +42,7 @@ impl AppState {
             media,
             relay: Arc::new(MediaRelay::new()),
             catalog_worker: None,
+            jellyfin: None,
             catalog_generation: Arc::new(Mutex::new(HashMap::new())),
             catalog_jobs: Arc::new(Mutex::new(HashMap::new())),
             catalog_request_status: Arc::new(Mutex::new(HashMap::new())),
@@ -58,6 +60,11 @@ impl AppState {
 
     pub fn with_port(mut self, port: u16) -> Self {
         self.http_port = port;
+        self
+    }
+
+    pub fn with_jellyfin(mut self, bridge: Option<Arc<crate::jellyfin::JellyfinBridge>>) -> Self {
+        self.jellyfin = bridge;
         self
     }
 

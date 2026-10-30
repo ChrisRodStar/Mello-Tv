@@ -76,6 +76,8 @@ Your profiles, watch history, and saved titles stay in the `mello-data` volume w
 
 [More Docker options →](docs/DOCKER.md)
 
+[Use Mello TV with Jellyfin →](docs/JELLYFIN.md)
+
 > Run a VPN on the computer hosting Mello TV. Use your home network, or Tailscale when you're away.
 
 ---

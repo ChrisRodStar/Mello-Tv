@@ -1,5 +1,6 @@
 pub mod activity;
 pub mod browse;
+pub mod jellyfin;
 pub mod profiles;
 pub mod providers;
 pub mod stream;
@@ -15,6 +16,7 @@ pub fn build_router(state: AppState) -> Router {
 pub fn build_router_with_static(state: AppState, static_dir: Option<PathBuf>) -> Router {
     let mut router = Router::new()
         .merge(activity::routes())
+        .merge(jellyfin::routes())
         .merge(browse::routes())
         .merge(profiles::routes())
         .merge(providers::routes())

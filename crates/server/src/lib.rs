@@ -4,6 +4,7 @@ pub mod catalog_service;
 pub mod discovery;
 pub mod error;
 pub mod extractors;
+pub mod jellyfin;
 pub mod middleware;
 pub mod routes;
 pub mod state;

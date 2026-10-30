@@ -90,6 +90,7 @@ struct SessionState {
     backup_index: usize,
     resources: BTreeMap<String, String>,
     created_at: Instant,
+    public_url: Option<String>,
 }
 
 pub struct MediaRelay {
@@ -131,6 +132,18 @@ impl MediaRelay {
         let mut activity = self.activity.lock().ok()?;
         activity.retain(|_, session| session.is_active(now));
         Some(activity.len())
+    }
+
+    /// Includes response bodies still being delivered and the buffering grace period.
+    pub fn session_active(&self, session_id: &str) -> bool {
+        self.activity
+            .lock()
+            .map(|activity| {
+                activity
+                    .get(session_id)
+                    .is_some_and(|session| session.is_active(Instant::now()))
+            })
+            .unwrap_or(false)
     }
 
     pub fn note_playback_activity(&self, session_id: &str) {
@@ -195,6 +208,45 @@ impl MediaRelay {
         token: String,
         selection: Selection,
     ) -> bool {
+        self.register_session_inner(session_id, token, selection, None)
+    }
+
+    /// Register a remote-library session with an explicitly configured URL.
+    /// Existing native/web sessions continue to emit relative resource URLs.
+    pub fn register_session_with_public_url(
+        &self,
+        session_id: String,
+        token: String,
+        selection: Selection,
+        public_url: &str,
+    ) -> bool {
+        let Ok(parsed) = Url::parse(public_url) else {
+            return false;
+        };
+        if !matches!(parsed.scheme(), "http" | "https")
+            || parsed.host_str().is_none()
+            || !parsed.username().is_empty()
+            || parsed.password().is_some()
+            || parsed.query().is_some()
+            || parsed.fragment().is_some()
+        {
+            return false;
+        }
+        self.register_session_inner(
+            session_id,
+            token,
+            selection,
+            Some(parsed.as_str().trim_end_matches('/').to_owned()),
+        )
+    }
+
+    fn register_session_inner(
+        &self,
+        session_id: String,
+        token: String,
+        selection: Selection,
+        public_url: Option<String>,
+    ) -> bool {
         let Some(selected) = selection.selected else {
             return false;
         };
@@ -224,6 +276,7 @@ impl MediaRelay {
                     backup_index: 0,
                     resources: BTreeMap::new(),
                     created_at: Instant::now(),
+                    public_url,
                 },
             );
             true
@@ -471,7 +524,7 @@ impl MediaRelay {
         let res = req
             .send()
             .await
-            .map_err(|e| RelayError::Upstream(e.to_string()))?;
+            .map_err(|e| RelayError::Upstream(e.without_url().to_string()))?;
 
         let status = res.status().as_u16();
         if !res.status().is_success() {
@@ -501,14 +554,14 @@ impl MediaRelay {
         let mut byte_stream = res.bytes_stream();
         let first_chunk = match byte_stream.next().await {
             Some(Ok(chunk)) => chunk,
-            Some(Err(e)) => return Err(RelayError::Upstream(e.to_string())),
+            Some(Err(e)) => return Err(RelayError::Upstream(e.without_url().to_string())),
             None => Bytes::new(),
         };
 
         if looks_like_hls_manifest(&first_chunk) {
             let mut full = BytesMut::from(first_chunk.as_ref());
             while let Some(next) = byte_stream.next().await {
-                let chunk = next.map_err(|e| RelayError::Upstream(e.to_string()))?;
+                let chunk = next.map_err(|e| RelayError::Upstream(e.without_url().to_string()))?;
                 if full.len() + chunk.len() > MAX_MANIFEST_BYTES {
                     return Err(RelayError::InvalidManifest(
                         "manifest exceeds byte limit".into(),
@@ -518,13 +571,25 @@ impl MediaRelay {
             }
 
             let mut discovered = Vec::new();
-            let rewritten = HlsManifestRewriter::rewrite(
+            let public_url = self.sessions.lock().ok().and_then(|map| {
+                map.get(session_id)
+                    .and_then(|session| session.public_url.clone())
+            });
+            let rewritten = HlsManifestRewriter::rewrite_with_public_url(
                 &full,
                 &final_url,
                 session_id,
                 token,
+                public_url.as_deref(),
                 |resolved_url| {
-                    let rid = Self::resource_id(&resolved_url);
+                    let mut rid = Self::resource_id(&resolved_url);
+                    if public_url.is_some() {
+                        // ffmpeg's HLS demuxer checks resource URL extensions before
+                        // fetching. Keep native URLs unchanged; remote-library URLs
+                        // need a media extension even for signed/extensionless CDNs.
+                        rid.push('.');
+                        rid.push_str(remote_resource_extension(&resolved_url));
+                    }
                     discovered.push((rid.clone(), resolved_url));
                     rid
                 },
@@ -549,7 +614,10 @@ impl MediaRelay {
         let sniffed_content_type =
             sniff_media_content_type(&first_chunk, &final_url, &content_type_header);
         let combined = futures_util::stream::once(async move { Ok(first_chunk) })
-            .chain(byte_stream.map(|item| item.map_err(std::io::Error::other)))
+            .chain(
+                byte_stream
+                    .map(|item| item.map_err(|error| std::io::Error::other(error.without_url()))),
+            )
             .map(move |item| {
                 let _keep_delivery_active = &activity;
                 item
@@ -563,6 +631,32 @@ impl MediaRelay {
             accept_ranges: accept_ranges.or_else(|| Some("bytes".into())),
             stream: Box::pin(combined),
         })
+    }
+}
+
+fn remote_resource_extension(url: &str) -> &'static str {
+    let extension = Url::parse(url).ok().and_then(|url| {
+        url.path()
+            .rsplit_once('.')
+            .map(|(_, extension)| extension.to_ascii_lowercase())
+    });
+    match extension.as_deref() {
+        Some("m3u8") => "m3u8",
+        Some("m4s") => "m4s",
+        Some("mp4") => "mp4",
+        Some("m4a") => "m4a",
+        Some("m4v") => "m4v",
+        Some("aac") => "aac",
+        Some("mp3") => "mp3",
+        Some("vtt") => "vtt",
+        Some("webvtt") => "webvtt",
+        Some("key") => "key",
+        Some("bin") => "bin",
+        Some("webm") => "webm",
+        Some("ogg") => "ogg",
+        Some("opus") => "opus",
+        Some("flac") => "flac",
+        _ => "ts",
     }
 }
 
@@ -697,13 +791,43 @@ mod activity_tests {
         Ok(())
     }
 
+    #[tokio::test]
+    async fn upstream_connection_errors_do_not_expose_signed_urls()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let address = listener.local_addr()?;
+        drop(listener);
+        let relay = MediaRelay::new();
+        let result = relay
+            .proxy_url(
+                "failed",
+                "relay-token",
+                &format!("http://{address}/stream?key=secret-provider-token"),
+                &FetchContext::default(),
+                None,
+            )
+            .await;
+        match result {
+            Err(error) => {
+                let message = error.to_string();
+                assert!(!message.contains("secret-provider-token"));
+                assert!(!message.contains("?key="));
+            }
+            Ok(_) => return Err("expected closed upstream to fail".into()),
+        }
+        Ok(())
+    }
+
     #[test]
     fn progress_keeps_buffered_playback_active_until_revoke() {
         let relay = MediaRelay::new();
         relay.note_playback_activity("playing");
         relay.note_playback_activity("playing");
         assert_eq!(relay.active_streams(), Some(1));
+        assert!(relay.session_active("playing"));
+        assert!(!relay.session_active("unknown"));
         relay.revoke_session("playing");
         assert_eq!(relay.active_streams(), Some(0));
+        assert!(!relay.session_active("playing"));
     }
 }

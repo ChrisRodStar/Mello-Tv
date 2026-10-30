@@ -19,11 +19,35 @@ impl HlsManifestRewriter {
         base_url: &Url,
         session_id: &str,
         token: &str,
+        register_uri: F,
+    ) -> Result<String, HlsRewriteError>
+    where
+        F: FnMut(String) -> String,
+    {
+        Self::rewrite_with_public_url(
+            manifest_bytes,
+            base_url,
+            session_id,
+            token,
+            None,
+            register_uri,
+        )
+    }
+
+    /// An explicit public base is used by remote library consumers whose own
+    /// HTTP proxy cannot resolve Mello's root-relative resource URLs.
+    pub fn rewrite_with_public_url<F>(
+        manifest_bytes: &[u8],
+        base_url: &Url,
+        session_id: &str,
+        token: &str,
+        public_url: Option<&str>,
         mut register_uri: F,
     ) -> Result<String, HlsRewriteError>
     where
         F: FnMut(String) -> String,
     {
+        let public_url = public_url.unwrap_or("").trim_end_matches('/');
         let raw_text =
             std::str::from_utf8(manifest_bytes).map_err(|_| HlsRewriteError::InvalidUtf8)?;
         let text = raw_text.strip_prefix('\u{feff}').unwrap_or(raw_text).trim();
@@ -47,6 +71,7 @@ impl HlsManifestRewriter {
             if !line.starts_with('#') {
                 let resolved = resolve_uri(base_url, line)?;
                 let rid = register_uri(resolved);
+                out.push_str(public_url);
                 out.push_str("/stream/");
                 out.push_str(session_id);
                 out.push_str("/r/");
@@ -55,8 +80,14 @@ impl HlsManifestRewriter {
                 out.push_str(token);
                 out.push('\n');
             } else if line.contains("URI=\"") {
-                let rewritten =
-                    rewrite_tag_uri(line, base_url, session_id, token, &mut register_uri)?;
+                let rewritten = rewrite_tag_uri(
+                    line,
+                    base_url,
+                    session_id,
+                    token,
+                    public_url,
+                    &mut register_uri,
+                )?;
                 out.push_str(&rewritten);
                 out.push('\n');
             } else {
@@ -95,6 +126,7 @@ fn rewrite_tag_uri<F>(
     base_url: &Url,
     session_id: &str,
     token: &str,
+    public_url: &str,
     register_uri: &mut F,
 ) -> Result<String, HlsRewriteError>
 where
@@ -120,6 +152,7 @@ where
         if !raw_uri.is_empty() {
             let resolved = resolve_uri(base_url, raw_uri)?;
             let rid = register_uri(resolved);
+            result.push_str(public_url);
             result.push_str("/stream/");
             result.push_str(session_id);
             result.push_str("/r/");

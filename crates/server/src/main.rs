@@ -6,6 +6,7 @@ use stream_core::ports::MediaEngine;
 use stream_media::DiscoveryCoordinator;
 use stream_server::{
     catalog_service::CatalogWorker,
+    jellyfin::{JellyfinBridge, JellyfinConfig},
     routes,
     state::{AppState, NoopMediaEngine},
 };
@@ -257,6 +258,11 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         .try_init();
 
     let config = ServerConfig::parse()?;
+    let jellyfin_config = if config.validate_data {
+        None
+    } else {
+        JellyfinConfig::from_env().map_err(std::io::Error::other)?
+    };
     let owner_closed = owner_lifetime::watch_stdin(config.exit_on_stdin_close)?;
     tracing::info!(
         host = %config.host,
@@ -329,9 +335,11 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             None
         }
     };
+    let jellyfin = jellyfin_config.map(|config| Arc::new(JellyfinBridge::new(config)));
     let state = AppState::new(catalog, Arc::new(accounts), media, household_id)
         .with_catalog_worker(catalog_worker)
-        .with_port(config.port);
+        .with_port(config.port)
+        .with_jellyfin(jellyfin);
 
     stream_server::discovery::spawn_discovery_services(
         state.household_account_id.clone(),
@@ -394,6 +402,31 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         listeners.push(listener);
     }
 
+    let jellyfin_task = state.jellyfin.as_ref().map(|bridge| {
+        tracing::info!(profile_id = %bridge.config.profile_id, library_dir = %bridge.config.library_dir.display(), "Jellyfin library export enabled");
+        let bridge = bridge.clone();
+        let state = state.clone();
+        let shutdown = media_shutdown.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(60));
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            loop {
+                tokio::select! {
+                    _ = shutdown.cancelled() => break,
+                    _ = interval.tick() => {
+                        match bridge.sync(&state).await {
+                            Ok(report) if report.written > 0 || report.removed > 0 => {
+                                tracing::info!(files = report.files, written = report.written, removed = report.removed, "Jellyfin library export synchronized");
+                            }
+                            Ok(_) => tracing::debug!("Jellyfin library export is current"),
+                            Err(error) => tracing::warn!(%error, "Jellyfin library export failed; retrying in 60 seconds"),
+                        }
+                    }
+                }
+            }
+        })
+    });
+
     let (shutdown_tx, _) = tokio::sync::broadcast::channel::<()>(1);
     let mut serve_handles = Vec::new();
 
@@ -420,6 +453,10 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     media_shutdown.cancel();
+    if let Some(task) = jellyfin_task {
+        task.abort();
+        let _ = task.await;
+    }
     let _ = shutdown_tx.send(());
 
     // An active request must not keep the app-owned server alive indefinitely.
