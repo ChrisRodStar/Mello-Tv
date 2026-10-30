@@ -252,9 +252,9 @@ fn main() {
         },
     ];
 
-    let providers = ["videasy", "vidcore", "vidlink", "vidfast", "vidsrc"];
+    let providers = ["vidsrc"];
 
-    for target in &targets {
+    for target in &targets[..1] {
         println!("\n>>> Testing Target: {} <<<", target.label);
         println!("------------------------------------------------------------");
 
@@ -277,23 +277,15 @@ fn main() {
                     );
 
                     for (idx, stream) in candidates.iter().take(3).enumerate() {
-                        let sample_url = if stream.url.len() > 65 {
-                            format!(
-                                "{}...{}",
-                                &stream.url[..40],
-                                &stream.url[stream.url.len() - 20..]
-                            )
-                        } else {
-                            stream.url.clone()
-                        };
                         println!(
-                            "     #{} [{:?}] Server: '{}' (variants: {}, tracks: {}) -> {}",
+                            "     #{} [{:?}] Server: '{}' (variants: {}, tracks: {}) -> {}\n        FetchContext: {:?}",
                             idx + 1,
                             stream.format,
                             stream.server,
                             stream.resolver_metadata.variants.len(),
                             stream.resolver_metadata.tracks.len(),
-                            sample_url
+                            stream.url,
+                            stream.fetch_context,
                         );
                     }
                 }
@@ -308,4 +300,16 @@ fn main() {
     println!("\n============================================================");
     println!("                 ALL LIVE CHECKS COMPLETE                   ");
     println!("============================================================");
+
+    println!("\n>>> Running coordinator health checks... <<<");
+    let shutdown = tokio_util::sync::CancellationToken::new();
+    let coordinator = stream_media::DiscoveryCoordinator::default_live(shutdown).unwrap();
+    let host_rt = tokio::runtime::Runtime::new().unwrap();
+    use stream_core::ports::MediaEngine;
+    let health = host_rt.block_on(async {
+        coordinator.check_provider_health().await.unwrap()
+    });
+    for h in health {
+        println!("HEALTH [{}]: working={}, detail={}", h.id, h.working, h.detail);
+    }
 }

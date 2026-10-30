@@ -142,6 +142,18 @@ impl DiscoveryCoordinator {
                     )
                     .await
                     .map_err(|_| ErrorCategory::Unavailable)?;
+                for p in &probes {
+                    eprintln!(
+                        "PROVIDER {}: url={}, accessible={}, failure={:?}, samples_completed={}, sample_bytes={}, protection_known={}",
+                        provider.id(),
+                        p.source.url,
+                        p.observation.accessible,
+                        p.observation.failure,
+                        p.observation.samples_completed,
+                        p.observation.sample_bytes,
+                        p.observation.protection_known,
+                    );
+                }
                 // Provider health is not a device codec or bandwidth verdict.
                 // Require actual sampled media bytes and known protection instead
                 // of applying a specific viewer's playback eligibility rules.

@@ -190,7 +190,7 @@ impl StreamProber {
         let mut limits = self.limits.clone();
         limits.samples_per_variant = 1;
         limits.total_sample_bytes = 2 * 1024 * 1024;
-        limits.total_playlist_bytes = 512 * 1024;
+        limits.total_playlist_bytes = 2 * 1024 * 1024;
         limits.max_variants = 1;
         limits.source_timeout = Duration::from_secs(4);
         Self {

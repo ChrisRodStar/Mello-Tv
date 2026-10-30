@@ -545,6 +545,12 @@ impl HttpClient {
                     .content_length()
                     .is_some_and(|bytes| bytes > limit as u64)
             {
+                eprintln!(
+                    "RESPONSE LIMIT HIT (content_length): url={}, content_length={:?}, limit={}",
+                    url,
+                    response.content_length(),
+                    limit
+                );
                 return Err(TransportError::ResponseLimit);
             }
             let mut stream = response.bytes_stream();
@@ -562,6 +568,14 @@ impl HttpClient {
                 }
                 let available = limit.saturating_sub(body.len());
                 if chunk.len() > available && !request.sample {
+                    eprintln!(
+                        "RESPONSE LIMIT HIT (chunk): url={}, chunk_len={}, available={}, body_len={}, limit={}",
+                        url,
+                        chunk.len(),
+                        available,
+                        body.len(),
+                        limit
+                    );
                     return Err(TransportError::ResponseLimit);
                 }
                 let take = available.min(chunk.len());

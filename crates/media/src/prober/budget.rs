@@ -156,7 +156,7 @@ mod tests {
         );
         assert!(
             super::super::StreamProber::new(
-                transport,
+                transport.clone(),
                 super::super::ProbeLimits {
                     total_sample_bytes: 16 * 1024 * 1024 + 1,
                     ..super::super::ProbeLimits::default()
@@ -164,5 +164,12 @@ mod tests {
             )
             .is_err()
         );
+        let prober = super::super::StreamProber::new(
+            transport,
+            super::super::ProbeLimits::default(),
+        )
+        .unwrap();
+        let health = prober.health_probe();
+        assert_eq!(health.limits.total_playlist_bytes, 2 * 1024 * 1024);
     }
 }
