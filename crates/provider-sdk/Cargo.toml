@@ -6,8 +6,6 @@ rust-version.workspace = true
 publish.workspace = true
 
 [dependencies]
-stream-core = { path = "../core" }
-serde_json.workspace = true
 thiserror.workspace = true
 
 [lints]

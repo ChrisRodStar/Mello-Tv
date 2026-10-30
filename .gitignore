@@ -1,21 +1,9 @@
-# macOS metadata
 .DS_Store
 
-# Local tooling and server state
-/deploy/
-/Local/
+# Local server state and generated library
 /data/
-.local/
-**/ios-old
+/library/
+.env
 
-# Dependencies and generated build output
-node_modules/
-dist/
-build/
+# Build output
 target/
-
-# Swift Package Manager / Xcode
-.build/
-DerivedData/
-xcuserdata/
-*.xcuserstate

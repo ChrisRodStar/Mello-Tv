@@ -9,9 +9,7 @@ publish.workspace = true
 stream-core = { path = "../core" }
 stream-provider-adapters = { path = "../provider-adapters" }
 stream-provider-codecs = { path = "../provider-codecs" }
-stream-provider-runtime = { path = "../provider-runtime" }
 stream-provider-sdk = { path = "../provider-sdk" }
-stream-storage = { path = "../storage" }
 reqwest.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
@@ -23,9 +21,10 @@ serde.workspace = true
 serde_json.workspace = true
 async-trait.workspace = true
 chrono.workspace = true
-http.workspace = true
 semver.workspace = true
 getrandom.workspace = true
+subtle.workspace = true
+tracing.workspace = true
 
 [lints]
 workspace = true

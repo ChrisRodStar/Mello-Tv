@@ -14,6 +14,9 @@ use tokio::{sync::Semaphore, time::Instant};
 use tokio_util::sync::CancellationToken;
 use url::Url;
 
+/// Many media CDNs reject requests without a mainstream browser user agent.
+pub const BROWSER_USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36";
+
 #[derive(Error)]
 pub enum TransportError {
     #[error("upstream destination denied")]
@@ -70,6 +73,27 @@ impl ProxyEndpoint {
             return Err(TransportError::InvalidConfig);
         }
         Ok(Self(url))
+    }
+    pub fn url(&self) -> &Url {
+        &self.0
+    }
+}
+impl EgressMode {
+    /// `socks5://host:port` uses the guarded local resolver; `http(s)://` proxies
+    /// are trusted to resolve destinations themselves.
+    pub fn from_proxy_url(raw: &str) -> Result<Self, TransportError> {
+        let endpoint = ProxyEndpoint::new(raw)?;
+        Ok(if endpoint.0.scheme() == "socks5" {
+            Self::Socks5Proxy(endpoint)
+        } else {
+            Self::HttpProxy(endpoint)
+        })
+    }
+    pub fn proxy(&self) -> Option<&ProxyEndpoint> {
+        match self {
+            Self::Direct => None,
+            Self::HttpProxy(endpoint) | Self::Socks5Proxy(endpoint) => Some(endpoint),
+        }
     }
 }
 impl fmt::Debug for ProxyEndpoint {
@@ -259,6 +283,7 @@ impl HttpClient {
             .no_proxy()
             .redirect(reqwest::redirect::Policy::none())
             .referer(false)
+            .user_agent(BROWSER_USER_AGENT)
             .dns_resolver(GuardedResolver::new(proxy_host.clone()))
             .retry(reqwest::retry::never())
             .tcp_nodelay(true)
@@ -266,8 +291,10 @@ impl HttpClient {
             .pool_max_idle_per_host(32)
             .pool_idle_timeout(Duration::from_secs(90))
             .connect_timeout(config.connect_timeout)
-            .read_timeout(config.read_timeout)
-            .timeout(config.request_timeout);
+            // No client-wide total timeout: it would also cover response
+            // bodies and cut long media streams. `fetch` and `fetch_stream`
+            // enforce their own request deadlines; `read_timeout` bounds idle reads.
+            .read_timeout(config.read_timeout);
         if let Some(endpoint) = proxy {
             builder = builder.proxy(
                 reqwest::Proxy::all(endpoint.0.as_str())
@@ -307,7 +334,29 @@ impl HttpClient {
         request: FetchRequest,
         cancellation: &CancellationToken,
     ) -> Result<StreamingResponse, TransportError> {
+        self.stream_request(request, cancellation, false).await
+    }
+
+    /// Long-lived media delivery. Every hop keeps the same destination,
+    /// redirect and credential policy as `fetch_stream`, but only the response
+    /// headers share the request deadline. The body has no byte cap and is
+    /// bounded by an idle timeout per chunk, so a full-length film can stream.
+    pub async fn fetch_media(
+        &self,
+        request: FetchRequest,
+        cancellation: &CancellationToken,
+    ) -> Result<StreamingResponse, TransportError> {
+        self.stream_request(request, cancellation, true).await
+    }
+
+    async fn stream_request(
+        &self,
+        request: FetchRequest,
+        cancellation: &CancellationToken,
+        media: bool,
+    ) -> Result<StreamingResponse, TransportError> {
         let deadline = Instant::now() + self.config.request_timeout;
+        let idle_timeout = self.config.read_timeout;
         let cancel = cancellation.child_token();
         let operation = async {
             if !matches!(request.method, Method::GET | Method::HEAD)
@@ -320,12 +369,14 @@ impl HttpClient {
             {
                 return Err(TransportError::InvalidContext);
             }
-            let limit = if request.max_response_bytes == 0 {
+            let limit = if media {
+                usize::MAX
+            } else if request.max_response_bytes == 0 {
                 self.config.max_response_bytes
             } else {
                 request.max_response_bytes
             };
-            if limit > self.config.max_response_bytes {
+            if !media && limit > self.config.max_response_bytes {
                 return Err(TransportError::InvalidContext);
             }
             let admitted = self
@@ -408,9 +459,14 @@ impl HttpClient {
                         if done {
                             return None;
                         }
+                        let chunk_deadline = if media {
+                            Instant::now() + idle_timeout
+                        } else {
+                            deadline
+                        };
                         let next = tokio::select! {biased;
                             _=cancel.cancelled()=>Some(Err(TransportError::Cancelled)),
-                            next=tokio::time::timeout_at(deadline,stream.next())=>match next {Ok(Some(value))=>Some(value.map_err(request_error)),Ok(None)=>None,Err(_)=>Some(Err(TransportError::Timeout))},
+                            next=tokio::time::timeout_at(chunk_deadline,stream.next())=>match next {Ok(Some(value))=>Some(value.map_err(request_error)),Ok(None)=>None,Err(_)=>Some(Err(TransportError::Timeout))},
                         };
                         let mut done = false;
                         let next = match next? {

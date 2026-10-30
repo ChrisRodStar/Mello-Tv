@@ -1,29 +1,64 @@
+# Mello + Jellyfin on one Docker host (for example a Proxmox LXC or VM).
+#
+# 1. Copy .env.example to .env and fill it in.
+# 2. docker compose up -d
+# 3. In Jellyfin, add two libraries:
+#      Movies -> /media/mello/movies   (content type: Movies)
+#      Shows  -> /media/mello/shows    (content type: Shows)
+#
+# Already running Jellyfin elsewhere? Delete the jellyfin service, change
+# mello-library to a host folder (e.g. /srv/mello/library:/library, owned by
+# PUID:PGID) and mount that folder into your existing Jellyfin.
+
 services:
   mello:
-    image: mello-tv:local
+    image: mello-jellyfin:local
     build: .
+    user: "${PUID:-1000}:${PGID:-1000}"
     ports:
+      # Jellyfin apps that direct-play need to reach this port.
       - "${MELLO_BIND_ADDRESS:-0.0.0.0}:${MELLO_PORT:-8080}:8080"
+    env_file: .env
     environment:
-      TMDB_API_KEY: "${TMDB_API_KEY:-}"
-      TMDB_READ_ACCESS_TOKEN: "${TMDB_READ_ACCESS_TOKEN:-}"
+      MELLO_DATA_DIR: /data
+      MELLO_LIBRARY_DIR: /library
     volumes:
       - mello-data:/data
+      - mello-library:/library
     restart: unless-stopped
     init: true
     read_only: true
     tmpfs:
-      - /tmp:rw,noexec,nosuid,size=64m,mode=1777
+      - /tmp:rw,noexec,nosuid,size=16m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     logging:
       driver: local
       options:
         max-size: "10m"
         max-file: "3"
-    stop_grace_period: 30s
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
+
+  jellyfin:
+    image: jellyfin/jellyfin:latest
+    user: "${PUID:-1000}:${PGID:-1000}"
+    ports:
+      - "8096:8096"
+    volumes:
+      - jellyfin-config:/config
+      - jellyfin-cache:/cache
+      - mello-library:/media/mello:ro
+    # Intel/AMD iGPU for hardware transcoding (pass /dev/dri through to the
+    # LXC/VM first). Remove if you have no GPU.
+    # devices:
+    #   - /dev/dri:/dev/dri
+    restart: unless-stopped
+    depends_on:
+      - mello
 
 volumes:
   mello-data:
+  mello-library:
+  jellyfin-config:
+  jellyfin-cache:

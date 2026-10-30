@@ -1,5 +1,5 @@
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, HashMap},
     fmt::Write,
     pin::Pin,
     sync::{Arc, Mutex},
@@ -9,12 +9,14 @@ use std::{
 use bytes::{Bytes, BytesMut};
 use futures_util::{Stream, StreamExt};
 use stream_core::providers::{FetchContext, ProbedStream, Selection, StreamFormat};
+use subtle::ConstantTimeEq;
 use thiserror::Error;
+use tokio_util::sync::CancellationToken;
 use url::Url;
 
-use super::hls::HlsManifestRewriter;
+use super::hls::{HlsManifestRewriter, ResourceKind};
+use crate::network::{FetchRequest, HttpClient, TransportError};
 
-const DEFAULT_USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36";
 const MAX_SESSIONS: usize = 256;
 const MAX_RESOURCES_PER_SESSION: usize = 16_384;
 const MAX_MANIFEST_BYTES: usize = 4 * 1024 * 1024;
@@ -59,14 +61,18 @@ pub enum RelayError {
     InvalidToken,
     #[error("stream resource not found")]
     ResourceNotFound,
-    #[error("no backup source available")]
-    NoBackupAvailable,
     #[error("upstream request failed: {0}")]
     Upstream(String),
     #[error("upstream returned status {0}")]
     UpstreamStatus(u16),
     #[error("invalid manifest: {0}")]
     InvalidManifest(String),
+}
+
+impl From<TransportError> for RelayError {
+    fn from(error: TransportError) -> Self {
+        Self::Upstream(error.to_string())
+    }
 }
 
 pub type ByteStream = Pin<Box<dyn Stream<Item = Result<Bytes, std::io::Error>> + Send>>;
@@ -88,35 +94,21 @@ struct SessionState {
     active: ProbedStream,
     backups: Vec<ProbedStream>,
     backup_index: usize,
-    resources: BTreeMap<String, String>,
-    created_at: Instant,
+    resources: HashMap<String, (String, ResourceKind)>,
+    last_used: Instant,
 }
 
+/// In-memory playback sessions. Every upstream request goes through the
+/// guarded `HttpClient`, so playlist URIs and redirects can only reach public
+/// addresses, and provider credentials are only sent to their own origin.
 pub struct MediaRelay {
     sessions: Mutex<BTreeMap<String, SessionState>>,
-    client: reqwest::Client,
+    client: HttpClient,
     activity: PlaybackActivity,
 }
 
-impl Default for MediaRelay {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl MediaRelay {
-    pub fn new() -> Self {
-        let client = reqwest::Client::builder()
-            .redirect(reqwest::redirect::Policy::limited(5))
-            .tcp_nodelay(true)
-            .tcp_keepalive(Duration::from_secs(60))
-            .pool_max_idle_per_host(32)
-            .pool_idle_timeout(Duration::from_secs(90))
-            .connect_timeout(Duration::from_secs(6))
-            .read_timeout(Duration::from_secs(20))
-            .build()
-            .unwrap_or_else(|_| reqwest::Client::new());
-
+    pub fn new(client: HttpClient) -> Self {
         Self {
             sessions: Mutex::new(BTreeMap::new()),
             client,
@@ -125,28 +117,11 @@ impl MediaRelay {
     }
 
     /// Recent playback activity, including response bodies still being delivered.
-    /// None means activity could not be inspected; callers must defer a restart.
     pub fn active_streams(&self) -> Option<usize> {
         let now = Instant::now();
         let mut activity = self.activity.lock().ok()?;
         activity.retain(|_, session| session.is_active(now));
         Some(activity.len())
-    }
-
-    pub fn note_playback_activity(&self, session_id: &str) {
-        if let Ok(mut activity) = self.activity.lock() {
-            let now = Instant::now();
-            activity.retain(|_, session| session.is_active(now));
-            activity
-                .entry(session_id.to_owned())
-                .and_modify(|session| {
-                    session.last_observed = now;
-                })
-                .or_insert(ActivityState {
-                    last_observed: now,
-                    in_flight: 0,
-                });
-        }
     }
 
     fn begin_delivery(&self, session_id: &str) -> Result<ActivityGuard, RelayError> {
@@ -170,17 +145,18 @@ impl MediaRelay {
         })
     }
 
-    pub fn generate_token() -> String {
+    /// 128-bit random hex token.
+    pub fn generate_token() -> Option<String> {
         let mut bytes = [0u8; 16];
-        let _ = getrandom::fill(&mut bytes);
+        getrandom::fill(&mut bytes).ok()?;
         let mut out = String::with_capacity(32);
         for b in bytes {
             let _ = write!(out, "{b:02x}");
         }
-        out
+        Some(out)
     }
 
-    pub fn resource_id(url: &str) -> String {
+    fn resource_id(url: &str) -> String {
         let digest = stream_provider_codecs::sha256(&[url.as_bytes()]);
         let mut out = String::with_capacity(24);
         for b in digest.iter().take(12) {
@@ -189,47 +165,43 @@ impl MediaRelay {
         out
     }
 
+    /// Installs a resolved selection. Returns the delivery format on success.
     pub fn register_session(
         &self,
         session_id: String,
         token: String,
         selection: Selection,
-    ) -> bool {
-        let Some(selected) = selection.selected else {
-            return false;
-        };
+    ) -> Option<StreamFormat> {
+        let selected = selection.selected?;
         let backups: Vec<ProbedStream> = selection
             .backups
             .unwrap_or_default()
             .into_iter()
             .map(|r| r.candidate)
             .collect();
-
-        if let Ok(mut map) = self.sessions.lock() {
-            if map.len() >= MAX_SESSIONS
-                && !map.contains_key(&session_id)
-                && let Some(oldest_key) = map
-                    .iter()
-                    .min_by_key(|(_, s)| s.created_at)
-                    .map(|(k, _)| k.clone())
-            {
-                map.remove(&oldest_key);
-            }
-            map.insert(
-                session_id,
-                SessionState {
-                    token,
-                    active: selected.candidate,
-                    backups,
-                    backup_index: 0,
-                    resources: BTreeMap::new(),
-                    created_at: Instant::now(),
-                },
-            );
-            true
-        } else {
-            false
+        let format = delivery_format(&selected.candidate);
+        let mut map = self.sessions.lock().ok()?;
+        if map.len() >= MAX_SESSIONS
+            && !map.contains_key(&session_id)
+            && let Some(oldest_key) = map
+                .iter()
+                .min_by_key(|(_, s)| s.last_used)
+                .map(|(k, _)| k.clone())
+        {
+            map.remove(&oldest_key);
         }
+        map.insert(
+            session_id,
+            SessionState {
+                token,
+                active: selected.candidate,
+                backups,
+                backup_index: 0,
+                resources: HashMap::new(),
+                last_used: Instant::now(),
+            },
+        );
+        Some(format)
     }
 
     pub fn has_session(&self, session_id: &str) -> bool {
@@ -239,195 +211,122 @@ impl MediaRelay {
             .unwrap_or(false)
     }
 
-    pub fn token_for(&self, session_id: &str) -> String {
-        if let Ok(map) = self.sessions.lock()
-            && let Some(session) = map.get(session_id)
-        {
-            return session.token.clone();
-        }
-        // Deterministic fallback token for sessions without an active relay entry (e.g. unit tests)
-        let digest = stream_provider_codecs::sha256(&[b"stream-token:", session_id.as_bytes()]);
-        let mut out = String::with_capacity(24);
-        for b in digest.iter().take(12) {
-            let _ = write!(out, "{b:02x}");
-        }
-        out
-    }
-
-    pub fn active_info(&self, session_id: &str) -> Option<(StreamFormat, Vec<i64>)> {
-        let map = self.sessions.lock().ok()?;
-        let session = map.get(session_id)?;
-        let format = match session.active.observation.format {
-            StreamFormat::Mp4 => StreamFormat::Mp4,
-            _ => StreamFormat::Hls,
-        };
-        let mut heights: Vec<i64> = session
-            .active
-            .observation
-            .playlist_metadata
-            .variants
-            .iter()
-            .chain(session.active.source.resolver_metadata.variants.iter())
-            .filter_map(|v| v.height)
-            .filter(|h| *h > 0 && *h <= 16384)
-            .collect();
-        if let Some(v) = &session.active.observation.variant
-            && let Some(h) = v.height
-            && h > 0
-            && h <= 16384
-        {
-            heights.push(h);
-        }
-        heights.sort_unstable_by(|a, b| b.cmp(a));
-        heights.dedup();
-        if format != StreamFormat::Hls {
-            heights.clear();
-        }
-        Some((format, heights))
-    }
-
-    /// Height of the measured active rendition, when the source exposes one.
-    pub fn active_height(&self, session_id: &str) -> Option<i64> {
-        let map = self.sessions.lock().ok()?;
-        map.get(session_id)?
-            .active
-            .observation
-            .variant
-            .as_ref()
-            .and_then(|variant| variant.height)
-            .filter(|height| *height > 0 && *height <= 16384)
-    }
-
-    /// Resolve public playback details from a measured selection before it is
-    /// installed into a session.
-    pub fn selection_info(selection: &Selection) -> Option<(StreamFormat, Vec<i64>, i64)> {
-        let active = &selection.selected.as_ref()?.candidate;
-        let format = match active.observation.format {
-            StreamFormat::Mp4 => StreamFormat::Mp4,
-            _ => StreamFormat::Hls,
-        };
-        let mut heights: Vec<i64> = active
-            .observation
-            .playlist_metadata
-            .variants
-            .iter()
-            .chain(active.source.resolver_metadata.variants.iter())
-            .filter_map(|variant| variant.height)
-            .filter(|height| *height > 0 && *height <= 16384)
-            .collect();
-        if let Some(height) = active
-            .observation
-            .variant
-            .as_ref()
-            .and_then(|variant| variant.height)
-            .filter(|height| *height > 0 && *height <= 16384)
-        {
-            heights.push(height);
-        }
-        heights.sort_unstable_by(|a, b| b.cmp(a));
-        heights.dedup();
-        if format != StreamFormat::Hls {
-            heights.clear();
-        }
-        let active_height = active
-            .observation
-            .variant
-            .as_ref()
-            .and_then(|variant| variant.height)
-            .filter(|height| *height > 0 && *height <= 16384)?;
-        Some((format, heights, active_height))
-    }
-
-    pub fn activate_backup(&self, session_id: &str) -> Result<String, RelayError> {
-        let mut map = self
-            .sessions
-            .lock()
-            .map_err(|_| RelayError::SessionNotFound)?;
-        let session = map.get_mut(session_id).ok_or(RelayError::SessionNotFound)?;
-        if session.backup_index >= session.backups.len() {
-            return Err(RelayError::NoBackupAvailable);
-        }
-        session.active = session.backups[session.backup_index].clone();
-        session.backup_index += 1;
-        session.resources.clear();
-        let new_token = Self::generate_token();
-        session.token = new_token.clone();
-        Ok(new_token)
-    }
-
-    pub fn replace_selection(&self, session_id: &str, selection: Selection) -> Option<String> {
-        let new_token = Self::generate_token();
-        if self.register_session(session_id.to_owned(), new_token.clone(), selection) {
-            Some(new_token)
-        } else {
-            None
-        }
-    }
-
     pub fn revoke_session(&self, session_id: &str) {
         if let Ok(mut map) = self.sessions.lock() {
             map.remove(session_id);
         }
-        if let Ok(mut activity) = self.activity.lock()
-            && activity
-                .get(session_id)
-                .is_some_and(|session| session.in_flight == 0)
-        {
-            activity.remove(session_id);
-        }
     }
 
+    fn authorize<'a>(
+        map: &'a mut BTreeMap<String, SessionState>,
+        session_id: &str,
+        token: &str,
+    ) -> Result<&'a mut SessionState, RelayError> {
+        let session = map.get_mut(session_id).ok_or(RelayError::SessionNotFound)?;
+        if !bool::from(session.token.as_bytes().ct_eq(token.as_bytes())) {
+            return Err(RelayError::InvalidToken);
+        }
+        session.last_used = Instant::now();
+        Ok(session)
+    }
+
+    /// Fetches the session's entry media. If the active source fails before
+    /// anything was delivered, the next measured backup is tried automatically.
     pub async fn fetch_entry(
         &self,
         session_id: &str,
         token: &str,
         range_header: Option<&str>,
     ) -> Result<RelayResponse, RelayError> {
-        let (upstream_url, context) = {
-            let map = self
-                .sessions
-                .lock()
-                .map_err(|_| RelayError::SessionNotFound)?;
-            let session = map.get(session_id).ok_or(RelayError::SessionNotFound)?;
-            if session.token != token {
-                return Err(RelayError::InvalidToken);
+        loop {
+            let (upstream_url, context, kind) = {
+                let mut map = self
+                    .sessions
+                    .lock()
+                    .map_err(|_| RelayError::SessionNotFound)?;
+                let session = Self::authorize(&mut map, session_id, token)?;
+                // Progressive files need Range for seeking; playlists never do.
+                let kind = if delivery_format(&session.active) == StreamFormat::Mp4 {
+                    ResourceKind::Segment
+                } else {
+                    ResourceKind::Playlist
+                };
+                (
+                    session.active.source.url.clone(),
+                    session.active.source.fetch_context.clone(),
+                    kind,
+                )
+            };
+            let result = self
+                .proxy_url(
+                    session_id,
+                    token,
+                    &upstream_url,
+                    kind,
+                    &context,
+                    range_header,
+                )
+                .await;
+            match result {
+                Err(RelayError::Upstream(_) | RelayError::UpstreamStatus(_))
+                    if self.advance_backup(session_id) =>
+                {
+                    tracing::info!("entry source failed; switched to the next backup source");
+                }
+                other => return other,
             }
-            (
-                session.active.source.url.clone(),
-                session.active.source.fetch_context.clone(),
-            )
-        };
+        }
+    }
 
-        self.proxy_url(session_id, token, &upstream_url, &context, range_header)
-            .await
+    fn advance_backup(&self, session_id: &str) -> bool {
+        let Ok(mut map) = self.sessions.lock() else {
+            return false;
+        };
+        let Some(session) = map.get_mut(session_id) else {
+            return false;
+        };
+        let Some(next) = session.backups.get(session.backup_index).cloned() else {
+            return false;
+        };
+        session.active = next;
+        session.backup_index += 1;
+        session.resources.clear();
+        true
     }
 
     pub async fn fetch_resource(
         &self,
         session_id: &str,
-        resource_id: &str,
+        resource_file: &str,
         token: &str,
         range_header: Option<&str>,
     ) -> Result<RelayResponse, RelayError> {
-        let (upstream_url, context) = {
-            let map = self
+        let resource_id = resource_file
+            .split_once('.')
+            .map_or(resource_file, |(id, _)| id);
+        let (upstream_url, kind, context) = {
+            let mut map = self
                 .sessions
                 .lock()
                 .map_err(|_| RelayError::SessionNotFound)?;
-            let session = map.get(session_id).ok_or(RelayError::SessionNotFound)?;
-            if session.token != token {
-                return Err(RelayError::InvalidToken);
-            }
-            let url = session
+            let session = Self::authorize(&mut map, session_id, token)?;
+            let (url, kind) = session
                 .resources
                 .get(resource_id)
                 .cloned()
                 .ok_or(RelayError::ResourceNotFound)?;
-            (url, session.active.source.fetch_context.clone())
+            (url, kind, session.active.source.fetch_context.clone())
         };
 
-        self.proxy_url(session_id, token, &upstream_url, &context, range_header)
-            .await
+        self.proxy_url(
+            session_id,
+            token,
+            &upstream_url,
+            kind,
+            &context,
+            range_header,
+        )
+        .await
     }
 
     async fn proxy_url(
@@ -435,80 +334,58 @@ impl MediaRelay {
         session_id: &str,
         token: &str,
         upstream_url: &str,
+        kind: ResourceKind,
         context: &FetchContext,
         range_header: Option<&str>,
     ) -> Result<RelayResponse, RelayError> {
         let activity = self.begin_delivery(session_id)?;
-        let mut req = self.client.get(upstream_url);
-        req = req.header("User-Agent", DEFAULT_USER_AGENT);
-        req = req.header("Accept", "*/*");
-
-        if let Some(public) = &context.public_resources {
-            if !public.referer.is_empty() {
-                req = req.header("Referer", &public.referer);
-            }
-            if !public.origin.is_empty() {
-                req = req.header("Origin", &public.origin);
-            }
-        }
-
-        for scope in &context.scopes {
-            for (k, v) in &scope.headers {
-                req = req.header(k, v);
-            }
-            if !scope.cookies.is_empty() {
-                req = req.header("Cookie", &scope.cookies);
-            }
-        }
-
-        let is_likely_manifest = upstream_url.contains(".m3u8");
+        let mut request = FetchRequest::get(upstream_url);
+        request.context = context.clone();
+        request
+            .headers
+            .insert("accept".to_owned(), "*/*".to_owned());
         if let Some(range) = range_header
-            && !is_likely_manifest
+            && !kind.is_playlist()
+            && range.len() <= 128
         {
-            req = req.header("Range", range);
+            request.headers.insert("range".to_owned(), range.to_owned());
         }
 
-        let res = req
-            .send()
-            .await
-            .map_err(|e| RelayError::Upstream(e.to_string()))?;
+        let response = self
+            .client
+            .fetch_media(request, &CancellationToken::new())
+            .await?;
 
-        let status = res.status().as_u16();
-        if !res.status().is_success() {
+        let status = response.status.as_u16();
+        if !response.status.is_success() {
             return Err(RelayError::UpstreamStatus(status));
         }
 
-        let final_url = res.url().clone();
-        let headers = res.headers();
-        let content_type_header = headers
-            .get("content-type")
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or("application/octet-stream")
-            .to_owned();
-        let content_length = headers
-            .get("content-length")
-            .and_then(|v| v.to_str().ok())
-            .and_then(|v| v.parse::<u64>().ok());
-        let content_range = headers
-            .get("content-range")
-            .and_then(|v| v.to_str().ok())
-            .map(str::to_owned);
-        let accept_ranges = headers
-            .get("accept-ranges")
-            .and_then(|v| v.to_str().ok())
-            .map(str::to_owned);
+        let final_url = response.url.clone();
+        let headers = &response.headers;
+        let header = |name: &str| {
+            headers
+                .get(name)
+                .and_then(|v| v.to_str().ok())
+                .map(str::to_owned)
+        };
+        let content_type_header =
+            header("content-type").unwrap_or_else(|| "application/octet-stream".to_owned());
+        let content_length = header("content-length").and_then(|v| v.parse::<u64>().ok());
+        let content_range = header("content-range");
+        let accept_ranges = header("accept-ranges");
 
-        let mut byte_stream = res.bytes_stream();
+        let mut byte_stream = response.body;
         let first_chunk = match byte_stream.next().await {
             Some(Ok(chunk)) => chunk,
-            Some(Err(e)) => return Err(RelayError::Upstream(e.to_string())),
+            Some(Err(e)) => return Err(e.into()),
             None => Bytes::new(),
         };
 
         if looks_like_hls_manifest(&first_chunk) {
             let mut full = BytesMut::from(first_chunk.as_ref());
             while let Some(next) = byte_stream.next().await {
-                let chunk = next.map_err(|e| RelayError::Upstream(e.to_string()))?;
+                let chunk = next?;
                 if full.len() + chunk.len() > MAX_MANIFEST_BYTES {
                     return Err(RelayError::InvalidManifest(
                         "manifest exceeds byte limit".into(),
@@ -517,15 +394,21 @@ impl MediaRelay {
                 full.extend_from_slice(&chunk);
             }
 
+            let playlist_kind = if kind == ResourceKind::SubtitlePlaylist {
+                ResourceKind::SubtitlePlaylist
+            } else {
+                ResourceKind::Playlist
+            };
             let mut discovered = Vec::new();
             let rewritten = HlsManifestRewriter::rewrite(
                 &full,
                 &final_url,
                 session_id,
                 token,
-                |resolved_url| {
+                playlist_kind,
+                |resolved_url, kind| {
                     let rid = Self::resource_id(&resolved_url);
-                    discovered.push((rid.clone(), resolved_url));
+                    discovered.push((rid.clone(), resolved_url, kind));
                     rid
                 },
             )
@@ -534,11 +417,11 @@ impl MediaRelay {
             if let Ok(mut map) = self.sessions.lock()
                 && let Some(session) = map.get_mut(session_id)
             {
-                for (rid, url) in discovered {
+                for (rid, url, kind) in discovered {
                     if session.resources.len() < MAX_RESOURCES_PER_SESSION
                         || session.resources.contains_key(&rid)
                     {
-                        session.resources.insert(rid, url);
+                        session.resources.insert(rid, (url, kind));
                     }
                 }
             }
@@ -546,8 +429,7 @@ impl MediaRelay {
             return Ok(RelayResponse::Manifest(rewritten));
         }
 
-        let sniffed_content_type =
-            sniff_media_content_type(&first_chunk, &final_url, &content_type_header);
+        let content_type = media_content_type(&first_chunk, &final_url, &content_type_header, kind);
         let combined = futures_util::stream::once(async move { Ok(first_chunk) })
             .chain(byte_stream.map(|item| item.map_err(std::io::Error::other)))
             .map(move |item| {
@@ -557,12 +439,20 @@ impl MediaRelay {
 
         Ok(RelayResponse::Binary {
             status,
-            content_type: sniffed_content_type,
+            content_type,
             content_length,
             content_range,
             accept_ranges: accept_ranges.or_else(|| Some("bytes".into())),
             stream: Box::pin(combined),
         })
+    }
+}
+
+/// HLS sources are served as playlists; progressive files as MP4.
+pub fn delivery_format(stream: &ProbedStream) -> StreamFormat {
+    match stream.observation.format {
+        StreamFormat::Mp4 => StreamFormat::Mp4,
+        _ => StreamFormat::Hls,
     }
 }
 
@@ -575,7 +465,9 @@ fn looks_like_hls_manifest(bytes: &[u8]) -> bool {
     trimmed.starts_with(b"#EXTM3U")
 }
 
-fn sniff_media_content_type(first_chunk: &[u8], url: &Url, declared: &str) -> String {
+/// Only media types leave the relay. Anything else (an HTML error page, a
+/// script) is labelled as opaque bytes so a browser never renders it.
+fn media_content_type(first_chunk: &[u8], url: &Url, declared: &str, kind: ResourceKind) -> String {
     if first_chunk.first() == Some(&0x47)
         && (first_chunk.len() < 189 || first_chunk.get(188) == Some(&0x47))
     {
@@ -593,14 +485,21 @@ fn sniff_media_content_type(first_chunk: &[u8], url: &Url, declared: &str) -> St
         .strip_prefix(b"\xef\xbb\xbf")
         .unwrap_or(first_chunk)
         .trim_ascii_start();
-    if trimmed.starts_with(b"WEBVTT") || url.path().ends_with(".vtt") {
+    if trimmed.starts_with(b"WEBVTT")
+        || url.path().ends_with(".vtt")
+        || kind == ResourceKind::SubtitleSegment
+    {
         return "text/vtt; charset=utf-8".into();
     }
-    declared.to_owned()
+    let declared = declared.trim().to_ascii_lowercase();
+    if declared.starts_with("video/") || declared.starts_with("audio/") {
+        return declared;
+    }
+    "application/octet-stream".into()
 }
 
 #[cfg(test)]
-mod activity_tests {
+mod tests {
     use super::*;
 
     #[test]
@@ -620,90 +519,43 @@ mod activity_tests {
     }
 
     #[test]
-    fn response_body_lifetime_and_cancellation_keep_restart_deferred() -> Result<(), RelayError> {
-        let relay = MediaRelay::new();
-        assert_eq!(relay.active_streams(), Some(0));
-        let body = relay.begin_delivery("playing")?;
-        if let Ok(mut activity) = relay.activity.lock() {
-            for session in activity.values_mut() {
-                session.last_observed = Instant::now() - PLAYBACK_IDLE_GRACE * 2;
-            }
-        }
-        assert_eq!(relay.active_streams(), Some(1));
-        relay.revoke_session("playing");
-        assert_eq!(relay.active_streams(), Some(1));
-        drop(body);
-        assert_eq!(relay.active_streams(), Some(1));
-        if let Ok(mut activity) = relay.activity.lock() {
-            for session in activity.values_mut() {
-                assert_eq!(session.in_flight, 0);
-                session.last_observed = Instant::now() - PLAYBACK_IDLE_GRACE;
-            }
-        }
-        assert_eq!(relay.active_streams(), Some(0));
-        Ok(())
+    fn non_media_content_types_are_neutralised() {
+        let url = Url::parse("https://cdn.example.com/x").unwrap_or_else(|_| unreachable!());
+        assert_eq!(
+            media_content_type(b"<html>", &url, "text/html", ResourceKind::Segment),
+            "application/octet-stream"
+        );
+        assert_eq!(
+            media_content_type(b"\0\0\0\0", &url, "Audio/AAC", ResourceKind::Segment),
+            "audio/aac"
+        );
+        assert_eq!(
+            media_content_type(
+                b"1\n00:00",
+                &url,
+                "text/plain",
+                ResourceKind::SubtitleSegment
+            ),
+            "text/vtt; charset=utf-8"
+        );
     }
 
     #[tokio::test]
-    async fn relay_response_holds_activity_until_its_body_is_dropped()
-    -> Result<(), Box<dyn std::error::Error>> {
-        use tokio::io::{AsyncReadExt, AsyncWriteExt};
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
-        let address = listener.local_addr()?;
-        let (close, closed) = tokio::sync::oneshot::channel();
-        let server = tokio::spawn(async move {
-            let (mut socket, _) = listener.accept().await?;
-            let mut request = Vec::new();
-            let mut byte = [0u8; 1];
-            while !request.ends_with(b"\r\n\r\n") {
-                socket.read_exact(&mut byte).await?;
-                request.push(byte[0]);
-            }
-            socket
-                .write_all(
-                    b"HTTP/1.1 200 OK\r\nContent-Length: 1000\r\nContent-Type: video/mp2t\r\n\r\n",
-                )
-                .await?;
-            socket.write_all(&[0x47; 188]).await?;
-            let _ = closed.await;
-            Ok::<_, std::io::Error>(())
-        });
-        let relay = MediaRelay::new();
-        let response = relay
+    async fn relay_refuses_private_destinations() {
+        let Ok(client) = HttpClient::new() else {
+            return;
+        };
+        let relay = MediaRelay::new(client);
+        let result = relay
             .proxy_url(
-                "playing",
-                "token",
-                &format!("http://{address}/segment.ts"),
+                "s",
+                "t",
+                "http://127.0.0.1:9/secret",
+                ResourceKind::Segment,
                 &FetchContext::default(),
                 None,
             )
-            .await?;
-        let RelayResponse::Binary { stream, .. } = response else {
-            return Err("expected binary response".into());
-        };
-        if let Ok(mut activity) = relay.activity.lock() {
-            for session in activity.values_mut() {
-                session.last_observed = Instant::now() - PLAYBACK_IDLE_GRACE * 2;
-            }
-        }
-        assert_eq!(relay.active_streams(), Some(1));
-        drop(stream);
-        // Cancellation starts the grace period, and a later explicit revoke clears it.
-        assert_eq!(relay.active_streams(), Some(1));
-        relay.revoke_session("playing");
-        assert_eq!(relay.active_streams(), Some(0));
-        let _ = close.send(());
-        server.await??;
-        Ok(())
-    }
-
-    #[test]
-    fn progress_keeps_buffered_playback_active_until_revoke() {
-        let relay = MediaRelay::new();
-        relay.note_playback_activity("playing");
-        relay.note_playback_activity("playing");
-        assert_eq!(relay.active_streams(), Some(1));
-        relay.revoke_session("playing");
-        assert_eq!(relay.active_streams(), Some(0));
+            .await;
+        assert!(matches!(result, Err(RelayError::Upstream(_))));
     }
 }

@@ -1,6 +1,7 @@
 //! Bounded provider racing with scoped coalescing and progressive measured
 //! startup. Provider generations are captured once; cached URLs are re-probed.
 
+use crate::cache::{ByteBoundCache, CacheNamespace, NamespacedKey, source_cache_deadline};
 use crate::{
     prober::{ProbeOptions, ProbeProgress, StreamProber},
     selection,
@@ -20,8 +21,6 @@ use std::{
 use stream_core::providers::{
     AdapterResult, ErrorCategory, Lookup, ProviderId, ProviderStatus, Selection,
 };
-use stream_provider_runtime::{ProviderHandle, ProviderRuntime, RuntimeError};
-use stream_storage::cache::{ByteBoundCache, CacheNamespace, NamespacedKey, source_cache_deadline};
 use thiserror::Error;
 use tokio::{
     sync::{Semaphore, mpsc, watch},
@@ -62,67 +61,6 @@ pub trait DiscoveryProvider: Send + Sync {
 
 pub trait ProviderCatalog: Send + Sync {
     fn snapshot(&self) -> Result<Vec<Arc<dyn DiscoveryProvider>>, DiscoveryError>;
-}
-
-#[derive(Clone)]
-pub struct ComponentProviders {
-    runtime: ProviderRuntime,
-}
-impl ComponentProviders {
-    pub fn new(runtime: ProviderRuntime) -> Self {
-        Self { runtime }
-    }
-}
-struct ComponentProvider {
-    runtime: ProviderRuntime,
-    handle: ProviderHandle,
-}
-#[async_trait]
-impl DiscoveryProvider for ComponentProvider {
-    fn id(&self) -> &ProviderId {
-        &self.handle.manifest().provider_id
-    }
-    fn version(&self) -> &Version {
-        &self.handle.manifest().version
-    }
-    fn generation(&self) -> u64 {
-        self.handle.generation()
-    }
-    async fn resolve(
-        &self,
-        lookup: &Lookup,
-        cancel: CancellationToken,
-    ) -> Result<AdapterResult, ErrorCategory> {
-        self.runtime
-            .resolve_handle(&self.handle, lookup, cancel)
-            .await
-            .map_err(|error| match error {
-                RuntimeError::Cancelled => ErrorCategory::Cancelled,
-                RuntimeError::Timeout => ErrorCategory::Timeout,
-                RuntimeError::Contract
-                | RuntimeError::Component(_)
-                | RuntimeError::ProviderFailure => ErrorCategory::ProtocolChange,
-                _ => ErrorCategory::Unavailable,
-            })
-    }
-}
-impl ProviderCatalog for ComponentProviders {
-    fn snapshot(&self) -> Result<Vec<Arc<dyn DiscoveryProvider>>, DiscoveryError> {
-        self.runtime
-            .snapshots()
-            .map_err(|_| DiscoveryError::Closed)
-            .map(|handles| {
-                handles
-                    .into_iter()
-                    .map(|handle| {
-                        Arc::new(ComponentProvider {
-                            runtime: self.runtime.clone(),
-                            handle,
-                        }) as Arc<dyn DiscoveryProvider>
-                    })
-                    .collect()
-            })
-    }
 }
 
 #[derive(Clone, Debug)]

@@ -7,8 +7,8 @@ mod destination;
 mod resolver;
 
 pub use client::{
-    EgressMode, FetchMetrics, FetchRequest, FetchResponse, HttpClient, ProxyEndpoint, ResponseBody,
-    StreamingResponse, TransportConfig, TransportError,
+    BROWSER_USER_AGENT, EgressMode, FetchMetrics, FetchRequest, FetchResponse, HttpClient,
+    ProxyEndpoint, ResponseBody, StreamingResponse, TransportConfig, TransportError,
 };
 pub use destination::{parse_destination_url, public_ip, validate_destination_url};
 pub use reqwest::{Method, StatusCode};
