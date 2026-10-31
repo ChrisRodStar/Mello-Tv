@@ -236,6 +236,16 @@ struct MelloTVAPI: Sendable {
         }
     }
 
+    // Timing metadata is optional. Read a hydrated IMDb identity without
+    // holding a skip button behind catalog polling or endpoint discovery.
+    func timingIMDbID(for title: MediaTitle) async throws -> String? {
+        let reply: SavedRecord<WireTitle> = try await executeSingleRequest(to: effectiveBaseURL,
+            path: "titles/\(title.type.rawValue)/\(title.tmdbID)", method: "GET", bodyData: nil,
+            query: [], key: nil, timingID: nil, timeout: 2, pendingAttempt: 7)
+        guard reply.data.id == title.tmdbID, reply.data.type == title.type else { throw APIError.invalidData }
+        return reply.data.imdbId
+    }
+
     func details(for title: MediaTitle) async throws -> TitleDetails {
         for attempt in 0..<20 {
             do {

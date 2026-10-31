@@ -24,6 +24,17 @@ private actor SegmentFixture {
     }
 }
 
+private actor RecoveringSegmentFixture {
+    private(set) var count = 0
+    let payload: Data
+    init(payload: Data) { self.payload = payload }
+    func fetch(_ request: URLRequest) -> PlaybackSegmentHTTPResponse {
+        count += 1
+        return PlaybackSegmentHTTPResponse(statusCode: count == 1 ? 503 : 200,
+            url: request.url, mimeType: "application/json", data: count == 1 ? Data() : payload)
+    }
+}
+
 private final class EpisodeResolverFixture: URLProtocol {
     static let lock = NSLock()
     static var scenario = "unordered"
@@ -247,9 +258,10 @@ struct EpisodePromptChecks {
         let partialFixture = SegmentFixture(payload: try data(partialPrimary), alternativePayload: rawAlternative)
         let partialService = PlaybackSegmentService(transport: { try await partialFixture.fetch($0) })
         let partial = await partialService.segments(for: supernaturalRequest, duration: 2600.64)
-        require(partial.segments.map(\.kind) == [.intro, .credits],
-                "fallback fills missing credits without replacing valid primary intro")
-        require(partial.segments.first?.start == 40 && partial.segments.first?.end == 70)
+        require(partial.segments.map(\.kind) == [.recap, .intro, .credits],
+                "fallback retains a separate recap while preserving valid primary intro")
+        require(partial.segments.first(where: { $0.kind == .intro })?.start == 40
+                && partial.segments.first(where: { $0.kind == .intro })?.end == 70)
         require(partial.source == "IntroDB.app + TheIntroDB")
         print("PASS fallback fills a missing segment kind while preserving primary source markers")
 
@@ -266,6 +278,100 @@ struct EpisodePromptChecks {
             require(await fixture.requests.count == 1, "failures are briefly cached rather than retried on each frame")
         }
         print("PASS throttling, redirects, invalid content, and oversized responses fail without skip actions")
+
+        // Public IntroDB.app S3E2 response captured 2026-10-31. No video is
+        // fetched: the fixture anchors its 48-second recap to the 42:11 cut.
+        let supernaturalS3E2: [String: Any] = [
+            "imdb_id": "tt0460681", "media_type": "tv", "is_movie": false, "season": 3, "episode": 2,
+            "intro": NSNull(),
+            "recap": ["start_ms": 0, "end_ms": 48_000, "confidence": 1, "submission_count": 1],
+            "outro": ["start_ms": 2_493_000, "end_ms": 2_531_000, "confidence": 1, "submission_count": 1],
+            "post_credits": NSNull(),
+        ]
+        let s3e2 = PlaybackSegmentService.validatedAlternativeSegments(from: try data(supernaturalS3E2),
+            expectedIMDbID: "tt0460681", expectedSeason: 3, expectedEpisode: 2, duration: 2532.64)!
+        require(s3e2.segments.map(\.kind) == [.recap, .credits])
+        require(s3e2.segments[0].end == 48 && s3e2.segments[1].start == 2493)
+        require(PlaybackSegmentService.validatedAlternativeSegments(from: try data(supernaturalS3E2),
+            expectedIMDbID: "tt0460681", expectedSeason: 3, expectedEpisode: 2, duration: 2425) == nil)
+        let mismatchedPrimary: [String: Any] = [
+            "tvdb_id": 78901, "type": "tv", "season": 3, "episode": 2, "group_duration_ms": 2_425_000,
+            "recap": [["start_ms": 0, "end_ms": 47_000, "confidence": 0.1, "submission_count": 1]],
+            "credits": [["start_ms": 2_488_000, "end_ms": NSNull(), "confidence": 0.1, "submission_count": 1]],
+        ]
+        let s3Fixture = SegmentFixture(payload: try data(mismatchedPrimary), alternativePayload: try data(supernaturalS3E2))
+        let s3Service = PlaybackSegmentService(transport: { try await s3Fixture.fetch($0) })
+        let s3Request = PlaybackRequest(titleID: 1622, type: .tv, title: "Supernatural", profileID: "fixture",
+            season: 3, episode: 2, catalogTitle: noIMDbTitle)
+        let hydratedS3 = await s3Service.segments(for: s3Request, duration: 2532.64, imdbID: "tt0460681")
+        require(hydratedS3.segments.map(\.kind) == [.recap, .credits],
+                "a hydrated IMDb ID enables the fallback without accepting a mismatched/weak primary cut")
+        let s3e2Timing = EpisodePromptTiming(duration: 2532.64, speed: 1,
+            creditsStart: s3e2.segments.first(where: { $0.kind == .credits })?.start)
+        var aligned = EpisodePromptState()
+        aligned.bind(to: "supernatural-s3e2")
+        aligned.consider(position: 2480, cardTrigger: s3e2Timing.cardTrigger,
+            countdownTrigger: s3e2Timing.countdownTrigger, naturallyAdvanced: true)
+        require(!aligned.isVisible, "the old last-minute rule showed Next before S3E2 credits")
+        aligned.consider(position: 2493, cardTrigger: s3e2Timing.cardTrigger,
+            countdownTrigger: s3e2Timing.countdownTrigger, naturallyAdvanced: true)
+        require(aligned.isVisible && !aligned.isCountingDown)
+        require(EpisodePromptTiming(duration: 2532.64, speed: 2, creditsStart: 2493).cardTrigger == 2493,
+            "changing speed cannot move the credits marker earlier")
+        print("PASS real Supernatural S3E2 recap/credits stay duration-matched and Next starts at credits, not the last minute")
+
+        var recaps = raw
+        recaps["recap"] = [["start_ms": 0, "end_ms": 45_000, "confidence": 0.8, "submission_count": 3]]
+        require(try validate(recaps)?.segments.map(\.kind) == [.recap, .intro], "primary recaps must not be discarded")
+        let creditsOnly = PlaybackSegments(duration: s3e2.duration,
+            segments: s3e2.segments.filter { $0.kind == .credits }, source: s3e2.source)
+        require(creditsOnly.retainingMissingMarkers(from: s3e2).segments.count == 2,
+            "a partial retry cannot erase a previously validated recap")
+        print("PASS separate recap/intro markers and partial-result preservation")
+
+        var restoredMetadata = raw
+        restoredMetadata["credits"] = [["start_ms": 3_450_000, "end_ms": NSNull(), "confidence": 0.9, "submission_count": 3]]
+        let recoveringFixture = RecoveringSegmentFixture(payload: try data(restoredMetadata))
+        let recoveringService = PlaybackSegmentService(transport: { await recoveringFixture.fetch($0) })
+        require(await recoveringService.segments(for: request, duration: 3500).segments.isEmpty)
+        require(await recoveringService.segments(for: request, duration: 3500).segments.isEmpty)
+        require(await recoveringFixture.count == 1, "ordinary reads honor the short failure cache")
+        require(await recoveringService.segments(for: request, duration: 3500, refreshMissing: true).segments.count == 2,
+                "an explicit bounded retry must bypass a cached failed lookup")
+        require(await recoveringFixture.count == 2)
+        print("PASS transient timing failure recovers on explicit retry without polling the failure cache")
+
+        var lookup = PlaybackSegmentLookupState()
+        let oldLookup = lookup.begin(duration: 2500, position: 0, now: 0)!
+        require(lookup.finish(oldLookup, hasOpening: false, hasCredits: false, now: 1))
+        require(lookup.begin(duration: 2500, position: 3, now: 3) == nil)
+        let retry = lookup.begin(duration: 2500, position: 4, now: 4)!
+        require(lookup.finish(retry, hasOpening: true, hasCredits: false, now: 5))
+        let third = lookup.begin(duration: 2500, position: 15, now: 15)!
+        require(lookup.finish(third, hasOpening: true, hasCredits: false, now: 16))
+        require(lookup.begin(duration: 2500, position: 20, now: 100) == nil)
+        let late = lookup.begin(duration: 2500, position: 2390, now: 2000)!
+        require(lookup.finish(late, hasOpening: true, hasCredits: true, now: 2001))
+        require(lookup.begin(duration: 2500, position: 2391, now: 2002) == nil)
+        let corrected = lookup.begin(duration: 2550, position: 30, now: 2003)!
+        require(!lookup.finish(oldLookup, hasOpening: true, hasCredits: true, now: 2004))
+        require(lookup.finish(corrected, hasOpening: true, hasCredits: true, now: 2004))
+        print("PASS bounded timing retries, late credits retry, duration correction, and stale-response ownership")
+
+        let unmarkedTiming = EpisodePromptTiming(duration: 1000, speed: 1, creditsStart: nil)
+        var unmarked = EpisodePromptState()
+        unmarked.bind(to: "unmarked")
+        unmarked.consider(position: 995, cardTrigger: unmarkedTiming.cardTrigger,
+            countdownTrigger: unmarkedTiming.countdownTrigger, naturallyAdvanced: true)
+        require(!unmarked.isVisible && unmarked.hasNaturallyEarnedCountdown && !unmarked.tick())
+        unmarked.naturalEnd()
+        require(unmarked.isVisible && unmarked.isCountingDown && unmarked.secondsRemaining == 10)
+        var soughtToEnd = EpisodePromptState()
+        soughtToEnd.bind(to: "sought-to-end")
+        soughtToEnd.seekOrScrub(to: 1000)
+        soughtToEnd.naturalEnd()
+        require(soughtToEnd.isVisible && !soughtToEnd.isCountingDown && !soughtToEnd.tick())
+        print("PASS missing credits wait for actual end with a visible countdown; seeking cannot earn autoplay")
 
         var prompt = EpisodePromptState()
         prompt.bind(to: "episode-one")

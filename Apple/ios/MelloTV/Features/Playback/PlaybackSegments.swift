@@ -30,6 +30,20 @@ struct PlaybackSegments: Sendable {
     // Retain the source name so the UI can provide the attribution TheIntroDB requests.
     let source: String?
 
+    func retainingMissingMarkers(from previous: Self) -> Self {
+        guard previous.duration > 0, abs(duration - previous.duration) <= 2 else { return self }
+        let retained = previous.segments.filter { old in
+            !segments.contains { new in
+                new.kind == old.kind || ((new.kind == .intro || new.kind == .recap) &&
+                    (old.kind == .intro || old.kind == .recap) && new.start < old.end && old.start < new.end)
+            }
+        }
+        let sources = [source, retained.isEmpty ? nil : previous.source].compactMap { $0 }
+        return Self(duration: duration,
+            segments: (segments + retained).sorted { $0.start == $1.start ? $0.end < $1.end : $0.start < $1.start },
+            source: sources.isEmpty ? nil : Set(sources).sorted().joined(separator: " + "))
+    }
+
     static func empty(duration: Double) -> Self {
         Self(duration: duration.isFinite ? max(0, duration) : 0, segments: [], source: nil)
     }
@@ -40,6 +54,43 @@ struct PlaybackSegmentHTTPResponse: Sendable {
     let url: URL?
     let mimeType: String?
     let data: Data
+}
+
+/// Retry missing markers without retrying every media-time callback. A late
+/// credits lookup gets its own bounded chance after an opening-network outage.
+struct PlaybackSegmentLookupState {
+    private(set) var duration: Double?
+    private(set) var attempts = 0
+    private(set) var inFlight: UUID?
+    private var retryAt: TimeInterval?
+    private var complete = false
+    private var retriedNearEnd = false
+
+    mutating func begin(duration: Double, position: Double, now: TimeInterval) -> UUID? {
+        guard duration.isFinite, duration > 0, now.isFinite else { return nil }
+        if self.duration.map({ abs($0 - duration) > 2 }) ?? true {
+            self = Self()
+            self.duration = duration
+        }
+        if position >= duration - 120, !retriedNearEnd, !complete, inFlight == nil {
+            retriedNearEnd = true
+            attempts = 0
+            retryAt = nil
+        }
+        guard !complete, inFlight == nil, attempts < 3, retryAt.map({ now >= $0 }) ?? true else { return nil }
+        attempts += 1
+        let token = UUID()
+        inFlight = token
+        return token
+    }
+
+    mutating func finish(_ token: UUID, hasOpening: Bool, hasCredits: Bool, now: TimeInterval) -> Bool {
+        guard inFlight == token else { return false }
+        inFlight = nil
+        complete = hasOpening && hasCredits
+        retryAt = complete || attempts >= 3 ? nil : now + (attempts == 1 ? 3 : 10)
+        return true
+    }
 }
 
 actor PlaybackSegmentService {
@@ -68,14 +119,15 @@ actor PlaybackSegmentService {
 
     private let transport: Transport
     private var cache: [Key: CacheEntry] = [:]
-    private var flights: [Key: Task<FetchResult, Never>] = [:]
+    private var flights: [Key: (id: UUID, task: Task<FetchResult, Never>)] = [:]
     private var accessOrder: UInt64 = 0
 
     init(transport: Transport? = nil) {
         self.transport = transport ?? Self.makeDefaultTransport()
     }
 
-    func segments(for request: PlaybackRequest, duration: Double) async -> PlaybackSegments {
+    func segments(for request: PlaybackRequest, duration: Double, imdbID: String? = nil,
+                  refreshMissing: Bool = false) async -> PlaybackSegments {
         guard request.type == .tv,
               request.titleID > 0,
               let season = request.season, (0...10_000).contains(season),
@@ -84,13 +136,15 @@ actor PlaybackSegmentService {
               let durationMilliseconds = Self.milliseconds(duration) else {
             return .empty(duration: duration)
         }
-        let imdbID = Self.validIMDbID(request.catalogTitle.imdbID)
+        let imdbID = Self.validIMDbID(imdbID ?? request.catalogTitle.imdbID)
         let key = Key(tmdbID: request.titleID, imdbID: imdbID, season: season, episode: episode,
                       durationMilliseconds: durationMilliseconds)
 
         let now = Date()
         if let entry = cache[key] {
-            if entry.expiresAt > now {
+            let hasOpening = entry.value.segments.contains { $0.kind == .intro || $0.kind == .recap }
+            let hasCredits = entry.value.segments.contains { $0.kind == .credits }
+            if entry.expiresAt > now, !refreshMissing || (hasOpening && hasCredits) {
                 accessOrder &+= 1
                 cache[key] = CacheEntry(value: entry.value, expiresAt: entry.expiresAt,
                                         accessOrder: accessOrder)
@@ -100,8 +154,10 @@ actor PlaybackSegmentService {
         }
 
         let task: Task<FetchResult, Never>
+        let flightID: UUID
         if let existing = flights[key] {
-            task = existing
+            task = existing.task
+            flightID = existing.id
         } else {
             guard flights.count < 4 else { return .empty(duration: duration) }
             let transport = self.transport
@@ -132,11 +188,13 @@ actor PlaybackSegmentService {
                 }
                 return .success(Self.merge(primary: primary, alternative: alternative))
             }
-            flights[key] = task
+            flightID = UUID()
+            flights[key] = (flightID, task)
         }
 
         let result = await task.value
-        flights.removeValue(forKey: key)
+        let ownsFlight = flights[key]?.id == flightID
+        if ownsFlight { flights.removeValue(forKey: key) }
 
         let value: PlaybackSegments
         let lifetime: TimeInterval
@@ -148,7 +206,7 @@ actor PlaybackSegmentService {
             value = .empty(duration: duration)
             lifetime = 30
         }
-        insert(value, for: key, expiresAt: Date().addingTimeInterval(lifetime))
+        if ownsFlight { insert(value, for: key, expiresAt: Date().addingTimeInterval(lifetime)) }
         return value
     }
 
@@ -187,12 +245,13 @@ actor PlaybackSegmentService {
         // These are conservative product thresholds, not a claim that the source's
         // confidence value is a calibrated probability of boundary correctness.
         let intros = parseSegments(response["intro"], kind: .intro, duration: duration)
+        let recaps = parseSegments(response["recap"], kind: .recap, duration: duration)
         let credits = parseFinalCredits(response["credits"], duration: duration)
         return PlaybackSegments(duration: duration,
-                               segments: (intros + credits).sorted {
+                               segments: (intros + recaps + credits).sorted {
                                    $0.start == $1.start ? $0.end < $1.end : $0.start < $1.start
                                },
-                               source: (intros.isEmpty && credits.isEmpty) ? nil : "TheIntroDB")
+                               source: (intros.isEmpty && recaps.isEmpty && credits.isEmpty) ? nil : "TheIntroDB")
     }
 
     static func validatedAlternativeSegments(
@@ -230,9 +289,9 @@ actor PlaybackSegmentService {
               outroStartSeconds >= duration * 0.75,
               duration - outroStartSeconds <= 15 * 60 else { return nil }
 
-        let opening = parseAlternativeOpening(response["intro"], kind: .intro, duration: duration)
-            ?? parseAlternativeOpening(response["recap"], kind: .recap, duration: duration)
-        var segments = opening.map { [$0] } ?? []
+        let intro = parseAlternativeOpening(response["intro"], kind: .intro, duration: duration)
+        let recap = parseAlternativeOpening(response["recap"], kind: .recap, duration: duration)
+        var segments = [recap, intro].compactMap { $0 }
         if response["post_credits"] == nil || response["post_credits"] is NSNull {
             segments.append(PlaybackSegment(kind: .credits,
                                             start: outroStartSeconds,
@@ -244,13 +303,16 @@ actor PlaybackSegmentService {
 
     private static func merge(primary: PlaybackSegments, alternative: PlaybackSegments) -> PlaybackSegments {
         var merged = primary.segments
-        let primaryHasOpening = merged.contains { $0.kind == .intro || $0.kind == .recap }
         let primaryHasCredits = merged.contains { $0.kind == .credits }
         var alternativeContributed = false
-        if !primaryHasOpening,
-           let opening = alternative.segments.first(where: { $0.kind == .intro || $0.kind == .recap }) {
-            merged.append(opening)
-            alternativeContributed = true
+        for opening in alternative.segments where opening.kind == .intro || opening.kind == .recap {
+            // Preserve primary markers when sources name overlapping openings
+            // differently; retain a separate recap and intro when they agree.
+            if !merged.contains(where: { $0.kind == opening.kind ||
+                (($0.kind == .intro || $0.kind == .recap) && $0.start < opening.end && opening.start < $0.end) }) {
+                merged.append(opening)
+                alternativeContributed = true
+            }
         }
         if !primaryHasCredits,
            let credits = alternative.segments.first(where: { $0.kind == .credits }) {
@@ -279,7 +341,7 @@ actor PlaybackSegmentService {
         let end = Double(endMilliseconds) / 1_000
         let length = end - start
         guard start >= 0, start < end, end <= duration,
-              (3...300).contains(length), start < min(1_200, duration / 2),
+              (3...(kind == .recap ? 480 : 300)).contains(length), start < min(1_200, duration / 2),
               end < duration - 30 else { return nil }
         return PlaybackSegment(kind: kind, start: start, end: end)
     }
@@ -330,7 +392,7 @@ actor PlaybackSegmentService {
                   let count = integer(value["submission_count"]), count >= 2 else { return nil }
 
             let start: Double
-            if value["start_ms"] is NSNull, kind == .intro {
+            if value["start_ms"] is NSNull, kind == .intro || kind == .recap {
                 start = 0
             } else if let milliseconds = integer(value["start_ms"]) {
                 start = Double(milliseconds) / 1_000
@@ -351,7 +413,7 @@ actor PlaybackSegmentService {
             let length = end - start
             switch kind {
             case .intro, .recap:
-                guard (3...300).contains(length), start < min(1_200, duration / 2), end < duration - 30 else { return nil }
+                guard (3...(kind == .recap ? 480 : 300)).contains(length), start < min(1_200, duration / 2), end < duration - 30 else { return nil }
             case .credits:
                 guard start >= duration * 0.75, duration - start <= 15 * 60,
                       end >= duration - 2 else { return nil }

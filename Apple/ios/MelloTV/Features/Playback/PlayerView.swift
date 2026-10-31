@@ -144,6 +144,8 @@ private struct PlaybackSessionView: View {
     @State private var playbackSegments = PlaybackSegments.empty(duration: 0)
     @State private var segmentTask: Task<Void, Never>?
     @State private var loadedSegmentItem: ObjectIdentifier?
+    @State private var segmentLookup = PlaybackSegmentLookupState()
+    @State private var segmentIMDbID: String?
     @State private var episodeMessage: String?
     @State private var audioGroup: AVMediaSelectionGroup?
     @State private var subtitleGroup: AVMediaSelectionGroup?
@@ -992,19 +994,43 @@ private struct PlaybackSessionView: View {
     }
 
     private func loadPlaybackSegments(for item: AVPlayerItem, duration itemDuration: Double) {
-        guard request.type == .tv, itemDuration.isFinite, itemDuration > 0 else { return }
+        guard request.type == .tv, isPlaybackSceneActive, itemDuration.isFinite, itemDuration > 0 else { return }
         let itemID = ObjectIdentifier(item)
-        guard loadedSegmentItem != itemID else { return }
-        loadedSegmentItem = itemID
+        if loadedSegmentItem != itemID {
+            loadedSegmentItem = itemID
+            segmentLookup = PlaybackSegmentLookupState()
+            segmentIMDbID = request.catalogTitle.imdbID
+        }
+        let previousDuration = segmentLookup.duration
+        guard let token = segmentLookup.begin(duration: itemDuration, position: currentTime,
+            now: ProcessInfo.processInfo.systemUptime) else { return }
+        if previousDuration.map({ abs($0 - itemDuration) > 2 }) == true {
+            playbackSegments = .empty(duration: 0)
+        }
+        let refreshMissing = segmentLookup.attempts > 1 || currentTime >= itemDuration - 120
         let ownerKey = request.cacheKey
         let segmentsRequest = request
         segmentTask?.cancel()
         segmentTask = Task {
-            let result = await PlaybackSegmentService.shared.segments(for: segmentsRequest, duration: itemDuration)
+            var imdbID = segmentIMDbID
+            if imdbID == nil {
+                imdbID = try? await MelloTVAPI(baseURL: ServerAddress.baseURL).timingIMDbID(for: segmentsRequest.catalogTitle)
+            }
+            guard !Task.isCancelled else { return }
+            let result = await PlaybackSegmentService.shared.segments(for: segmentsRequest, duration: itemDuration,
+                imdbID: imdbID, refreshMissing: refreshMissing)
             guard !Task.isCancelled, request.cacheKey == ownerKey,
-                  player?.currentItem === item else { return }
-            playbackSegments = result
-            playbackLog.info("Episode timing lookup finished for S\(segmentsRequest.season ?? 0) E\(segmentsRequest.episode ?? 0): \(result.segments.count, privacy: .public) accepted markers")
+                  player?.currentItem === item, segmentLookup.inFlight == token else { return }
+            segmentIMDbID = imdbID
+            // A failed retry must not erase an opening already validated for
+            // this same item/duration.
+            playbackSegments = result.retainingMissingMarkers(from: playbackSegments)
+            let hasOpening = playbackSegments.segments.contains { $0.kind == .intro || $0.kind == .recap }
+            let hasCredits = playbackSegments.segments.contains { $0.kind == .credits }
+            _ = segmentLookup.finish(token, hasOpening: hasOpening, hasCredits: hasCredits,
+                now: ProcessInfo.processInfo.systemUptime)
+            segmentTask = nil
+            playbackLog.info("Episode timing lookup finished for S\(segmentsRequest.season ?? 0) E\(segmentsRequest.episode ?? 0), attempt \(segmentLookup.attempts): \(playbackSegments.segments.count, privacy: .public) accepted markers")
             updateEpisodePrompt(position: currentTime, duration: duration, naturallyAdvanced: false)
         }
     }
@@ -1018,12 +1044,9 @@ private struct PlaybackSessionView: View {
               !isLocked, activePanel == nil, !isSeeking, seekQueue.pendingTarget == nil,
               !isAdjusting else { return }
         let creditsStart = playbackSegments.segments.first(where: { $0.kind == .credits })?.start
-        let speed = Double(max(0.5, playbackSpeed))
-        let lastMinute = itemDuration - 60 * speed
-        let cardTrigger = max(0, min(lastMinute, creditsStart ?? lastMinute))
-        let countdownTrigger = max(0, itemDuration - 10 * speed)
-        episodePrompt.consider(position: position, cardTrigger: cardTrigger,
-                               countdownTrigger: countdownTrigger, naturallyAdvanced: naturallyAdvanced)
+        let timing = EpisodePromptTiming(duration: itemDuration, speed: playbackSpeed, creditsStart: creditsStart)
+        episodePrompt.consider(position: position, cardTrigger: timing.cardTrigger,
+                               countdownTrigger: timing.countdownTrigger, naturallyAdvanced: naturallyAdvanced)
         if episodePrompt.isVisible { ensureEpisodePromptTimer() }
     }
 
@@ -1339,6 +1362,10 @@ private struct PlaybackSessionView: View {
                       self.player?.currentItem === activeItem else { return }
                 nextEpisodeLookup.complete(foundSuccessor: candidate != nil)
                 nextEpisodeCandidate = candidate
+                if isAtNaturalEnd, candidate != nil {
+                    episodePrompt.naturalEnd()
+                    ensureEpisodePromptTimer()
+                }
                 if let candidate {
                     playbackLog.info("Next episode metadata ready for S\(candidate.season ?? 0) E\(candidate.episode ?? 0), attempt \(self.nextEpisodeLookup.attempts, privacy: .public)")
                 } else {
@@ -1421,15 +1448,12 @@ private struct PlaybackSessionView: View {
         ) { _ in
             Task { @MainActor in
                 guard player?.currentItem === item else { return }
-                let hadVisiblePrompt = episodePrompt.isVisible
                 isAtNaturalEnd = true
                 intendsToPlay = false
                 isPlaying = false
                 showControls = true
                 progressTracker?.flush()
-                if !hadVisiblePrompt {
-                    episodePrompt.seekOrScrub(to: currentTime)
-                } else {
+                if nextEpisodeCandidate != nil {
                     episodePrompt.naturalEnd()
                     ensureEpisodePromptTimer()
                 }

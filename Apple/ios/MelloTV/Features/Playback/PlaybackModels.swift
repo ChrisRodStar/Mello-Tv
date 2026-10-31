@@ -122,6 +122,20 @@ struct PlaybackClockStallDetector: Equatable {
     }
 }
 
+/// Credits are episode-specific. Without a matched marker, wait until the
+/// actual end instead of presenting Next over the final scene.
+struct EpisodePromptTiming {
+    let cardTrigger: Double
+    let countdownTrigger: Double
+
+    init(duration: Double, speed: Float, creditsStart: Double?) {
+        let rate = speed.isFinite && speed > 0 ? Double(speed) : 1
+        let credits = creditsStart.flatMap { $0.isFinite && $0 >= 0 && $0 < duration ? $0 : nil }
+        cardTrigger = credits ?? duration
+        countdownTrigger = max(credits ?? 0, duration - 10 * rate)
+    }
+}
+
 /// Episode-scoped state for the near-end prompt. The view owns clocks and
 /// playback observations; this value owns the rules so seeks/backgrounding and
 /// episode replacement can be tested without AVPlayer or network access.
@@ -160,9 +174,9 @@ struct EpisodePromptState: Equatable {
         } else if isVisible {
             hideAndReset()
         }
-        if isVisible, position >= countdownTrigger, naturallyAdvanced {
-            isCountingDown = true
+        if position >= countdownTrigger, naturallyAdvanced {
             hasNaturallyEarnedCountdown = true
+            if isVisible { isCountingDown = true }
         }
     }
 
@@ -195,8 +209,9 @@ struct EpisodePromptState: Equatable {
     }
 
     mutating func naturalEnd() {
-        guard isVisible, !isCancelled, hasNaturallyEarnedCountdown else { return }
-        if secondsRemaining > 0 { isCountingDown = true }
+        guard !isCancelled else { return }
+        isVisible = true
+        if !isSuppressed, hasNaturallyEarnedCountdown, secondsRemaining > 0 { isCountingDown = true }
     }
 
     mutating func playNextNow() {
