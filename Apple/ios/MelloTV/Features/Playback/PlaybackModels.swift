@@ -265,6 +265,28 @@ struct NextEpisodeLookupState: Equatable {
     }
 }
 
+/// Re-arm bounded recovery only after measured, uninterrupted playback.
+struct PlaybackRecoveryBudget {
+    private(set) var attempts = 0
+    private var healthySeconds: Double = 0
+
+    mutating func beginAttempt() -> Bool {
+        healthySeconds = 0
+        guard attempts < 2 else { return false }
+        attempts += 1
+        return true
+    }
+
+    mutating func recordHealthyPlayback(seconds: Double) {
+        guard seconds.isFinite, seconds > 0, seconds <= 2 else { return }
+        healthySeconds += seconds
+        if healthySeconds >= 30 { reset() }
+    }
+
+    mutating func interruptHealthyPlayback() { healthySeconds = 0 }
+    mutating func reset() { attempts = 0; healthySeconds = 0 }
+}
+
 /// A failed control-plane request must not cover media that has resumed.
 /// Require actual forward progress as well as AVPlayer's playing status.
 enum PlaybackRecoveryProgress {

@@ -86,6 +86,7 @@ private struct PlaybackSessionView: View {
     @State private var isBuffering = false
     @State private var hasStartedPlayback = false
     @State private var errorMessage: String?
+    @State private var hasFailedItem = false
     @State private var showControls = true
     @State private var currentTime: Double = 0
     @State private var duration: Double = 0
@@ -111,7 +112,7 @@ private struct PlaybackSessionView: View {
     @State private var stallTask: Task<Void, Never>?
     @State private var playbackClockWatchdogTask: Task<Void, Never>?
     @State private var operations = PlaybackSessionOperations()
-    @State private var recoveryAttempts = 0
+    @State private var recoveryBudget = PlaybackRecoveryBudget()
     @State private var lastAutomaticRecreation: TimeInterval = -.infinity
     @State private var creationKey = UUID().uuidString.lowercased()
     @State private var preparationConsumed = false
@@ -165,6 +166,7 @@ private struct PlaybackSessionView: View {
 
                 if let player {
                     VideoSurface(player: player, gestureSettings: gestureSettings, timing: timing) {
+                        guard errorMessage == nil, player.currentItem?.status != .failed else { return }
                         if !recordedFirstFrame {
                             recordedFirstFrame = true
                             playbackLog.info("First frame after \(Date().timeIntervalSince(startupTime), privacy: .public) seconds")
@@ -190,6 +192,12 @@ private struct PlaybackSessionView: View {
                             .accessibilityHidden(true)
                         }
                         .ignoresSafeArea()
+                        // AVKit can draw its own unavailable-video symbol even
+                        // with playback controls disabled. Only our failure UI
+                        // should be visible and accessible during a failed item.
+                        .opacity(hasFailedItem || errorMessage != nil ? 0 : 1)
+                        .allowsHitTesting(!hasFailedItem && errorMessage == nil)
+                        .accessibilityHidden(hasFailedItem || errorMessage != nil)
                         .accessibilityLabel("Video")
                         .accessibilityAction(named: "Show playback controls") { toggleControls() }
                         .accessibilityAction(named: "Back 10 seconds") { seek(by: -10) }
@@ -208,9 +216,10 @@ private struct PlaybackSessionView: View {
                 }
 
                 if isPreparing {
-                    preparationOverlay
+                    preparationOverlay.zIndex(10)
                 } else if let errorMessage {
-                    errorOverlay(errorMessage)
+                    Color.black.ignoresSafeArea().zIndex(9)
+                    errorOverlay(errorMessage).zIndex(10)
                 } else if controlsVisible {
                     transportControls
                 }
@@ -227,6 +236,7 @@ private struct PlaybackSessionView: View {
                     .padding(.top, 12)
                     .padding(.bottom, 8)
                     .transition(.opacity)
+                    .zIndex(20)
                 }
 
                 if isLocked && showUnlockControl && errorMessage == nil {
@@ -448,7 +458,7 @@ private struct PlaybackSessionView: View {
                 .multilineTextAlignment(.center)
             Button("Try again") {
                 if authorizedSource != nil {
-                    recoveryAttempts = 0
+                    recoveryBudget.reset()
                     lastAutomaticRecreation = -.infinity
                     recoverPlayback()
                 } else {
@@ -1136,6 +1146,7 @@ private struct PlaybackSessionView: View {
         isSeeking = false
         showControls = true
         errorMessage = nil
+        hasFailedItem = false
 
         preparationTask = Task {
             do {
@@ -1218,7 +1229,10 @@ private struct PlaybackSessionView: View {
                             trace.record(.playing, width: Double(newPlayer.currentItem?.presentationSize.width ?? 0),
                                          height: Double(newPlayer.currentItem?.presentationSize.height ?? 0))
                             hasStartedPlayback = true
-                        } else if isBuffering { trace.record(.waiting) }
+                        } else {
+                            recoveryBudget.interruptHealthyPlayback()
+                            if isBuffering { trace.record(.waiting) }
+                        }
                         monitorStall(newPlayer)
                         if !intendsToPlay { showControls = true }
                         scheduleAutoHide()
@@ -1248,6 +1262,9 @@ private struct PlaybackSessionView: View {
                             if naturallyAdvanced,
                                newPlayer.timeControlStatus == .playing {
                                 trace.record(.playbackAdvancing)
+                                if isPlaybackSceneActive, let playbackDelta {
+                                    recoveryBudget.recordHealthyPlayback(seconds: playbackDelta / Double(max(0.5, playbackSpeed)))
+                                }
                             }
                             lastObservedPlaybackTime = time.seconds
                             self.currentTime = max(0, time.seconds)
@@ -1356,6 +1373,8 @@ private struct PlaybackSessionView: View {
         stallTask?.cancel()
         stallTask = nil
         if let player { monitorStall(player) }
+        hasFailedItem = item.status == .failed
+        recoveryBudget.interruptHealthyPlayback()
         let trace = timing
         applyQuality(playbackQuality, to: item)
         if let accessLogObserver { NotificationCenter.default.removeObserver(accessLogObserver) }
@@ -1380,6 +1399,7 @@ private struct PlaybackSessionView: View {
                         loadPlaybackSegments(for: item, duration: itemDuration)
                     }
                 } else if status == .failed {
+                    hasFailedItem = true
                     isPlaying = false
                     isLoading = false
                     recoverPlayback()
@@ -1493,14 +1513,13 @@ private struct PlaybackSessionView: View {
     private func recoverPlayback() {
         guard recoveryTask == nil, let source = authorizedSource, let player else { return }
         if source.expiresAt <= Date() { recreateExpiredPlayback(); return }
-        guard recoveryAttempts < 2 else {
+        guard recoveryBudget.beginAttempt() else {
             player.pause()
             errorMessage = "Playback was interrupted. Try again."
             return
         }
-        recoveryAttempts += 1
         timing?.record(.recoveryStarted)
-        playbackLog.info("Recovering playback; attempt \(recoveryAttempts, privacy: .public)")
+        playbackLog.info("Recovering playback; attempt \(recoveryBudget.attempts, privacy: .public)")
         let position = player.currentTime().seconds
         let savedPosition = hasStartedPlayback ? currentTime : (request.startFromBeginning ? 0 : source.resumeSeconds)
         let resumePosition = position.isFinite ? max(0, position) : savedPosition
@@ -1518,7 +1537,16 @@ private struct PlaybackSessionView: View {
         let previousUpgrade = automaticUpgradeTask
         previousUpgrade?.cancel()
         recoveryTask = Task {
-            defer { recoveryTask = nil }
+            var replacementFailed = false
+            defer {
+                recoveryTask = nil
+                // Failure notifications can arrive while this task is seeking
+                // its replacement. Reconcile that failure after releasing the
+                // recovery owner so it cannot get stuck in Preparing forever.
+                if replacementFailed, self.player === player, player.currentItem?.status == .failed {
+                    recoverPlayback()
+                }
+            }
             // Settle the old owner before reconciling its pending mutation.
             await previousRenewal?.value
             await previousUpgrade?.value
@@ -1538,6 +1566,10 @@ private struct PlaybackSessionView: View {
                 await seekForPlayback(player, seconds: replacementPosition)
                 try Task.checkCancellation()
                 guard player.currentItem === item else { return }
+                if item.status == .failed {
+                    replacementFailed = true
+                    return
+                }
                 if intendsToPlay { player.play() }
                 startRenewal()
             } catch {
@@ -1546,7 +1578,7 @@ private struct PlaybackSessionView: View {
                 if PlaybackRecoveryProgress.hasResumed(from: position, to: player.currentTime().seconds,
                     isPlaying: player.timeControlStatus == .playing,
                     itemFailed: recoveryItem?.status == .failed) {
-                    recoveryAttempts = 0
+                    recoveryBudget.reset()
                     isBuffering = false
                     startRenewal()
                     return
@@ -1574,7 +1606,7 @@ private struct PlaybackSessionView: View {
         let shouldPlay = intendsToPlay
         creationKey = UUID().uuidString.lowercased()
         operations = PlaybackSessionOperations()
-        recoveryAttempts = 0
+        recoveryBudget.reset()
         startPlayback(retry: true, resumeAt: resume, playWhenReady: shouldPlay)
     }
 
@@ -1619,6 +1651,7 @@ private struct PlaybackSessionView: View {
     private func seekTo(_ targetSeconds: Double, tolerance: Double = 0) {
         guard let player, canSeek, targetSeconds.isFinite else { return }
         isAtNaturalEnd = false
+        recoveryBudget.interruptHealthyPlayback()
         episodePrompt.seekOrScrub(to: targetSeconds)
         episodePromptTask?.cancel()
         episodePromptTask = nil

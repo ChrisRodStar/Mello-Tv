@@ -61,6 +61,9 @@ actor FixtureState {
     func respond(_ request: URLRequest) async -> (Int, Data) {
         if let trace = request.value(forHTTPHeaderField: "X-Playback-Trace-ID") { traceHeaders.append(trace) }
         let path = request.url!.path
+        if path.hasSuffix("/playback-settings") {
+            return (200, Data(#"{"audio_language":"","subtitle_language":"","subtitles_enabled":false,"autoplay_next":true,"max_height":0}"#.utf8))
+        }
         let key = request.value(forHTTPHeaderField: "Idempotency-Key") ?? ""
         attempts.append((path, key))
         if request.httpMethod == "DELETE" { deleted += 1; return (204, Data()) }
@@ -124,6 +127,19 @@ actor FixtureState {
 struct PlaybackReliabilityChecks {
     @MainActor
     static func main() async throws {
+        var recoveryBudget = PlaybackRecoveryBudget()
+        precondition(recoveryBudget.beginAttempt() && recoveryBudget.beginAttempt())
+        precondition(!recoveryBudget.beginAttempt(), "a broken source still has a bounded budget")
+        recoveryBudget.recordHealthyPlayback(seconds: 300)
+        precondition(!recoveryBudget.beginAttempt(), "a seek cannot reset the recovery allowance")
+        for _ in 0..<20 { recoveryBudget.recordHealthyPlayback(seconds: 1) }
+        recoveryBudget.interruptHealthyPlayback()
+        for _ in 0..<20 { recoveryBudget.recordHealthyPlayback(seconds: 1) }
+        precondition(recoveryBudget.attempts == 2, "interrupted playback must not re-arm too early")
+        for _ in 0..<10 { recoveryBudget.recordHealthyPlayback(seconds: 1) }
+        precondition(recoveryBudget.beginAttempt(), "30 healthy seconds allow recovery from a later stall")
+        print("PASS recovery re-arms after sustained measured playback while rapid failures remain bounded")
+
         var seeks = PlaybackSeekQueue()
         let firstTarget = seeks.target(skipping: 10, from: 100, duration: 300)!
         let firstSeek = seeks.enqueue(target: firstTarget, tolerance: 0.5)!
