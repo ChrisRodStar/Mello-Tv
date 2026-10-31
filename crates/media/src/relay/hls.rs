@@ -80,7 +80,7 @@ impl HlsManifestRewriter {
                 let priority = variant_priority(line);
                 let header = line.to_string();
                 let mut uri_line = None;
-                while let Some(next_raw) = lines.next() {
+                for next_raw in lines.by_ref() {
                     let next_line = next_raw.trim();
                     if next_line.is_empty() {
                         continue;

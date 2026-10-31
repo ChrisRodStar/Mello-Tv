@@ -1,6 +1,6 @@
 //! Opt-in Jellyfin library export. This reads a profile's My List and never changes it.
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, HashSet},
     path::{Component, Path, PathBuf},
 };
 
@@ -8,8 +8,11 @@ use chrono::{NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use stream_core::{
-    accounts::{Target, is_safe_identifier},
-    catalog::{MediaType, Season, Title},
+    accounts::{PreferredFormat, Target, is_safe_identifier},
+    catalog::{
+        ContentPreference, Favorite, MediaType, RecommendationInputs, Recommendations, Season,
+        Shelf, Title, TitleIdentity, ViewingSignal, valid_genre,
+    },
 };
 use stream_storage::accounts::ListKind;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -27,6 +30,8 @@ pub struct JellyfinConfig {
     pub library_dir: PathBuf,
     pub public_url: String,
     pub play_key: String,
+    pub server_url: Option<String>,
+    pub api_key: Option<String>,
 }
 
 impl JellyfinConfig {
@@ -50,7 +55,18 @@ impl JellyfinConfig {
         let directory = values.next().ok_or("missing directory configuration")??;
         let url = values.next().ok_or("missing URL configuration")??;
         let key = values.next().ok_or("missing key configuration")??;
-        Self::new(profile, directory.into(), url, key).map(Some)
+        let mut config = Self::new(profile, directory.into(), url, key)?;
+        let server_url = std::env::var("STREAM_JELLYFIN_SERVER_URL")
+            .or_else(|_| std::env::var("JELLYFIN_URL"))
+            .ok()
+            .filter(|v| !v.trim().is_empty());
+        let api_key = std::env::var("STREAM_JELLYFIN_API_KEY")
+            .or_else(|_| std::env::var("JELLYFIN_API_KEY"))
+            .ok()
+            .filter(|v| !v.trim().is_empty());
+        config.server_url = server_url;
+        config.api_key = api_key;
+        Ok(Some(config))
     }
 
     pub fn new(
@@ -89,7 +105,19 @@ impl JellyfinConfig {
             library_dir,
             public_url: url.as_str().trim_end_matches('/').to_owned(),
             play_key,
+            server_url: None,
+            api_key: None,
         })
+    }
+
+    pub fn with_server_refresh(
+        mut self,
+        server_url: Option<String>,
+        api_key: Option<String>,
+    ) -> Self {
+        self.server_url = server_url;
+        self.api_key = api_key;
+        self
     }
 }
 
@@ -118,25 +146,34 @@ impl JellyfinBridge {
     pub async fn sync(&self, state: &AppState) -> Result<SyncReport, String> {
         let _guard = self.sync_lock.lock().await;
         let labels = existing_labels(&self.config.library_dir).await?;
-        let titles = state
-            .accounts
-            .list_titles(
-                &state.household_account_id,
-                &self.config.profile_id,
-                ListKind::Library,
-            )
-            .await
-            .map_err(|e| format!("cannot read Jellyfin profile library: {e}"))?;
+        let (titles, library_identities) = self.collect_desired_titles(state).await?;
         let mut files = BTreeMap::new();
         let today = chrono::DateTime::<Utc>::from(std::time::SystemTime::now()).date_naive();
         for saved in titles {
             let identity = saved.identity;
-            let title = self.load_title(state, saved).await?;
-            title
-                .validate()
-                .map_err(|e| format!("invalid Jellyfin title: {e}"))?;
+            let is_library = library_identities.contains(&identity.key());
+            let title = match self.load_title(state, saved).await {
+                Ok(t) => t,
+                Err(e) if is_library => return Err(e),
+                Err(e) => {
+                    tracing::warn!(id = identity.id(), %e, "skipping auto-discovered Jellyfin title");
+                    continue;
+                }
+            };
+            if let Err(e) = title.validate() {
+                if is_library {
+                    return Err(format!("invalid Jellyfin title: {e}"));
+                } else {
+                    tracing::warn!(id = identity.id(), %e, "skipping invalid auto-discovered title");
+                    continue;
+                }
+            }
             if title.identity != identity {
-                return Err("invalid Jellyfin title identity".into());
+                if is_library {
+                    return Err("invalid Jellyfin title identity".into());
+                } else {
+                    continue;
+                }
             }
             match title.identity.media_type() {
                 MediaType::Movie => add_movie(
@@ -149,28 +186,65 @@ impl JellyfinBridge {
                 ),
                 MediaType::Tv => {
                     if !title.details {
-                        return Err(format!(
-                            "show {} has no detailed catalog snapshot",
-                            title.identity.id()
-                        ));
+                        if is_library {
+                            return Err(format!(
+                                "show {} has no detailed catalog snapshot",
+                                title.identity.id()
+                            ));
+                        } else {
+                            tracing::warn!(
+                                id = identity.id(),
+                                "auto show has no details, skipping"
+                            );
+                            continue;
+                        }
                     }
+                    let mut show_files = BTreeMap::new();
+                    let mut show_failed = false;
                     for summary in &title.seasons {
-                        let season = self
+                        if summary.season < 1 && summary.episode_count == 0 {
+                            continue;
+                        }
+                        let season = match self
                             .load_season(state, title.identity.id(), summary.season)
-                            .await?;
+                            .await
+                        {
+                            Ok(s) => s,
+                            Err(e) if is_library => return Err(e),
+                            Err(e) => {
+                                tracing::warn!(
+                                    id = title.identity.id(),
+                                    season = summary.season,
+                                    %e,
+                                    "failed to load auto season"
+                                );
+                                show_failed = true;
+                                break;
+                            }
+                        };
                         if season.season != summary.season {
-                            return Err("invalid Jellyfin season number".into());
+                            if is_library {
+                                return Err("invalid Jellyfin season number".into());
+                            } else {
+                                show_failed = true;
+                                break;
+                            }
                         }
                         if season.episodes.len()
                             < usize::try_from(summary.episode_count)
                                 .map_err(|_| "invalid Jellyfin episode count")?
                         {
-                            return Err(format!(
-                                "Jellyfin season {}:{} is incomplete",
-                                season.show_id, season.season
-                            ));
+                            if is_library {
+                                return Err(format!(
+                                    "Jellyfin season {}:{} is incomplete",
+                                    season.show_id, season.season
+                                ));
+                            } else {
+                                show_failed = true;
+                                break;
+                            }
                         }
-                        add_season(
+                        if let Err(e) = add_season(
                             &self.config,
                             &title,
                             &season,
@@ -178,18 +252,74 @@ impl JellyfinBridge {
                             labels
                                 .get(&("tv".to_owned(), identity.id()))
                                 .map(String::as_str),
-                            &mut files,
-                        )?;
+                            &mut show_files,
+                        ) {
+                            if is_library {
+                                return Err(e);
+                            } else {
+                                show_failed = true;
+                                break;
+                            }
+                        }
+                    }
+                    if !show_failed {
+                        files.extend(show_files);
                     }
                 }
             }
         }
-        apply_files(&self.config.library_dir, files).await
+        let report = apply_files(&self.config.library_dir, files).await?;
+        if (report.written > 0 || report.removed > 0)
+            && let (Some(server_url), Some(api_key)) =
+                (&self.config.server_url, &self.config.api_key)
+        {
+            self.refresh_jellyfin_server(server_url, api_key).await;
+        }
+        Ok(report)
     }
 
-    /// A play capability can only resolve titles still selected by this profile.
-    pub async fn playback_title(&self, state: &AppState, target: &Target) -> Result<Title, String> {
-        let titles = state
+    async fn refresh_jellyfin_server(&self, server_url: &str, api_key: &str) {
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(5))
+            .build()
+            .ok();
+        if let Some(client) = client {
+            let refresh_url = format!("{}/Library/Refresh", server_url.trim_end_matches('/'));
+            let res = client
+                .post(&refresh_url)
+                .header(
+                    "Authorization",
+                    format!(r#"MediaBrowser Token="{api_key}""#),
+                )
+                .header("X-Emby-Token", api_key)
+                .send()
+                .await;
+            match res {
+                Ok(resp) if resp.status().is_success() => {
+                    tracing::info!("triggered Jellyfin library refresh");
+                }
+                Ok(resp) => {
+                    tracing::warn!(
+                        status = %resp.status(),
+                        "Jellyfin library refresh returned unexpected status"
+                    );
+                }
+                Err(err) => {
+                    tracing::warn!(%err, "failed to trigger Jellyfin library refresh");
+                }
+            }
+        }
+    }
+
+    async fn collect_desired_titles(
+        &self,
+        state: &AppState,
+    ) -> Result<(Vec<Title>, HashSet<String>), String> {
+        let mut desired_map = BTreeMap::<String, Title>::new();
+        let mut library_identities = HashSet::<String>::new();
+
+        // 1. Explicit library
+        let library_titles = state
             .accounts
             .list_titles(
                 &state.household_account_id,
@@ -197,11 +327,171 @@ impl JellyfinBridge {
                 ListKind::Library,
             )
             .await
-            .map_err(|e| format!("cannot read Jellyfin library: {e}"))?;
-        let saved = titles
+            .map_err(|e| format!("cannot read Jellyfin profile library: {e}"))?;
+        for title in library_titles {
+            let key = title.identity.key();
+            library_identities.insert(key.clone());
+            desired_map.insert(key, title);
+        }
+
+        let now: chrono::DateTime<Utc> = std::time::SystemTime::now().into();
+
+        // 2. Personalized recommendations
+        let mut recs: Option<Recommendations> = None;
+        if let Ok(record) = state
+            .catalog
+            .get("recommendations", &self.config.profile_id, now)
+            .await
+            && record.expires_at > now
+        {
+            recs = serde_json::from_value::<Recommendations>(record.data).ok();
+        }
+        if recs.is_none()
+            && let Some(worker) = &state.catalog_worker
+            && worker.available()
+            && let Some(inputs) = self.build_recommendation_inputs(state).await
+            && let Ok(fresh) = worker
+                .refresh_recommendations(&self.config.profile_id, inputs)
+                .await
+        {
+            recs = Some(fresh.data);
+        }
+        if let Some(recs) = recs {
+            for title in recs.pool {
+                desired_map.entry(title.identity.key()).or_insert(title);
+            }
+            for section in recs.sections {
+                for title in section.titles {
+                    desired_map.entry(title.identity.key()).or_insert(title);
+                }
+            }
+        }
+
+        // 3. Trending & Popular shelves
+        let home_shelves = ["trending", "movie-popular", "tv-popular"];
+        for key in home_shelves {
+            if let Ok(record) = state.catalog.get("shelf", key, now).await
+                && let Ok(shelf) = serde_json::from_value::<Shelf>(record.data)
+            {
+                for title in shelf.titles {
+                    desired_map.entry(title.identity.key()).or_insert(title);
+                }
+            }
+        }
+
+        // 4. Any other shelves in catalog store
+        if let Ok(shelves) = state.catalog.list("shelf", 50, now).await {
+            for record in shelves {
+                if let Ok(shelf) = serde_json::from_value::<Shelf>(record.data) {
+                    for title in shelf.titles {
+                        desired_map.entry(title.identity.key()).or_insert(title);
+                    }
+                }
+            }
+        }
+
+        let titles: Vec<Title> = desired_map.into_values().collect();
+        Ok((titles, library_identities))
+    }
+
+    async fn build_recommendation_inputs(&self, state: &AppState) -> Option<RecommendationInputs> {
+        let profile = state
+            .accounts
+            .get_profile(&state.household_account_id, &self.config.profile_id)
+            .await
+            .ok()?;
+        let ignored: HashSet<String> = state
+            .accounts
+            .list_titles(
+                &state.household_account_id,
+                &self.config.profile_id,
+                ListKind::RecommendationIgnored,
+            )
+            .await
+            .unwrap_or_default()
             .into_iter()
-            .find(|title| title.identity == *target.identity())
-            .ok_or("title is not in the Jellyfin profile library")?;
+            .map(|title| title.identity.key())
+            .collect();
+        let mut favorites: Vec<Favorite> = state
+            .accounts
+            .list_titles(
+                &state.household_account_id,
+                &self.config.profile_id,
+                ListKind::Favorites,
+            )
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|title| !ignored.contains(&title.identity.key()))
+            .map(|title| Favorite {
+                identity: title.identity,
+                title: title.title,
+            })
+            .collect();
+        favorites.truncate(50);
+        let mut genres: Vec<String> = profile
+            .preferences
+            .genres
+            .into_iter()
+            .filter(|g| valid_genre(g))
+            .take(9)
+            .collect();
+        if genres.is_empty() {
+            genres = vec![
+                "action".into(),
+                "comedy".into(),
+                "drama".into(),
+                "scifi".into(),
+            ];
+        }
+        let mut history = state
+            .accounts
+            .history(&state.household_account_id, &self.config.profile_id, 0)
+            .await
+            .unwrap_or_default();
+        history.retain(|progress| !ignored.contains(&progress.target.identity().key()));
+        let mut grouped_signals = std::collections::HashMap::<String, ViewingSignal>::new();
+        for progress in history.iter().take(100) {
+            let identity = *progress.target.identity();
+            let key = identity.key();
+            let signal = grouped_signals.entry(key).or_insert_with(|| ViewingSignal {
+                identity,
+                title: String::new(),
+                watched_seconds: 0.0,
+                duration_seconds: 0.0,
+                completed: false,
+                meaningful_episodes: 0,
+                updated_at: progress.updated_at,
+            });
+            signal.watched_seconds += progress.watched_seconds;
+            signal.duration_seconds = signal.duration_seconds.max(progress.duration_seconds);
+            signal.completed |= progress.completed;
+            if progress.target.season().is_some() && progress.completed {
+                signal.meaningful_episodes = signal.meaningful_episodes.saturating_add(1);
+            }
+            signal.updated_at = signal.updated_at.max(progress.updated_at);
+        }
+        let mut signals: Vec<ViewingSignal> = grouped_signals.into_values().collect();
+        signals.truncate(100);
+        let format = match profile.preferences.format {
+            PreferredFormat::Both => ContentPreference::Both,
+            PreferredFormat::Movie => ContentPreference::Movie,
+            PreferredFormat::Tv => ContentPreference::Tv,
+        };
+        Some(RecommendationInputs {
+            completed: true,
+            format,
+            genres,
+            favorites,
+            signals,
+            activity_days: Vec::new(),
+        })
+    }
+
+    /// A play capability can resolve titles in library, recommendations, or shelves.
+    /// Titles played from recommendations or shelves are automatically added to the library.
+    pub async fn playback_title(&self, state: &AppState, target: &Target) -> Result<Title, String> {
+        let (saved, is_library) = self.find_playback_title(state, target.identity()).await?;
         let title = self.load_title(state, saved).await?;
         title
             .validate()
@@ -232,7 +522,80 @@ impl JellyfinBridge {
                 return Err("episode is not available in the Jellyfin library".into());
             }
         }
+        if !is_library {
+            let _ = state
+                .accounts
+                .put_title(
+                    &state.household_account_id,
+                    &self.config.profile_id,
+                    ListKind::Library,
+                    title.clone(),
+                )
+                .await;
+        }
         Ok(title)
+    }
+
+    async fn find_playback_title(
+        &self,
+        state: &AppState,
+        identity: &TitleIdentity,
+    ) -> Result<(Title, bool), String> {
+        let titles = state
+            .accounts
+            .list_titles(
+                &state.household_account_id,
+                &self.config.profile_id,
+                ListKind::Library,
+            )
+            .await
+            .map_err(|e| format!("cannot read Jellyfin library: {e}"))?;
+        if let Some(saved) = titles.into_iter().find(|t| &t.identity == identity) {
+            return Ok((saved, true));
+        }
+
+        let now: chrono::DateTime<Utc> = std::time::SystemTime::now().into();
+        if let Ok(record) = state
+            .catalog
+            .get("recommendations", &self.config.profile_id, now)
+            .await
+            && let Ok(recs) = serde_json::from_value::<Recommendations>(record.data)
+        {
+            if let Some(saved) = recs.pool.into_iter().find(|t| &t.identity == identity) {
+                return Ok((saved, false));
+            }
+            for section in recs.sections {
+                if let Some(saved) = section
+                    .titles
+                    .into_iter()
+                    .find(|t| &t.identity == identity)
+                {
+                    return Ok((saved, false));
+                }
+            }
+        }
+
+        let home_shelves = ["trending", "movie-popular", "tv-popular"];
+        for key in home_shelves {
+            if let Ok(record) = state.catalog.get("shelf", key, now).await
+                && let Ok(shelf) = serde_json::from_value::<Shelf>(record.data)
+                && let Some(saved) = shelf.titles.into_iter().find(|t| &t.identity == identity)
+            {
+                return Ok((saved, false));
+            }
+        }
+
+        if let Ok(shelves) = state.catalog.list("shelf", 50, now).await {
+            for record in shelves {
+                if let Ok(shelf) = serde_json::from_value::<Shelf>(record.data)
+                    && let Some(saved) = shelf.titles.into_iter().find(|t| &t.identity == identity)
+                {
+                    return Ok((saved, false));
+                }
+            }
+        }
+
+        Err("title is not in the Jellyfin profile library".into())
     }
 
     async fn load_title(&self, state: &AppState, saved: Title) -> Result<Title, String> {
@@ -973,6 +1336,119 @@ mod tests {
         )
         .await?;
         assert!(result.is_err());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn sync_includes_trending_and_recommendations_and_promotes_on_play()
+    -> Result<(), Box<dyn std::error::Error>> {
+        use std::sync::Arc;
+        use stream_core::accounts::{Preferences, Profile};
+        use stream_storage::{AccountStore, CatalogStore, catalog::CatalogWrite, db::Database};
+
+        let dir = tempfile::Builder::new().tempdir_in(std::env::temp_dir().canonicalize()?)?;
+        let accounts = Arc::new(
+            AccountStore::from_database(Database::in_memory(64).await?, [0x5c; 32]).await?,
+        );
+        let household = accounts.select_household(None).await?;
+        accounts
+            .create_profile(
+                &household,
+                Profile {
+                    id: "jellyfin".into(),
+                    name: "Jellyfin".into(),
+                    color: "blue".into(),
+                    preferences: Preferences::default(),
+                },
+            )
+            .await?;
+        let catalog = Arc::new(CatalogStore::from_database(Database::in_memory(64).await?).await?);
+        let state = AppState::new(
+            catalog.clone(),
+            accounts.clone(),
+            Arc::new(crate::state::NoopMediaEngine),
+            household.clone(),
+        );
+
+        // 1. Library title
+        let lib_movie: Title = serde_json::from_value(
+            serde_json::json!({"type":"movie", "id":42, "title":"Library Movie", "overview":"", "rating":0.0, "details":true}),
+        )?;
+        accounts
+            .put_title(&household, "jellyfin", ListKind::Library, lib_movie)
+            .await?;
+
+        // 2. Shelf title (trending)
+        let trend_movie: Title = serde_json::from_value(
+            serde_json::json!({"type":"movie", "id":100, "title":"Trending Movie", "overview":"", "rating":0.0, "details":true}),
+        )?;
+        let shelf = Shelf {
+            id: "trending".into(),
+            heading: "Trending this week".into(),
+            kind: "trending".into(),
+            source: "tmdb".into(),
+            reason: String::new(),
+            titles: vec![trend_movie.clone()],
+        };
+        catalog
+            .put(
+                CatalogWrite {
+                    kind: "shelf".into(),
+                    key: "trending".into(),
+                    data: serde_json::to_value(&shelf)?,
+                    ttl: chrono::Duration::hours(1),
+                },
+                std::time::SystemTime::now().into(),
+            )
+            .await?;
+
+        // 3. Recommendation title
+        let rec_movie: Title = serde_json::from_value(
+            serde_json::json!({"type":"movie", "id":200, "title":"Recommended Movie", "overview":"", "rating":0.0, "details":true}),
+        )?;
+        let recs = Recommendations {
+            fingerprint: "test".into(),
+            pool: vec![rec_movie.clone()],
+            sections: Vec::new(),
+        };
+        catalog
+            .put(
+                CatalogWrite {
+                    kind: "recommendations".into(),
+                    key: "jellyfin".into(),
+                    data: serde_json::to_value(&recs)?,
+                    ttl: chrono::Duration::hours(1),
+                },
+                std::time::SystemTime::now().into(),
+            )
+            .await?;
+
+        let bridge = JellyfinBridge::new(JellyfinConfig::new(
+            "jellyfin".into(),
+            dir.path().into(),
+            "http://mello:8080".into(),
+            "0123456789abcdef0123456789abcdef".into(),
+        )?);
+
+        let report = bridge.sync(&state).await?;
+        assert_eq!(report.files, 3);
+        assert_eq!(report.written, 3);
+
+        // Trending movie is playable even though not in library yet
+        let trend_target = Target::new(TitleIdentity::new(MediaType::Movie, 100)?, None, None)?;
+        let played = bridge.playback_title(&state, &trend_target).await;
+        assert!(played.is_ok());
+
+        // Keep-on-play promoted trending movie to the permanent library
+        let lib_titles = accounts
+            .list_titles(&household, "jellyfin", ListKind::Library)
+            .await?;
+        assert!(lib_titles.iter().any(|t| t.identity.id() == 100));
+
+        // Unknown title is rejected
+        let unknown = Target::new(TitleIdentity::new(MediaType::Movie, 999)?, None, None)?;
+        assert!(bridge.playback_title(&state, &unknown).await.is_err());
+
         Ok(())
     }
 
