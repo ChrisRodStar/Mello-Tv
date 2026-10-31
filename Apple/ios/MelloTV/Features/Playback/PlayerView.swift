@@ -103,6 +103,8 @@ private struct PlaybackSessionView: View {
     @State private var preparationTask: Task<Void, Never>?
     @State private var renewalTask: Task<Void, Never>?
     @State private var automaticUpgradeTask: Task<Void, Never>?
+    @State private var qualitySwitchTask: Task<Void, Never>?
+    @State private var qualitySwitchToken: UUID?
     @State private var automaticUpgradeAttempted = false
     @State private var sessionFinalizationTask: Task<Void, Never>?
     @State private var recoveryTask: Task<Void, Never>?
@@ -295,7 +297,7 @@ private struct PlaybackSessionView: View {
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: controlsVisible)
         .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: activePanel)
         .onChange(of: playbackQuality) { _, quality in
-            if let item = player?.currentItem { applyQuality(quality, to: item) }
+            switchQuality(quality)
             timing?.record(.qualityLimitChanged, value: Double(quality.height))
             if quality == .automatic { considerAutomaticQualityUpgrade() }
         }
@@ -732,6 +734,40 @@ private struct PlaybackSessionView: View {
         quality.apply(to: item)
     }
 
+    private func switchQuality(_ quality: PlaybackQuality) {
+        guard let player, let currentItem = player.currentItem else { return }
+        applyQuality(quality, to: currentItem)
+        // Discard buffered renditions so a manual change takes effect at the
+        // current position, rather than waiting for the old buffer to drain.
+        // An in-flight replacement will apply the latest binding itself.
+        guard qualitySwitchTask == nil, recoveryTask == nil,
+              hasStartedPlayback, errorMessage == nil,
+              let source = authorizedSource, source.format == "hls" else { return }
+        let position = player.currentTime().seconds
+        let resumePosition = position.isFinite ? max(0, position) : currentTime
+        captureTrackPreferences(from: currentItem)
+        progressTracker?.flush()
+        player.pause()
+        let item = AVPlayerItem(url: source.url)
+        applyQuality(quality, to: item)
+        player.replaceCurrentItem(with: item)
+        observeItem(item)
+        let token = UUID()
+        qualitySwitchToken = token
+        qualitySwitchTask = Task {
+            defer {
+                if qualitySwitchToken == token {
+                    qualitySwitchTask = nil
+                    qualitySwitchToken = nil
+                }
+            }
+            await seekForPlayback(player, seconds: resumePosition)
+            guard !Task.isCancelled, self.player === player,
+                  player.currentItem === item else { return }
+            if intendsToPlay { player.play() }
+        }
+    }
+
     private func considerAutomaticQualityUpgrade() {
         guard playbackQuality == .automatic, hasStartedPlayback, isPlaybackSceneActive,
               !automaticUpgradeAttempted, automaticUpgradeTask == nil,
@@ -762,6 +798,7 @@ private struct PlaybackSessionView: View {
                 observeItem(replacement)
                 await seekForPlayback(activePlayer, seconds: resumePosition)
                 try Task.checkCancellation()
+                guard activePlayer.currentItem === replacement else { return }
                 if intendsToPlay { activePlayer.play() }
             } catch {
                 // A missing higher rendition or a transient probe failure does
@@ -1316,6 +1353,9 @@ private struct PlaybackSessionView: View {
         sliderValue = currentTime
         progressTracker?.setSeeking(false)
         playbackClockStall.reset()
+        stallTask?.cancel()
+        stallTask = nil
+        if let player { monitorStall(player) }
         let trace = timing
         applyQuality(playbackQuality, to: item)
         if let accessLogObserver { NotificationCenter.default.removeObserver(accessLogObserver) }
@@ -1392,7 +1432,7 @@ private struct PlaybackSessionView: View {
                         player.replaceCurrentItem(with: item)
                         observeItem(item)
                         await seekForPlayback(player, seconds: position.seconds)
-                        guard !Task.isCancelled else { return }
+                        guard !Task.isCancelled, player.currentItem === item else { return }
                         if shouldResume && intendsToPlay { player.play() }
                     }
                 } catch {
@@ -1412,9 +1452,12 @@ private struct PlaybackSessionView: View {
         stallTask?.cancel()
         stallTask = nil
         guard intendsToPlay, observedPlayer.timeControlStatus == .waitingToPlayAtSpecifiedRate else { return }
+        let observedItem = observedPlayer.currentItem
         stallTask = Task {
             do { try await Task.sleep(for: .seconds(15)) } catch { return }
-            guard self.player === observedPlayer, intendsToPlay,
+            guard !Task.isCancelled, self.player === observedPlayer,
+                  observedPlayer.currentItem === observedItem, intendsToPlay,
+                  isPlaybackSceneActive, !isSeeking, seekQueue.pendingTarget == nil,
                   observedPlayer.timeControlStatus == .waitingToPlayAtSpecifiedRate else { return }
             recoverPlayback()
         }
@@ -1451,6 +1494,7 @@ private struct PlaybackSessionView: View {
         guard recoveryTask == nil, let source = authorizedSource, let player else { return }
         if source.expiresAt <= Date() { recreateExpiredPlayback(); return }
         guard recoveryAttempts < 2 else {
+            player.pause()
             errorMessage = "Playback was interrupted. Try again."
             return
         }
@@ -1460,8 +1504,10 @@ private struct PlaybackSessionView: View {
         let position = player.currentTime().seconds
         let savedPosition = hasStartedPlayback ? currentTime : (request.startFromBeginning ? 0 : source.resumeSeconds)
         let resumePosition = position.isFinite ? max(0, position) : savedPosition
+        let recoveryItem = player.currentItem
         progressTracker?.flush()
-        player.pause()
+        // Keep the existing item alive while the control request runs. A
+        // transient network stall may resolve before that request finishes.
         errorMessage = nil
         isLoading = false
         isBuffering = true
@@ -1480,21 +1526,36 @@ private struct PlaybackSessionView: View {
                 try Task.checkCancellation()
                 let recovered = try await operations.recover(source, request: request)
                 try Task.checkCancellation()
-                guard self.player === player else { return }
+                guard self.player === player, player.currentItem === recoveryItem else { return }
                 authorizedSource = recovered
+                let latestPosition = player.currentTime().seconds
+                let replacementPosition = latestPosition.isFinite ? max(0, latestPosition) : resumePosition
+                captureTrackPreferences(from: recoveryItem)
+                player.pause()
                 let item = AVPlayerItem(url: recovered.url)
                 player.replaceCurrentItem(with: item)
                 observeItem(item)
-                await seekForPlayback(player, seconds: resumePosition)
+                await seekForPlayback(player, seconds: replacementPosition)
                 try Task.checkCancellation()
+                guard player.currentItem === item else { return }
                 if intendsToPlay { player.play() }
                 startRenewal()
             } catch {
-                guard !Task.isCancelled else { return }
+                guard !Task.isCancelled, self.player === player,
+                      player.currentItem === recoveryItem else { return }
+                if PlaybackRecoveryProgress.hasResumed(from: position, to: player.currentTime().seconds,
+                    isPlaying: player.timeControlStatus == .playing,
+                    itemFailed: recoveryItem?.status == .failed) {
+                    recoveryAttempts = 0
+                    isBuffering = false
+                    startRenewal()
+                    return
+                }
                 if (error as? APIError)?.isExpiredPlayback == true {
                     recreateExpiredPlayback()
                     return
                 }
+                player.pause()
                 errorMessage = error.localizedDescription
                 isBuffering = false
             }
@@ -1799,6 +1860,9 @@ private struct PlaybackSessionView: View {
         playerStatusCancellable = nil
         renewalTask?.cancel()
         renewalTask = nil
+        qualitySwitchTask?.cancel()
+        qualitySwitchTask = nil
+        qualitySwitchToken = nil
         recoveryTask?.cancel()
         recoveryTask = nil
         stallTask?.cancel()

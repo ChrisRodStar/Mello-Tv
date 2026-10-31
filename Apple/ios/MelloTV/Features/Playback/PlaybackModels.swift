@@ -265,6 +265,15 @@ struct NextEpisodeLookupState: Equatable {
     }
 }
 
+/// A failed control-plane request must not cover media that has resumed.
+/// Require actual forward progress as well as AVPlayer's playing status.
+enum PlaybackRecoveryProgress {
+    static func hasResumed(from start: Double, to current: Double,
+                           isPlaying: Bool, itemFailed: Bool) -> Bool {
+        isPlaying && !itemFailed && start.isFinite && current.isFinite && current - start > 0.05
+    }
+}
+
 enum PlaybackQuality: Int, CaseIterable, Identifiable {
     case automatic = 0, fullHD = 1080, hd = 720, sd = 480, low = 360
 

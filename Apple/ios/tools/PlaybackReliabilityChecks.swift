@@ -197,6 +197,23 @@ struct PlaybackReliabilityChecks {
                      "only 15 seconds of active foreground non-seeking clock stall is actionable")
         print("PASS clock-stall recovery deadline ignores paused, seeking, and background intervals")
 
+        precondition(PlaybackRecoveryProgress.hasResumed(from: 20, to: 23,
+            isPlaying: true, itemFailed: false),
+            "a recovery API timeout must not cover video that resumed during the request")
+        precondition(!PlaybackRecoveryProgress.hasResumed(from: 20, to: 20,
+            isPlaying: true, itemFailed: false), "playing status alone does not prove recovery")
+        precondition(!PlaybackRecoveryProgress.hasResumed(from: 20, to: 23,
+            isPlaying: false, itemFailed: false), "a seek while paused is not resumed playback")
+        precondition(!PlaybackRecoveryProgress.hasResumed(from: 20, to: 23,
+            isPlaying: true, itemFailed: true), "a failed item still needs recovery")
+        precondition(!PlaybackRecoveryProgress.hasResumed(from: 20, to: 10,
+            isPlaying: true, itemFailed: false), "a rewind does not establish forward progress")
+        precondition(!PlaybackRecoveryProgress.hasResumed(from: .nan, to: 23,
+            isPlaying: true, itemFailed: false))
+        precondition(!PlaybackRecoveryProgress.hasResumed(from: 20, to: .infinity,
+            isPlaying: true, itemFailed: false))
+        print("PASS recovery failures distinguish resumed media from stalled, paused, failed, or invalid clocks")
+
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [FixtureProtocol.self]
         let api = MelloTVAPI(baseURL: URL(string: "https://fixture.invalid")!, session: URLSession(configuration: config))
