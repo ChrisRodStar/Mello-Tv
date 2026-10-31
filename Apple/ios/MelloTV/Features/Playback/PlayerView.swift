@@ -216,17 +216,19 @@ private struct PlaybackSessionView: View {
                 }
 
                 if isPreparing {
-                    preparationOverlay.zIndex(10)
+                    preparationOverlay
                 } else if let errorMessage {
-                    Color.black.ignoresSafeArea().zIndex(9)
-                    errorOverlay(errorMessage).zIndex(10)
+                    ZStack {
+                        Color.black.ignoresSafeArea()
+                        errorOverlay(errorMessage)
+                    }
+                    .zIndex(30)
                 } else if controlsVisible {
                     transportControls
                 }
 
-                if controlsVisible {
+                if controlsVisible && errorMessage == nil {
                     VStack(spacing: 0) {
-                        header
                         Spacer(minLength: 12)
                         if hasStartedPlayback && errorMessage == nil {
                             timeline
@@ -236,7 +238,6 @@ private struct PlaybackSessionView: View {
                     .padding(.top, 12)
                     .padding(.bottom, 8)
                     .transition(.opacity)
-                    .zIndex(20)
                 }
 
                 if isLocked && showUnlockControl && errorMessage == nil {
@@ -301,7 +302,16 @@ private struct PlaybackSessionView: View {
                         .zIndex(8)
                 }
             }
+            .frame(width: geometry.size.width, height: geometry.size.height)
             .foregroundStyle(.white)
+            .overlay(alignment: .top) {
+                if controlsVisible {
+                    header
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, geometry.size.width > 600 ? 32 : 20)
+                        .padding(.top, 12)
+                }
+            }
         }
         .statusBarHidden(!controlsVisible)
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: controlsVisible)
