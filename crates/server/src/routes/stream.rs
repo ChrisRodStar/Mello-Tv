@@ -905,6 +905,9 @@ async fn stream_entry(
     ensure_session_loaded(&state, &id, &token).await;
     let range = headers.get(header::RANGE).and_then(|v| v.to_str().ok());
     let result = state.relay.fetch_entry(&id, &token, range).await;
+    if result.is_err() {
+        state.relay.revoke_session(&id);
+    }
     relay_result_to_response(result)
 }
 

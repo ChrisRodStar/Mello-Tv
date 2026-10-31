@@ -2,11 +2,11 @@ use std::collections::BTreeMap;
 
 use super::{HlsError, MAX_LINE_BYTES};
 
-pub(super) type Attributes<'a> = BTreeMap<&'a str, &'a str>;
+pub(crate) type Attributes<'a> = BTreeMap<&'a str, &'a str>;
 
 /// Attribute values borrow the bounded manifest. Commas inside a quoted value
 /// do not split fields; HLS quoted strings have no backslash escape syntax.
-pub(super) fn parse(input: &str) -> Result<Attributes<'_>, HlsError> {
+pub(crate) fn parse(input: &str) -> Result<Attributes<'_>, HlsError> {
     if input.len() > MAX_LINE_BYTES {
         return Err(HlsError::LimitExceeded("attributes"));
     }
@@ -66,7 +66,7 @@ fn insert<'a>(field: &'a str, attributes: &mut Attributes<'a>) -> Result<(), Hls
     Ok(())
 }
 
-pub(super) fn get<'a>(attributes: &Attributes<'a>, key: &str) -> Option<&'a str> {
+pub(crate) fn get<'a>(attributes: &Attributes<'a>, key: &str) -> Option<&'a str> {
     attributes.get(key).copied()
 }
 

@@ -6,7 +6,7 @@
 //! per-segment initialization associations. Unknown extension tags are ignored.
 //! DNS approval and destination pinning still belong to the shared transport.
 
-mod attributes;
+pub(crate) mod attributes;
 mod parser;
 
 use stream_core::providers::Metadata;
