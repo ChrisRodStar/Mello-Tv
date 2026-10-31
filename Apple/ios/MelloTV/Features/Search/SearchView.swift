@@ -474,10 +474,9 @@ final class SearchStore {
         pageSize = 20
 
         do {
-            async let searchTask = api.search(query, page: 1)
-            async let catalogTask = loadCatalogSections()
-
-            let (searchResponse, catalogSections) = try await (searchTask, catalogTask)
+            async let catalogTask = try? loadCatalogSections()
+            let searchResponse = try await api.search(query, page: 1)
+            let catalogSections = cachedCatalogSections
             guard activeRequestID == requestID, !Task.isCancelled else { return }
 
             let rankedTitles = SearchRanker.rank(titles: searchResponse.titles, for: query)
@@ -489,6 +488,11 @@ final class SearchStore {
             self.shelves = assembleShelves(for: query, searchTitles: rankedTitles, catalogSections: catalogSections)
             self.hasSearched = true
             self.isLoading = false
+            if let enriched = await catalogTask {
+                guard activeRequestID == requestID, !Task.isCancelled else { return }
+                cachedCatalogSections = enriched
+                shelves = assembleShelves(for: query, searchTitles: rankedTitles, catalogSections: enriched)
+            }
         } catch {
             guard activeRequestID == requestID, !Task.isCancelled else { return }
             self.errorMessage = error.localizedDescription

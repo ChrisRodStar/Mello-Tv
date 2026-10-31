@@ -63,6 +63,9 @@ final class SimulatorPlaybackFixture: URLProtocol, @unchecked Sendable {
             result = ["type": "tv", "id": 1622, "season": 1, "episode": 1,
                 "position_seconds": Self.progress, "duration_seconds": 60, "watched_seconds": 10,
                 "completed": false, "updated_at": "2026-10-19T12:00:00Z"]
+        } else if path.hasSuffix("/playback-settings") {
+            result = ["audio_language": "", "subtitle_language": "", "subtitles_enabled": false,
+                      "autoplay_next": true, "max_height": 0]
         } else if path.contains("/playback") && request.httpMethod != "DELETE" {
             let key = request.value(forHTTPHeaderField: "Idempotency-Key") ?? "fixture"
             let session = Self.sessions[key] ?? "sim-session-\(Self.sessions.count + 1)"

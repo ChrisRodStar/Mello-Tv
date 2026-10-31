@@ -3,6 +3,9 @@ import Network
 import AVFoundation
 import OSLog
 import MelloKit
+#if canImport(UIKit)
+import UIKit
+#endif
 
 private let preparationLog = Logger(subsystem: Bundle.main.bundleIdentifier ?? "com.tinymellow.mellotv", category: "Preparation")
 
@@ -13,7 +16,7 @@ final class NetworkMonitor: @unchecked Sendable {
     private let lock = NSLock()
     private var _isExpensive: Bool = false
     private var _isConstrained: Bool = false
-    private var _isConnected: Bool = true
+    private var _isConnected: Bool = false
 
     var isPreloadPermitted: Bool {
         lock.lock()
@@ -243,6 +246,7 @@ final class PreparedPlaybackService {
             // The returned warmup owns all asynchronous positioning. It does
             // not suspend this authorization-to-player ownership transfer.
             let item = AVPlayerItem(url: source.url)
+            (PlaybackQuality(rawValue: source.qualityLimit) ?? .automatic).apply(to: item)
             item.canUseNetworkResourcesForLiveStreamingWhilePaused = true
             let player = AVPlayer(playerItem: item)
             player.pause()

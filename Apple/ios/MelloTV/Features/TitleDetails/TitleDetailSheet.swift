@@ -121,6 +121,8 @@ private struct TitleDetailContent: View {
         .task {
             do { recommendationChoices = try await api.recommendationChoices(profileID: profileID) }
             catch { if !Task.isCancelled { feedbackError = "Couldn’t load recommendation choices." } }
+        }
+        .task {
             if details == nil { await loadDetails() }
             if suggestions == nil, !Task.isCancelled {
                 await loadSuggestions()

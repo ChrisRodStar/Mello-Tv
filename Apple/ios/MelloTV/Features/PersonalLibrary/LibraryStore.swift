@@ -12,6 +12,8 @@ final class LibraryStore {
     var isSaving = false
     var errorMessage: String?
     private var activeProfileID: String?
+    private var loadTask: Task<ProfileLibrary, Error>?
+    private var loadGeneration = UUID()
 
     // Manual status is local to this installation. It is deliberately separate
     // from measured viewing telemetry and never sent as fabricated watch time.
@@ -23,7 +25,19 @@ final class LibraryStore {
     }()
 
     func hasManualWatchedMark(profileID: String, title: MediaTitle, season: Int, episode: Int) -> Bool {
-        manualWatchedEpisodes.contains(episodeWatchStorageKey(profileID: profileID, title: title, season: season, episode: episode))
+        let key = episodeWatchStorageKey(profileID: profileID, title: title, season: season, episode: episode)
+        if manualWatchedEpisodes.contains(key) { return true }
+        let endpoints = [ServerAddress.baseURL] + ServerAddress.fallbackURLs
+        for endpoint in endpoints {
+            let legacy = episodeWatchStorageKey(profileID: profileID, title: title, season: season, episode: episode, origin: endpoint)
+            if manualWatchedEpisodes.contains(legacy) {
+                manualWatchedEpisodes.remove(legacy)
+                manualWatchedEpisodes.insert(key)
+                persistWatchedMarks()
+                return true
+            }
+        }
+        return false
     }
 
     func isEpisodeWatched(profileID: String, title: MediaTitle, season: Int, episode: Int) -> Bool {
@@ -39,15 +53,24 @@ final class LibraryStore {
     func setEpisodeWatched(_ watched: Bool, profileID: String, title: MediaTitle, season: Int, episode: Int) {
         let key = episodeWatchStorageKey(profileID: profileID, title: title, season: season, episode: episode)
         if watched { manualWatchedEpisodes.insert(key) }
-        else { manualWatchedEpisodes.remove(key) }
+        else {
+            manualWatchedEpisodes.remove(key)
+            for endpoint in [ServerAddress.baseURL] + ServerAddress.fallbackURLs {
+                manualWatchedEpisodes.remove(episodeWatchStorageKey(profileID: profileID, title: title, season: season, episode: episode, origin: endpoint))
+            }
+        }
+        persistWatchedMarks()
+    }
+
+    private func persistWatchedMarks() {
         if let data = try? JSONEncoder().encode(manualWatchedEpisodes) {
             UserDefaults.standard.set(data, forKey: Self.episodeWatchKey)
         }
     }
 
-    private func episodeWatchStorageKey(profileID: String, title: MediaTitle, season: Int, episode: Int) -> String {
+    private func episodeWatchStorageKey(profileID: String, title: MediaTitle, season: Int, episode: Int, origin: URL? = nil) -> String {
         // Encode the identity components independently to avoid delimiter collisions.
-        let identity = [ServerAddress.baseURL.absoluteString, profileID, title.type.rawValue,
+        let identity = [(origin ?? ServerAddress.serverIdentityURL).absoluteString, profileID, title.type.rawValue,
                         String(title.tmdbID), String(season), String(episode)]
         return (try? JSONEncoder().encode(identity).base64EncodedString()) ?? identity.joined(separator: "|")
     }
@@ -57,32 +80,36 @@ final class LibraryStore {
     }
 
     func loadLibrary(for profileID: String, forceReload: Bool = false) async {
-        if !forceReload, activeProfileID == profileID, !library.list.isEmpty {
-            return
+        if activeProfileID == profileID {
+            if let loadTask { _ = try? await loadTask.value; return }
+            if !forceReload, !library.list.isEmpty || !library.progress.isEmpty { return }
+        } else {
+            loadTask?.cancel()
+            library = .empty
         }
-
         activeProfileID = profileID
+        let generation = UUID()
+        loadGeneration = generation
         isLoading = true
         errorMessage = nil
-
+        let api = api
+        let task = Task { try await api.library(for: profileID) }
+        loadTask = task
+        defer {
+            if loadGeneration == generation { isLoading = false; loadTask = nil }
+        }
         do {
-            let data = try await api.library(for: profileID)
-            self.library = data
-            self.isLoading = false
+            let data = try await task.value
+            guard !task.isCancelled, loadGeneration == generation, activeProfileID == profileID else { return }
+            library = data
         } catch {
-            self.isLoading = false
-            self.errorMessage = "Couldn’t load your library. Try again."
+            guard !task.isCancelled, loadGeneration == generation else { return }
+            errorMessage = "Couldn’t load your library. Try again."
         }
     }
 
     func refresh(for profileID: String) async {
-        do {
-            let data = try await api.library(for: profileID)
-            self.library = data
-            self.errorMessage = nil
-        } catch {
-            // Keep existing data on refresh error
-        }
+        await loadLibrary(for: profileID, forceReload: true)
     }
 
     func toggleMyList(profileID: String, title: MediaTitle) async {

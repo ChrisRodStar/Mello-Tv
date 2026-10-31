@@ -6,6 +6,7 @@ import MelloKit
 @Observable
 final class ProfileStore {
     private let api: MelloTVAPI
+    private var pendingCreation: (name: String, color: String, knownIDs: Set<String>)?
 
     var profiles: [Profile] = []
     var activeProfile: Profile?
@@ -37,76 +38,44 @@ final class ProfileStore {
     }
 
     func loadProfiles() async {
+        guard !isLoading else { return }
         isLoading = true
         errorMessage = nil
-        if ServerAddress.fallbackURLs.isEmpty || (ServerAddress.isCellularOnly && !ServerAddress.isTailscaleAddress(ServerAddress.baseURL)) {
+        defer { isLoading = false; isDiscoveringServer = false }
+        if ServerAddress.fallbackURLs.isEmpty {
             isDiscoveringServer = true
             if let discovered = await ServerAddress.ensureResolved() {
                 discoveredServers = [discovered]
-                ServerAddress.saveDiscoveredServer(discovered)
             }
             isDiscoveringServer = false
         }
         refreshServerMetadata()
-
         do {
             let loaded = try await api.profiles()
-            refreshServerMetadata()
-            self.profiles = loaded
-            self.isLoading = false
-            self.errorMessage = nil
-
-            // Restore active profile from persistence (checking both server identity and current URL)
-            let savedID = ProfilePersistence.activeProfileID(for: persistenceIdentityURL)
-                ?? ProfilePersistence.activeProfileID(for: ServerAddress.baseURL)
-            if let savedID,
-               let match = loaded.first(where: { $0.id == savedID }) {
-                self.activeProfile = match
-                ProfilePersistence.setActiveProfileID(match.id, for: persistenceIdentityURL)
-                checkOnboarding(for: match)
-            } else if let first = loaded.first, loaded.count == 1 {
-                // If only 1 profile exists and nothing saved, select it
-                selectProfile(first)
-            } else {
-                // Multiple or no profiles saved, active profile remains nil (Who's watching shown)
-                self.activeProfile = nil
-            }
+            try Task.checkCancellation()
+            acceptProfiles(loaded)
         } catch {
-            // Initial request failed. Immediately call ServerAddress.ensureResolved() and switch to resolved server.
-            isDiscoveringServer = true
-            if let resolved = await ServerAddress.ensureResolved() {
-                isDiscoveringServer = false
-                discoveredServers = [resolved]
-                ServerAddress.saveDiscoveredServer(resolved)
-                refreshServerMetadata()
-                do {
-                    let loaded = try await api.profiles()
-                    refreshServerMetadata()
-                    self.profiles = loaded
-                    self.isLoading = false
-                    self.errorMessage = nil
-
-                    let savedID = ProfilePersistence.activeProfileID(for: persistenceIdentityURL)
-                        ?? ProfilePersistence.activeProfileID(for: ServerAddress.baseURL)
-                    if let savedID, let match = loaded.first(where: { $0.id == savedID }) {
-                        self.activeProfile = match
-                        ProfilePersistence.setActiveProfileID(match.id, for: persistenceIdentityURL)
-                        checkOnboarding(for: match)
-                    } else if let first = loaded.first, loaded.count == 1 {
-                        selectProfile(first)
-                    } else {
-                        self.activeProfile = nil
-                    }
-                    return
-                } catch {
-                    // Retry with resolved server failed
-                }
-            }
-
-            isDiscoveringServer = false
-            isLoading = false
+            guard !Task.isCancelled else { return }
+            // The API already attempts endpoint recovery. Do not recursively
+            // discover and load again when a reachable server returns an error.
             errorMessage = error.localizedDescription
-            await scanForServers()
+        }
+    }
+
+    private func acceptProfiles(_ loaded: [Profile]) {
+        refreshServerMetadata()
+        profiles = loaded
+        errorMessage = nil
+        let savedID = ProfilePersistence.activeProfileID(for: persistenceIdentityURL)
+            ?? ProfilePersistence.activeProfileID(for: ServerAddress.baseURL)
+        if let savedID, let match = loaded.first(where: { $0.id == savedID }) {
+            activeProfile = match
+            ProfilePersistence.setActiveProfileID(match.id, for: persistenceIdentityURL)
+            checkOnboarding(for: match)
+        } else if loaded.count == 1, let first = loaded.first {
+            selectProfile(first)
+        } else {
+            activeProfile = nil
         }
     }
 
@@ -209,12 +178,30 @@ final class ProfileStore {
                 color: color,
                 preferences: .empty
             )
-            let previousIDs = Set(profiles.map(\.id))
-            let newProfiles = try await api.createProfile(newProfile)
-            self.profiles = newProfiles
-            if let created = newProfiles.first(where: { !previousIDs.contains($0.id) }) {
-                selectProfile(created)
+            if let pending = pendingCreation, pending.name == cleanName, pending.color == color {
+                // A lost POST response may already have created the profile.
+                // Reconcile a fresh list before allowing another explicit Save.
+                let refreshed = try await api.profiles()
+                let matches = refreshed.filter {
+                    !pending.knownIDs.contains($0.id) && $0.name == cleanName && $0.color == color
+                }
+                guard matches.count <= 1 else {
+                    throw APIError.serverMessage("Refresh your profiles to review the completed request.")
+                }
+                profiles = refreshed
+                if let created = matches.first {
+                    pendingCreation = nil
+                    selectProfile(created)
+                    showProfileEditor = false
+                    return
+                }
             }
+            pendingCreation = (cleanName, color, Set(profiles.map(\.id)))
+            let created = try await api.createProfile(newProfile)
+            pendingCreation = nil
+            profiles.removeAll { $0.id == created.id }
+            profiles.append(created)
+            selectProfile(created)
         }
         showProfileEditor = false
     }
@@ -231,10 +218,7 @@ final class ProfileStore {
 
     func completeOnboarding(with preferences: ProfilePreferences, original: Profile) async throws {
         guard let current = activeProfile, current.id == original.id else { return }
-        let latest = try await api.profiles().first { $0.id == original.id }
-        guard let latest else {
-            throw APIError.serverMessage("This profile is no longer available.")
-        }
+        let latest = try await api.profileForPreferenceEditing(id: original.id)
         func matches(_ a: ProfilePreferences, _ b: ProfilePreferences) -> Bool {
             a.format == b.format && Set(a.genres) == Set(b.genres) && a.completed == b.completed && Set(a.likedTitles) == Set(b.likedTitles)
         }

@@ -11,24 +11,6 @@ private final class PrivateAPIDelegate: NSObject, URLSessionTaskDelegate, Sendab
     }
 }
 
-private final class ActiveOriginState: @unchecked Sendable {
-    static let shared = ActiveOriginState()
-    private let lock = NSLock()
-    private var resolved: URL?
-
-    func current(default fallback: URL) -> URL {
-        lock.lock()
-        defer { lock.unlock() }
-        return resolved ?? fallback
-    }
-
-    func update(_ url: URL) {
-        lock.lock()
-        resolved = url
-        lock.unlock()
-    }
-}
-
 struct MelloTVAPI: Sendable {
     let baseURL: URL
     var session: URLSession = Self.privateSession
@@ -40,12 +22,12 @@ struct MelloTVAPI: Sendable {
 
     private var effectiveBaseURL: URL {
         guard isDynamicOrigin else { return baseURL }
-        return ActiveOriginState.shared.current(default: ServerAddress.baseURL)
+        return ServerAddress.baseURL
     }
 
     private var candidateBaseURLs: [URL] {
         guard isDynamicOrigin else { return [baseURL] }
-        let primary = ActiveOriginState.shared.current(default: ServerAddress.baseURL)
+        let primary = ServerAddress.baseURL
         var list = [primary, ServerAddress.baseURL]
         if let ts = ServerAddress.tailscaleURL {
             list.append(ts)
@@ -217,10 +199,23 @@ struct MelloTVAPI: Sendable {
             var titles = reply.records.map { $0.data.view }
             if page == 1 {
                 do {
-                    let discovery: SavedRecord<[WireTitle]> = try await request("search-results", query: [URLQueryItem(name: "q", value: query)])
+                    let discovery: SavedRecord<[WireTitle]>
+                    if titles.isEmpty {
+                        discovery = try await request("search-results", query: [URLQueryItem(name: "q", value: query)])
+                    } else {
+                        // Bound optional enrichment; do not hold valid cached
+                        // results behind discovery polling or endpoint scans.
+                        discovery = try await executeSingleRequest(to: effectiveBaseURL, path: "search-results", method: "GET",
+                            bodyData: nil, query: [URLQueryItem(name: "q", value: query)], key: nil, timingID: nil,
+                            timeout: 2, pendingAttempt: 7)
+                    }
                     if let status = discovery.status, try catalogStatusError(status, reason: discovery.reason) { continue }
                     titles += discovery.data.map(\.view)
-                } catch APIError.serverStatus(404) { }
+                } catch {
+                    try Task.checkCancellation()
+                    // Discovery enriches usable cached results; an outage here
+                    // must not turn a successful search into an error screen.
+                }
             }
             var seen = Set<String>()
             return SearchResponse(titles: titles.filter { seen.insert($0.id).inserted }, page: page,
@@ -289,20 +284,25 @@ struct MelloTVAPI: Sendable {
     }
 
     func profiles() async throws -> [Profile] {
+        // Entering the app requires profile identities, not every profile's
+        // optional favorites. Editors load their authoritative choices separately.
         let reply: ProfilesReply = try await request("profiles")
-        var profiles = reply.profiles
-        for index in profiles.indices {
-            let favorites: TitlesReply = try await request("profiles/\(profiles[index].id)/favorites")
-            profiles[index].preferences.likedTitles = favorites.titles.map {
-                LikedTitle(id: $0.id, type: $0.type, title: $0.title)
-            }
-        }
-        return profiles
+        return reply.profiles
     }
 
-    func createProfile(_ profile: Profile) async throws -> [Profile] {
-        let _: Profile = try await request("profiles", method: "POST", body: ["name": profile.name, "color": profile.color])
-        return try await profiles()
+    func profileForPreferenceEditing(id: String) async throws -> Profile {
+        guard var profile = try await profiles().first(where: { $0.id == id }) else {
+            throw APIError.serverMessage("This profile is no longer available.")
+        }
+        let favorites: TitlesReply = try await request("profiles/\(id)/favorites")
+        profile.preferences.likedTitles = favorites.titles.map {
+            LikedTitle(id: $0.id, type: $0.type, title: $0.title)
+        }
+        return profile
+    }
+
+    func createProfile(_ profile: Profile) async throws -> Profile {
+        try await request("profiles", method: "POST", body: ["name": profile.name, "color": profile.color])
     }
 
     func updateProfileIdentity(_ profile: Profile) async throws -> [Profile] {
@@ -447,25 +447,44 @@ struct MelloTVAPI: Sendable {
         while offset < 20000 {
             let page: HistoryReply = try await request("profiles/\(profileID)/history", query: [URLQueryItem(name: "offset", value: String(offset))])
             history += page.records
-            if page.records.count < page.limit { break }
+            if page.records.isEmpty || page.records.count < page.limit { break }
             offset += page.records.count
         }
         let titles = try await saved.titles.map(\.view)
         var known = Dictionary(titles.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        var progress: [WatchProgress] = []
+        var missing: [WireProgress] = []
+        var seen = Set(known.keys)
         for item in history {
-            let key = "\(item.type.rawValue)-\(item.id)"
-            let title: MediaTitle
-            if let existing = known[key] { title = existing }
-            else {
-                let reply: SavedRecord<WireTitle> = try await request("titles/\(item.type.rawValue)/\(item.id)")
-                title = reply.data.view
-                known[key] = title
+            if seen.insert("\(item.type.rawValue)-\(item.id)").inserted { missing.append(item) }
+        }
+        // Hydrate independently with bounded concurrency. Missing metadata does
+        // not invalidate saved titles or the rest of a profile's history.
+        for start in stride(from: 0, to: missing.count, by: 4) {
+            try Task.checkCancellation()
+            let batch = Array(missing[start..<min(start + 4, missing.count)])
+            let hydrated = await withTaskGroup(of: (String, MediaTitle?).self) { group in
+                for item in batch {
+                    group.addTask {
+                        let key = "\(item.type.rawValue)-\(item.id)"
+                        let reply: SavedRecord<WireTitle>? = try? await request("titles/\(item.type.rawValue)/\(item.id)")
+                        return (key, reply?.data.view)
+                    }
+                }
+                var result: [String: MediaTitle] = [:]
+                for await (key, title) in group { if let title { result[key] = title } }
+                return result
             }
-            progress.append(WatchProgress(title: title, season: item.season ?? 0, episode: item.episode ?? 0,
+            known.merge(hydrated) { _, new in new }
+        }
+        try Task.checkCancellation()
+        let progress = history.map { item in
+            let key = "\(item.type.rawValue)-\(item.id)"
+            let title = known[key] ?? MediaTitle(tmdbID: item.id, type: item.type,
+                title: "\(item.type.displayName) \(item.id)")
+            return WatchProgress(title: title, season: item.season ?? 0, episode: item.episode ?? 0,
                 episodeTitle: "", position: item.positionSeconds, duration: item.durationSeconds,
                 watchedSeconds: item.watchedSeconds, completed: item.completed,
-                updatedAt: parsedDate(item.updatedAt)?.timeIntervalSince1970 ?? 0))
+                updatedAt: parsedDate(item.updatedAt)?.timeIntervalSince1970 ?? 0)
         }
         return ProfileLibrary(list: titles, progress: progress)
     }
@@ -490,11 +509,14 @@ struct MelloTVAPI: Sendable {
     }
 
     func resolvePlayback(request playback: PlaybackRequest, key: String) async throws -> AuthorizedPlayback {
+        let settings = (try? await playbackSettings(profileID: playback.profileID)) ?? ProfilePlaybackSettings()
+        try Task.checkCancellation()
+        let ceiling = settings.maxHeight == 0 ? 1080 : settings.maxHeight
         let codecs = Self.playbackCodecs(overriding: codecSupportOverride)
         var body: [String: Any] = ["type": playback.type.rawValue, "id": playback.titleID,
             "device": ["formats": ["hls", "mp4"], "codecs": codecs,
                        "supports_encrypted_hls": true, "allow_unknown_codecs": false, "allow_unknown_resolution": false,
-                       "max_height": 1080]]
+                       "max_height": ceiling]]
         if playback.type == .tv {
             body["season"] = playback.season
             body["episode"] = playback.episode
@@ -504,7 +526,7 @@ struct MelloTVAPI: Sendable {
         playback.timing?.record(.authorizationStarted)
         do {
             let reply: WirePlayback = try await playbackRequest("profiles/\(playback.profileID)/playback", method: "POST", body: body, key: key, timingID: playback.timing?.id)
-            let source = try authorized(reply, for: playback)
+            let source = try authorized(reply, for: playback, qualityLimit: settings.maxHeight)
             playback.timing?.record(.authorizationFinished)
             return source
         } catch {
@@ -531,7 +553,7 @@ struct MelloTVAPI: Sendable {
         guard ["renew", "backup", "refresh", "upgrade"].contains(kind) else { throw APIError.invalidData }
         let reply: WirePlayback = try await playbackRequest("profiles/\(playback.profileID)/playback/\(source.id)/\(kind)",
             method: "POST", body: ["expected_revision": source.revision], key: key)
-        return try authorized(reply, for: playback)
+        return try authorized(reply, for: playback, qualityLimit: source.qualityLimit)
     }
 
     private func playbackRequest<Response: Decodable>(_ path: String, method: String,
@@ -551,7 +573,11 @@ struct MelloTVAPI: Sendable {
     }
 
     func revokePlayback(_ source: AuthorizedPlayback, request playback: PlaybackRequest) async throws {
-        let _: EmptyReply = try await request("profiles/\(playback.profileID)/playback/\(source.id)", method: "DELETE")
+        try await revokePlayback(id: source.id, profileID: playback.profileID)
+    }
+
+    func revokePlayback(id: String, profileID: String) async throws {
+        let _: EmptyReply = try await request("profiles/\(profileID)/playback/\(id)", method: "DELETE")
     }
 
     func putPlaybackActivity(sessionID: String, body: [String: Any]) async throws {
@@ -562,8 +588,8 @@ struct MelloTVAPI: Sendable {
         let _: EmptyReply = try await request("playback-activity/\(sessionID)", method: "DELETE")
     }
 
-    private func authorized(_ reply: WirePlayback, for playback: PlaybackRequest) throws -> AuthorizedPlayback {
-        let origin = effectiveBaseURL
+    private func authorized(_ reply: WirePlayback, for playback: PlaybackRequest, qualityLimit: Int) throws -> AuthorizedPlayback {
+        let origin = reply.responseOrigin ?? effectiveBaseURL
         let heights = reply.availableHeights ?? []
         guard heights.count <= 32, Set(heights).count == heights.count,
               heights.allSatisfy({ $0 > 0 && $0 <= 16384 }), reply.format == "hls" || heights.isEmpty else { throw APIError.invalidData }
@@ -576,7 +602,7 @@ struct MelloTVAPI: Sendable {
               let expires = parsedDate(reply.expiresAt), expires > Date() else { throw APIError.invalidData }
         return AuthorizedPlayback(id: reply.id, url: url, format: reply.format, expiresAt: expires,
                                   revision: reply.revision, resumeSeconds: reply.resumeSeconds,
-                                  availableHeights: heights, reloadRequired: reply.reloadRequired ?? false)
+                                  availableHeights: heights, reloadRequired: reply.reloadRequired ?? false, qualityLimit: qualityLimit)
     }
 
     private func executeSingleRequest<Response: Decodable>(to candidate: URL, path: String, method: String,
@@ -610,11 +636,6 @@ struct MelloTVAPI: Sendable {
         }
 
         let (data, response) = try await session.data(for: request)
-        if isDynamicOrigin {
-            ActiveOriginState.shared.update(candidate)
-            ServerAddress.markEndpointActive(candidate)
-        }
-
         guard let http = response as? HTTPURLResponse else { throw APIError.invalidResponse }
         let statusPayload = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
         let isMetadataPending = http.statusCode == 202 ||
@@ -636,7 +657,10 @@ struct MelloTVAPI: Sendable {
             let code = (try? JSONDecoder().decode(FailureReply.self, from: data))?.error ?? "unavailable"
             throw APIError.service(status: http.statusCode, code: code, message: Self.message(for: code))
         }
-        if http.statusCode == 204, let empty = EmptyReply() as? Response { return empty }
+        if http.statusCode == 204, let empty = EmptyReply() as? Response {
+            if isDynamicOrigin { ServerAddress.markEndpointActive(candidate) }
+            return empty
+        }
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase
         if let value = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -645,6 +669,11 @@ struct MelloTVAPI: Sendable {
             throw APIError.serverMessage(value["reason"] as? String ?? "Catalog data could not be loaded. Try again.")
         }
         guard let reply = try? decoder.decode(Response.self, from: data) else { throw APIError.invalidData }
+        if isDynamicOrigin { ServerAddress.markEndpointActive(candidate) }
+        if var playback = reply as? WirePlayback {
+            playback.responseOrigin = candidate
+            return (playback as? Response) ?? reply
+        }
         return reply
     }
 
@@ -665,11 +694,13 @@ struct MelloTVAPI: Sendable {
             if case APIError.serverStatus = error { throw error }
             if case APIError.serverMessage = error { throw error }
 
+            if method == "POST", key == nil {
+                throw APIError.connection("Couldn’t confirm the request. Refresh before trying again.")
+            }
             // Origin failed with connection/network issue.
             // Immediately trigger parallel resolution via ensureResolved() instead of sequentially hanging for 4s on dead candidates.
             if isDynamicOrigin && allowDiscoveryRetry {
-                if let resolved = await ServerAddress.ensureResolved() {
-                    ActiveOriginState.shared.update(resolved.primaryURL)
+                if await ServerAddress.ensureResolved() != nil {
                     return try await request(path, method: method, body: body, query: query,
                                              key: key, timingID: timingID, allowDiscoveryRetry: false)
                 }
@@ -788,6 +819,10 @@ private struct WirePlayback: Decodable {
     let resumeSeconds: Double
     let availableHeights: [Int]?
     let reloadRequired: Bool?
+    var responseOrigin: URL? = nil
+    enum CodingKeys: String, CodingKey {
+        case id, title, url, format, expiresAt, revision, resumeSeconds, availableHeights, reloadRequired
+    }
     struct Target: Decodable { let type: MediaType; let id: Int; let season: Int?; let episode: Int? }
 }
 struct AuthorizedPlayback: Sendable {
@@ -799,9 +834,10 @@ struct AuthorizedPlayback: Sendable {
     let resumeSeconds: Double
     let availableHeights: [Int]
     let reloadRequired: Bool
+    let qualityLimit: Int
 
     init(id: String, url: URL, format: String, expiresAt: Date, revision: Int, resumeSeconds: Double,
-         availableHeights: [Int], reloadRequired: Bool = false) {
+         availableHeights: [Int], reloadRequired: Bool = false, qualityLimit: Int = 0) {
         self.id = id
         self.url = url
         self.format = format
@@ -810,6 +846,7 @@ struct AuthorizedPlayback: Sendable {
         self.resumeSeconds = resumeSeconds
         self.availableHeights = availableHeights
         self.reloadRequired = reloadRequired
+        self.qualityLimit = qualityLimit
     }
 }
 

@@ -21,6 +21,8 @@ struct OnboardingView: View {
     @State private var isLoading = false
     @State private var errorMessage: String?
     @State private var hasInitialized = false
+    @State private var originalProfile: Profile?
+    @State private var preferenceLoadGeneration = 0
     @State private var showFavorites = false
     @State private var operationTask: Task<Void, Never>?
     private let api = MelloTVAPI(baseURL: ServerAddress.baseURL)
@@ -63,13 +65,23 @@ struct OnboardingView: View {
             .background(MelloTVTheme.background.ignoresSafeArea())
             .foregroundStyle(MelloTVTheme.text)
             .toolbar(.hidden, for: .navigationBar)
-            .task {
-                // Rotation and returning from another app must not reset this draft.
+            .task(id: preferenceLoadGeneration) {
+                // Never treat unavailable favorites as an empty editable list.
                 guard !hasInitialized else { return }
-                hasInitialized = true
-                format = profile.preferences.format.isEmpty ? "both" : profile.preferences.format
-                selectedGenres = Set(profile.preferences.genres.filter { $0 != "family" })
-                selectedLikedTitles = profile.preferences.likedTitles
+                do {
+                    let saved = try await api.profileForPreferenceEditing(id: profile.id)
+                    try Task.checkCancellation()
+                    originalProfile = saved
+                    format = saved.preferences.format.isEmpty ? "both" : saved.preferences.format
+                    selectedGenres = Set(saved.preferences.genres.filter { $0 != "family" })
+                    selectedLikedTitles = saved.preferences.likedTitles
+                    hasInitialized = true
+                    errorMessage = nil
+                } catch {
+                    if !Task.isCancelled { errorMessage = "Couldn’t load your preferences. Try again before editing." }
+                }
+            }
+            .task {
                 do { genreArtworks = try await api.genreArtwork() }
                 catch { /* Artwork is optional; every genre remains selectable. */ }
             }
@@ -204,6 +216,10 @@ struct OnboardingView: View {
 
     private func actionBar(isInline: Bool) -> some View {
         VStack(alignment: .leading, spacing: 10) {
+            if !hasInitialized {
+                Button("Retry loading preferences") { preferenceLoadGeneration += 1 }
+                    .frame(minHeight: 44)
+            }
             if let errorMessage {
                 Text(errorMessage)
                     .font(.subheadline)
@@ -310,7 +326,7 @@ struct OnboardingView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(CardScaleButtonStyle(scale: 0.98))
-        .disabled(selectedCount < 3 || isLoading)
+        .disabled(!hasInitialized || selectedCount < 3 || isLoading)
         .opacity(selectedCount < 3 ? 0.45 : 1)
     }
 
@@ -368,7 +384,7 @@ struct OnboardingView: View {
     }
 
     private func savePreferences() {
-        guard !isLoading, selectedLikedTitles.count >= 3 else { return }
+        guard !isLoading, selectedLikedTitles.count >= 3, let originalProfile else { return }
         isLoading = true
         errorMessage = nil
         currentStep = .saving
@@ -377,7 +393,7 @@ struct OnboardingView: View {
         operationTask = Task { @MainActor in
             defer { isLoading = false; operationTask = nil }
             do {
-                try await profileStore.completeOnboarding(with: preferences, original: profile)
+                try await profileStore.completeOnboarding(with: preferences, original: originalProfile)
                 try Task.checkCancellation()
                 onCompleted?()
             } catch {

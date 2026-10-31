@@ -30,7 +30,48 @@ private struct UDPDiscoveryPacket: Decodable {
     let endpoints: [String]?
 }
 
+// Health metadata is refreshed at most once a minute per active endpoint.
+// A late probe cannot switch the app back to an older connection.
+private final class EndpointProbeState: @unchecked Sendable {
+    private let lock = NSLock()
+    private var active: URL?
+    private var generation = 0
+    private var lastRefresh: [URL: TimeInterval] = [:]
+
+    func begin(_ url: URL) -> Int? {
+        lock.lock()
+        defer { lock.unlock() }
+        if active != url { active = url; generation += 1 }
+        let now = ProcessInfo.processInfo.systemUptime
+        if let last = lastRefresh[url], now - last < 60 { return nil }
+        if lastRefresh.count >= 16 { lastRefresh.removeAll() }
+        lastRefresh[url] = now
+        return generation
+    }
+
+    func isCurrent(_ token: Int, url: URL) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return generation == token && active == url
+    }
+}
+
+private actor ServerResolutionFlight {
+    static let shared = ServerResolutionFlight()
+    private var task: Task<DiscoveredServer?, Never>?
+
+    func resolve() async -> DiscoveredServer? {
+        if let task { return await task.value }
+        let flight = Task { await ServerAddress.resolveReachableServer() }
+        task = flight
+        let result = await flight.value
+        task = nil
+        return result
+    }
+}
+
 enum ServerAddress {
+    private static let endpointProbes = EndpointProbeState()
     private static let activeURLKey = "mello-tv.server.active-url"
     private static let knownEndpointsKey = "mello-tv.server.known-endpoints"
     private static let tailscaleURLKey = "mello-tv.server.tailscale-url"
@@ -254,9 +295,11 @@ enum ServerAddress {
     /// Updates the active origin when one of the known endpoints succeeds.
     static func markEndpointActive(_ url: URL) {
         UserDefaults.standard.set(url.absoluteString, forKey: activeURLKey)
-        // Asynchronously refresh endpoint list (including Tailscale IP) from /api/v1/status
+        guard let token = endpointProbes.begin(url) else { return }
         Task.detached(priority: .utility) {
-            if let server = await probeServerStatus(at: url, timeout: 3.0) {
+            if let server = await probeServerStatus(at: url, timeout: 3.0),
+               endpointProbes.isCurrent(token, url: url),
+               UserDefaults.standard.string(forKey: activeURLKey) == url.absoluteString {
                 saveDiscoveredServer(server)
             }
         }
@@ -278,6 +321,10 @@ enum ServerAddress {
     /// in parallel so the fastest responding endpoint wins immediately (0ms overhead on Wi-Fi, <150ms on cellular Tailscale).
     @discardableResult
     static func ensureResolved() async -> DiscoveredServer? {
+        await ServerResolutionFlight.shared.resolve()
+    }
+
+    fileprivate static func resolveReachableServer() async -> DiscoveredServer? {
         let candidates = await allKnownCandidateURLs()
         if !candidates.isEmpty,
            let fastMatch = await raceStatusProbes(candidates, timeout: 4.0) {
