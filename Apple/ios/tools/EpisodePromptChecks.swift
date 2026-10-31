@@ -361,17 +361,36 @@ struct EpisodePromptChecks {
         let unmarkedTiming = EpisodePromptTiming(duration: 1000, speed: 1, creditsStart: nil)
         var unmarked = EpisodePromptState()
         unmarked.bind(to: "unmarked")
+        unmarked.consider(position: 969, cardTrigger: unmarkedTiming.cardTrigger,
+            countdownTrigger: unmarkedTiming.countdownTrigger, naturallyAdvanced: true)
+        require(!unmarked.isVisible)
+        unmarked.consider(position: 970, cardTrigger: unmarkedTiming.cardTrigger,
+            countdownTrigger: unmarkedTiming.countdownTrigger, naturallyAdvanced: true)
+        require(unmarked.isVisible && !unmarked.isCountingDown,
+                "missing credits still offer manual Next during the final 30 seconds")
         unmarked.consider(position: 995, cardTrigger: unmarkedTiming.cardTrigger,
             countdownTrigger: unmarkedTiming.countdownTrigger, naturallyAdvanced: true)
-        require(!unmarked.isVisible && unmarked.hasNaturallyEarnedCountdown && !unmarked.tick())
+        require(unmarked.isVisible && unmarked.secondsRemaining == 10)
         unmarked.naturalEnd()
-        require(unmarked.isVisible && unmarked.isCountingDown && unmarked.secondsRemaining == 10)
+        require(unmarked.canAutoplayAtEnd(isEnabled: true, isForeground: true)
+                && unmarked.secondsRemaining == 0 && !unmarked.isCountingDown,
+                "actual end advances immediately even when no timer ticks occurred")
+        require(!unmarked.canAutoplayAtEnd(isEnabled: false, isForeground: true), "autoplay off is respected")
+        require(!unmarked.canAutoplayAtEnd(isEnabled: true, isForeground: false), "never advance while backgrounded")
+        var cancelledEnd = unmarked
+        cancelledEnd.keepWatching()
+        require(!cancelledEnd.canAutoplayAtEnd(isEnabled: true, isForeground: true))
+        var backgroundedEnd = unmarked
+        backgroundedEnd.backgrounded(at: 1000)
+        backgroundedEnd.naturalEnd()
+        require(!backgroundedEnd.canAutoplayAtEnd(isEnabled: true, isForeground: true))
         var soughtToEnd = EpisodePromptState()
         soughtToEnd.bind(to: "sought-to-end")
         soughtToEnd.seekOrScrub(to: 1000)
         soughtToEnd.naturalEnd()
-        require(soughtToEnd.isVisible && !soughtToEnd.isCountingDown && !soughtToEnd.tick())
-        print("PASS missing credits wait for actual end with a visible countdown; seeking cannot earn autoplay")
+        require(soughtToEnd.isVisible && !soughtToEnd.isCountingDown && !soughtToEnd.tick()
+                && !soughtToEnd.canAutoplayAtEnd(isEnabled: true, isForeground: true))
+        print("PASS manual Next appears before unmatched credits; actual end advances without timer delay and respects autoplay/seek/background guards")
 
         var prompt = EpisodePromptState()
         prompt.bind(to: "episode-one")

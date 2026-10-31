@@ -1043,16 +1043,23 @@ private struct PlaybackSessionView: View {
     private func updateEpisodePrompt(position: Double, duration itemDuration: Double, naturallyAdvanced: Bool) {
         guard request.type == .tv, isPlaybackSceneActive, hasStartedPlayback,
               errorMessage == nil,
-              nextEpisodeCandidate != nil,
               itemDuration.isFinite, itemDuration > 0,
               position.isFinite, player?.timeControlStatus == .playing,
-              !isLocked, activePanel == nil, !isSeeking, seekQueue.pendingTarget == nil,
-              !isAdjusting else { return }
+              !isSeeking, seekQueue.pendingTarget == nil else { return }
         let creditsStart = playbackSegments.segments.first(where: { $0.kind == .credits })?.start
         let timing = EpisodePromptTiming(duration: itemDuration, speed: playbackSpeed, creditsStart: creditsStart)
         episodePrompt.consider(position: position, cardTrigger: timing.cardTrigger,
                                countdownTrigger: timing.countdownTrigger, naturallyAdvanced: naturallyAdvanced)
-        if episodePrompt.isVisible { ensureEpisodePromptTimer() }
+        if episodePrompt.isVisible, nextEpisodeCandidate != nil { ensureEpisodePromptTimer() }
+    }
+
+    @discardableResult
+    private func advanceAfterEndIfReady() -> Bool {
+        guard isAtNaturalEnd, errorMessage == nil,
+              episodePrompt.canAutoplayAtEnd(isEnabled: settings.autoplayNext, isForeground: isPlaybackSceneActive),
+              let nextEpisodeCandidate else { return false }
+        playPreparedNext(nextEpisodeCandidate)
+        return true
     }
 
     private func ensureEpisodePromptTimer() {
@@ -1076,15 +1083,10 @@ private struct PlaybackSessionView: View {
                       isPlaybackSceneActive, hasStartedPlayback, errorMessage == nil else { return }
                 guard episodePrompt.isVisible, (isPlaying || isAtNaturalEnd), !isLocked, activePanel == nil,
                       !isSeeking, seekQueue.pendingTarget == nil, !isAdjusting else { continue }
-                if settings.autoplayNext, isAtNaturalEnd, episodePrompt.hasNaturallyEarnedCountdown,
-                   episodePrompt.secondsRemaining == 0 {
-                    guard let nextEpisodeCandidate else { return }
-                    playPreparedNext(nextEpisodeCandidate)
-                    return
-                }
-                if settings.autoplayNext, episodePrompt.tick(), isAtNaturalEnd {
-                    continue
-                }
+                // The timer animates the pre-end indicator only. The end
+                // notification advances immediately, regardless of this clock.
+                guard !isAtNaturalEnd else { return }
+                if settings.autoplayNext { _ = episodePrompt.tick() }
             }
         }
     }
@@ -1369,7 +1371,7 @@ private struct PlaybackSessionView: View {
                 nextEpisodeCandidate = candidate
                 if isAtNaturalEnd, candidate != nil {
                     episodePrompt.naturalEnd()
-                    ensureEpisodePromptTimer()
+                    if advanceAfterEndIfReady() { return }
                 }
                 if let candidate {
                     playbackLog.info("Next episode metadata ready for S\(candidate.season ?? 0) E\(candidate.episode ?? 0), attempt \(self.nextEpisodeLookup.attempts, privacy: .public)")
@@ -1458,10 +1460,11 @@ private struct PlaybackSessionView: View {
                 isPlaying = false
                 showControls = true
                 progressTracker?.flush()
-                if nextEpisodeCandidate != nil {
-                    episodePrompt.naturalEnd()
-                    ensureEpisodePromptTimer()
-                }
+                episodePromptTask?.cancel()
+                episodePromptTask = nil
+                episodePromptToken = nil
+                episodePrompt.naturalEnd()
+                advanceAfterEndIfReady()
             }
         }
     }

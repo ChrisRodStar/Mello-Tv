@@ -158,8 +158,8 @@ struct PlaybackClockStallDetector: Equatable {
     }
 }
 
-/// Credits are episode-specific. Without a matched marker, wait until the
-/// actual end instead of presenting Next over the final scene.
+/// A matched credits marker controls the prompt. Without one, offer manual
+/// Next during the last 30 media seconds; autoplay still waits for actual end.
 struct EpisodePromptTiming {
     let cardTrigger: Double
     let countdownTrigger: Double
@@ -167,7 +167,7 @@ struct EpisodePromptTiming {
     init(duration: Double, speed: Float, creditsStart: Double?) {
         let rate = speed.isFinite && speed > 0 ? Double(speed) : 1
         let credits = creditsStart.flatMap { $0.isFinite && $0 >= 0 && $0 < duration ? $0 : nil }
-        cardTrigger = credits ?? duration
+        cardTrigger = credits ?? max(0, duration - 30)
         countdownTrigger = max(credits ?? 0, duration - 10 * rate)
     }
 }
@@ -244,10 +244,15 @@ struct EpisodePromptState: Equatable {
         return false
     }
 
+    func canAutoplayAtEnd(isEnabled: Bool, isForeground: Bool) -> Bool {
+        isEnabled && isForeground && !isCancelled && !isSuppressed && hasNaturallyEarnedCountdown
+    }
+
     mutating func naturalEnd() {
         guard !isCancelled else { return }
         isVisible = true
-        if !isSuppressed, hasNaturallyEarnedCountdown, secondsRemaining > 0 { isCountingDown = true }
+        isCountingDown = false
+        secondsRemaining = 0
     }
 
     mutating func playNextNow() {
