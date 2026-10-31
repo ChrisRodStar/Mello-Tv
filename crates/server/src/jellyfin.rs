@@ -12,11 +12,14 @@ use stream_core::{
     catalog::{MediaType, Season, Title},
 };
 use stream_storage::accounts::ListKind;
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use crate::state::AppState;
 
 const MANIFEST: &str = ".mello-jellyfin.json";
+const MAX_EXPORT_FILES: usize = 20_000;
+const MAX_MANIFEST_BYTES: u64 = 32 * 1024 * 1024;
+const MAX_STREAM_FILE_BYTES: u64 = 8 * 1024;
 
 /// Configuration deliberately has no Debug implementation: play_key is a capability.
 pub struct JellyfinConfig {
@@ -114,6 +117,7 @@ impl JellyfinBridge {
     /// data must never turn a temporary outage into deletion of an existing show.
     pub async fn sync(&self, state: &AppState) -> Result<SyncReport, String> {
         let _guard = self.sync_lock.lock().await;
+        let labels = existing_labels(&self.config.library_dir).await?;
         let titles = state
             .accounts
             .list_titles(
@@ -135,7 +139,14 @@ impl JellyfinBridge {
                 return Err("invalid Jellyfin title identity".into());
             }
             match title.identity.media_type() {
-                MediaType::Movie => add_movie(&self.config, &title, &mut files),
+                MediaType::Movie => add_movie(
+                    &self.config,
+                    &title,
+                    labels
+                        .get(&("movie".to_owned(), identity.id()))
+                        .map(String::as_str),
+                    &mut files,
+                ),
                 MediaType::Tv => {
                     if !title.details {
                         return Err(format!(
@@ -150,7 +161,25 @@ impl JellyfinBridge {
                         if season.season != summary.season {
                             return Err("invalid Jellyfin season number".into());
                         }
-                        add_season(&self.config, &title, &season, today, &mut files)?;
+                        if season.episodes.len()
+                            < usize::try_from(summary.episode_count)
+                                .map_err(|_| "invalid Jellyfin episode count")?
+                        {
+                            return Err(format!(
+                                "Jellyfin season {}:{} is incomplete",
+                                season.show_id, season.season
+                            ));
+                        }
+                        add_season(
+                            &self.config,
+                            &title,
+                            &season,
+                            today,
+                            labels
+                                .get(&("tv".to_owned(), identity.id()))
+                                .map(String::as_str),
+                            &mut files,
+                        )?;
                     }
                 }
             }
@@ -271,7 +300,12 @@ fn label(title: &Title) -> String {
                 c
             }
         })
-        .take(100)
+        // Reserve space for the TMDB suffix and episode filename suffix within
+        // the common 255-byte component limit, including multibyte title text.
+        .scan(0usize, |length, character| {
+            *length += character.len_utf8();
+            (*length <= 128).then_some(character)
+        })
         .collect();
     name = name.trim_matches([' ', '.']).to_owned();
     if name.is_empty() {
@@ -287,8 +321,15 @@ fn play_url(config: &JellyfinConfig, kind: &str, id: i64, season: i32, episode: 
     )
 }
 
-fn add_movie(config: &JellyfinConfig, title: &Title, files: &mut BTreeMap<String, String>) {
-    let name = label(title);
+fn add_movie(
+    config: &JellyfinConfig,
+    title: &Title,
+    existing_label: Option<&str>,
+    files: &mut BTreeMap<String, String>,
+) {
+    let name = existing_label
+        .map(str::to_owned)
+        .unwrap_or_else(|| label(title));
     files.insert(
         format!("movies/{name}/{name}.strm"),
         play_url(config, "movie", title.identity.id(), 0, 0),
@@ -300,6 +341,7 @@ fn add_season(
     title: &Title,
     season: &Season,
     today: NaiveDate,
+    existing_label: Option<&str>,
     files: &mut BTreeMap<String, String>,
 ) -> Result<(), String> {
     season
@@ -308,13 +350,18 @@ fn add_season(
     if season.show_id != title.identity.id() {
         return Err("Jellyfin season belongs to another show".into());
     }
-    let name = label(title);
+    let name = existing_label
+        .map(str::to_owned)
+        .unwrap_or_else(|| label(title));
     for episode in &season.episodes {
         let Ok(air_date) = NaiveDate::parse_from_str(&episode.air_date, "%Y-%m-%d") else {
             continue;
         };
         if air_date > today {
             continue;
+        }
+        if files.len() >= MAX_EXPORT_FILES {
+            return Err(format!("Jellyfin export exceeds {MAX_EXPORT_FILES} files"));
         }
         files.insert(
             format!(
@@ -333,6 +380,81 @@ struct Manifest {
     files: BTreeMap<String, String>,
     #[serde(default)]
     pending: BTreeMap<String, String>,
+}
+
+/// Preserve the existing provider-ID folder and filename when TMDB corrects or
+/// localizes a title. Jellyfin must not see a removed item followed by a new path.
+async fn existing_labels(root: &Path) -> Result<BTreeMap<(String, i64), String>, String> {
+    let manifest = read_manifest(root).await?;
+    let mut labels = BTreeMap::new();
+    for path in manifest.files.keys().chain(manifest.pending.keys()) {
+        let components: Vec<_> = path.split('/').collect();
+        let (kind, folder) = match components.as_slice() {
+            ["movies", folder, file] if *file == format!("{folder}.strm") => ("movie", *folder),
+            ["shows", folder, season_folder, file] => {
+                let season = season_folder
+                    .strip_prefix("Season ")
+                    .and_then(|s| s.parse::<i32>().ok())
+                    .filter(|s| (0..=10_000).contains(s))
+                    .ok_or("invalid Jellyfin show ownership path")?;
+                let prefix = format!("{folder} - S{season:02}E");
+                let episode = file
+                    .strip_prefix(&prefix)
+                    .and_then(|s| s.strip_suffix(".strm"))
+                    .and_then(|s| s.parse::<i32>().ok())
+                    .filter(|n| (1..=100_000).contains(n))
+                    .ok_or("invalid Jellyfin episode ownership path")?;
+                if *season_folder != format!("Season {season:02}")
+                    || *file != format!("{prefix}{episode:02}.strm")
+                {
+                    return Err("invalid Jellyfin episode ownership path".into());
+                }
+                ("tv", *folder)
+            }
+            _ => return Err("invalid Jellyfin ownership folder structure".into()),
+        };
+        let (name, suffix) = folder
+            .rsplit_once(" [tmdbid-")
+            .ok_or("missing Jellyfin ownership TMDB ID")?;
+        let id = suffix
+            .strip_suffix(']')
+            .and_then(|s| s.parse::<i64>().ok())
+            .filter(|id| *id > 0)
+            .ok_or("invalid Jellyfin ownership TMDB ID")?;
+        if name.is_empty() || folder != format!("{name} [tmdbid-{id}]") {
+            return Err("invalid Jellyfin ownership folder name".into());
+        }
+        let key = (kind.to_owned(), id);
+        if let Some(previous) = labels.insert(key, folder.to_owned())
+            && previous != folder
+        {
+            return Err("ambiguous Jellyfin ownership folders for one TMDB ID".into());
+        }
+    }
+    Ok(labels)
+}
+
+async fn read_manifest(root: &Path) -> Result<Manifest, String> {
+    inspect_path(root).await?;
+    let manifest = match read_optional(&root.join(MANIFEST)).await? {
+        Some(bytes) => serde_json::from_slice::<Manifest>(&bytes)
+            .map_err(|_| "invalid Jellyfin ownership manifest")?,
+        None => Manifest {
+            version: 1,
+            ..Manifest::default()
+        },
+    };
+    if manifest.version != 1
+        || manifest.pending.len() > MAX_EXPORT_FILES
+        || manifest
+            .files
+            .keys()
+            .chain(manifest.pending.keys())
+            .any(|path| !managed_path(path))
+    {
+        return Err("invalid Jellyfin ownership manifest paths".into());
+    }
+    Ok(manifest)
 }
 
 fn fingerprint(bytes: &[u8]) -> String {
@@ -372,11 +494,34 @@ async fn inspect_path(path: &Path) -> Result<(), String> {
 
 async fn read_optional(path: &Path) -> Result<Option<Vec<u8>>, String> {
     inspect_path(path).await?;
-    match tokio::fs::read(path).await {
-        Ok(bytes) => Ok(Some(bytes)),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(e) => Err(format!("cannot read Jellyfin export: {e}")),
+    let metadata = match tokio::fs::symlink_metadata(path).await {
+        Ok(metadata) => metadata,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(format!("cannot inspect Jellyfin export file: {e}")),
+    };
+    if !metadata.is_file() {
+        return Err("Jellyfin export refuses non-regular files".into());
     }
+    let limit = if path.file_name().is_some_and(|name| name == MANIFEST) {
+        MAX_MANIFEST_BYTES
+    } else {
+        MAX_STREAM_FILE_BYTES
+    };
+    if metadata.len() > limit {
+        return Err("Jellyfin export file exceeds size limit".into());
+    }
+    let file = tokio::fs::File::open(path)
+        .await
+        .map_err(|e| format!("cannot read Jellyfin export: {e}"))?;
+    let mut bytes = Vec::new();
+    file.take(limit + 1)
+        .read_to_end(&mut bytes)
+        .await
+        .map_err(|e| format!("cannot read Jellyfin export: {e}"))?;
+    if bytes.len() as u64 > limit {
+        return Err("Jellyfin export file exceeds size limit".into());
+    }
+    Ok(Some(bytes))
 }
 
 async fn atomic_write(path: &Path, content: &[u8]) -> Result<(), String> {
@@ -416,28 +561,19 @@ async fn save_manifest(root: &Path, files: BTreeMap<String, String>) -> Result<(
         pending: BTreeMap::new(),
     })
     .map_err(|e| e.to_string())?;
+    if bytes.len() as u64 > MAX_MANIFEST_BYTES {
+        return Err("Jellyfin ownership manifest exceeds size limit".into());
+    }
     atomic_write(&root.join(MANIFEST), &bytes).await
 }
 
 async fn apply_files(root: &Path, files: BTreeMap<String, String>) -> Result<SyncReport, String> {
-    inspect_path(root).await?;
-    let mut old = match read_optional(&root.join(MANIFEST)).await? {
-        Some(bytes) => serde_json::from_slice::<Manifest>(&bytes)
-            .map_err(|_| "invalid Jellyfin ownership manifest")?,
-        None => Manifest {
-            version: 1,
-            ..Manifest::default()
-        },
-    };
-    if old.version != 1
-        || old
-            .files
-            .keys()
-            .chain(old.pending.keys())
-            .chain(files.keys())
-            .any(|path| !managed_path(path))
-    {
-        return Err("invalid Jellyfin ownership manifest paths".into());
+    if files.len() > MAX_EXPORT_FILES {
+        return Err(format!("Jellyfin export exceeds {MAX_EXPORT_FILES} files"));
+    }
+    let mut old = read_manifest(root).await?;
+    if files.keys().any(|path| !managed_path(path)) {
+        return Err("invalid Jellyfin export paths".into());
     }
     // A journal written before any file mutation allows either the previous or
     // intended digest after a crash, without authorizing arbitrary replacements.
@@ -490,6 +626,9 @@ async fn apply_files(root: &Path, files: BTreeMap<String, String>) -> Result<Syn
         pending: desired.clone(),
     };
     let journal_bytes = serde_json::to_vec(&journal).map_err(|e| e.to_string())?;
+    if journal_bytes.len() as u64 > MAX_MANIFEST_BYTES {
+        return Err("Jellyfin ownership manifest exceeds size limit".into());
+    }
     atomic_write(&root.join(MANIFEST), &journal_bytes).await?;
     for (path, content) in &files {
         if read_optional(&root.join(path)).await?.as_deref() != Some(content.as_bytes()) {
@@ -642,7 +781,7 @@ mod tests {
             serde_json::json!({"type":"tv", "id":42, "title":"Example/Show", "overview":"", "rating":0.0, "details":true,"seasons":[{"season":1,"name":"Season 1","episode_count":3}]}),
         )?;
         accounts
-            .put_title(&household, "jellyfin", ListKind::Library, title)
+            .put_title(&household, "jellyfin", ListKind::Library, title.clone())
             .await?;
         let season = serde_json::json!({"show_id":42,"season":1,"name":"Season 1","episodes":[
             {"tmdb_episode_id":1,"season":1,"episode":1,"name":"Aired","overview":"","runtime":24,"air_date":"2020-01-01"},
@@ -654,7 +793,7 @@ mod tests {
                 CatalogWrite {
                     kind: "season".into(),
                     key: "tv:42:1".into(),
-                    data: season,
+                    data: season.clone(),
                     ttl: chrono::Duration::hours(1),
                 },
                 std::time::SystemTime::now().into(),
@@ -673,10 +812,35 @@ mod tests {
         );
         let content = tokio::fs::read_to_string(&path).await?;
         assert!(content.starts_with("http://mello:8080/integrations/jellyfin/play/tv/42/1/1?key="));
+        let mut renamed = title;
+        renamed.title = "Corrected show title".into();
+        accounts
+            .put_title(&household, "jellyfin", ListKind::Library, renamed)
+            .await?;
+        let unchanged = bridge.sync(&state).await?;
+        assert_eq!((unchanged.written, unchanged.removed), (0, 0));
+        assert_eq!(tokio::fs::read_to_string(&path).await?, content);
         let target = Target::new(TitleIdentity::new(MediaType::Tv, 42)?, Some(1), Some(1))?;
         assert!(bridge.playback_title(&state, &target).await.is_ok());
         let future = Target::new(TitleIdentity::new(MediaType::Tv, 42)?, Some(1), Some(2))?;
         assert!(bridge.playback_title(&state, &future).await.is_err());
+        // A syntactically valid, partial season response must not delete aired
+        // episodes that were exported from an earlier complete snapshot.
+        let mut incomplete = season;
+        incomplete["episodes"] = serde_json::json!([]);
+        catalog
+            .put(
+                CatalogWrite {
+                    kind: "season".into(),
+                    key: "tv:42:1".into(),
+                    data: incomplete,
+                    ttl: chrono::Duration::hours(1),
+                },
+                std::time::SystemTime::now().into(),
+            )
+            .await?;
+        assert!(bridge.sync(&state).await.is_err());
+        assert_eq!(tokio::fs::read_to_string(&path).await?, content);
         catalog.delete("season", "tv:42:1").await?;
         assert!(bridge.sync(&state).await.is_err());
         assert_eq!(tokio::fs::read_to_string(&path).await?, content);
@@ -690,6 +854,125 @@ mod tests {
             .await?;
         assert!(bridge.playback_title(&state, &target).await.is_err());
         assert_eq!(bridge.sync(&state).await?.removed, 1);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn movie_metadata_rename_keeps_exact_owned_path() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let dir = tempfile::Builder::new().tempdir_in(std::env::temp_dir().canonicalize()?)?;
+        let mut title: Title = serde_json::from_value(
+            serde_json::json!({"type":"movie","id":42,"title":"Original title","overview":"","rating":0.0,"details":true}),
+        )?;
+        let config = JellyfinConfig::new(
+            "profile".into(),
+            dir.path().into(),
+            "http://mello:8080".into(),
+            "0123456789abcdef0123456789abcdef".into(),
+        )?;
+        let mut files = BTreeMap::new();
+        add_movie(&config, &title, None, &mut files);
+        let original_path = files.keys().next().ok_or("missing movie fixture")?.clone();
+        apply_files(dir.path(), files).await?;
+        let original_body = tokio::fs::read_to_string(dir.path().join(&original_path)).await?;
+        title.title = "Localized or corrected title".into();
+        let labels = existing_labels(dir.path()).await?;
+        let mut files = BTreeMap::new();
+        add_movie(
+            &config,
+            &title,
+            labels.get(&("movie".to_owned(), 42)).map(String::as_str),
+            &mut files,
+        );
+        let report = apply_files(dir.path(), files).await?;
+        assert_eq!((report.written, report.removed), (0, 0));
+        assert_eq!(
+            tokio::fs::read_to_string(dir.path().join(original_path)).await?,
+            original_body
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn ambiguous_owned_title_folders_are_rejected() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let dir = tempfile::Builder::new().tempdir_in(std::env::temp_dir().canonicalize()?)?;
+        let files = BTreeMap::from([
+            (
+                "movies/Old [tmdbid-42]/Old [tmdbid-42].strm".into(),
+                "old".into(),
+            ),
+            (
+                "movies/New [tmdbid-42]/New [tmdbid-42].strm".into(),
+                "new".into(),
+            ),
+        ]);
+        apply_files(dir.path(), files).await?;
+        assert!(existing_labels(dir.path()).await.is_err());
+        assert!(
+            dir.path()
+                .join("movies/Old [tmdbid-42]/Old [tmdbid-42].strm")
+                .is_file()
+        );
+        assert!(
+            dir.path()
+                .join("movies/New [tmdbid-42]/New [tmdbid-42].strm")
+                .is_file()
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn multibyte_titles_fit_real_filesystem_component_limits()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let dir = tempfile::Builder::new().tempdir_in(std::env::temp_dir().canonicalize()?)?;
+        let title: Title = serde_json::from_value(
+            serde_json::json!({"type":"movie", "id":42,"title":"🎬映画".repeat(100),"overview":"","rating":0.0,"details":true}),
+        )?;
+        let config = JellyfinConfig::new(
+            "profile".into(),
+            dir.path().into(),
+            "http://mello:8080".into(),
+            "0123456789abcdef0123456789abcdef".into(),
+        )?;
+        let mut files = BTreeMap::new();
+        add_movie(&config, &title, None, &mut files);
+        assert_eq!(apply_files(dir.path(), files).await?.written, 1);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn oversized_manifest_and_stream_files_are_rejected_before_reading()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let dir = tempfile::Builder::new().tempdir_in(std::env::temp_dir().canonicalize()?)?;
+        let manifest = dir.path().join(MANIFEST);
+        std::fs::File::create(&manifest)?.set_len(MAX_MANIFEST_BYTES + 1)?;
+        assert!(apply_files(dir.path(), BTreeMap::new()).await.is_err());
+        tokio::fs::remove_file(manifest).await?;
+        let movie_dir = dir.path().join("movies/Example");
+        tokio::fs::create_dir_all(&movie_dir).await?;
+        std::fs::File::create(movie_dir.join("Example.strm"))?
+            .set_len(MAX_STREAM_FILE_BYTES + 1)?;
+        let desired = BTreeMap::from([("movies/Example/Example.strm".into(), "ours".into())]);
+        assert!(apply_files(dir.path(), desired).await.is_err());
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn fifo_manifest_is_rejected_without_waiting_for_writer()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let dir = tempfile::Builder::new().tempdir_in(std::env::temp_dir().canonicalize()?)?;
+        let result = std::process::Command::new("mkfifo")
+            .arg(dir.path().join(MANIFEST))
+            .status()?;
+        assert!(result.success());
+        let result = tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            apply_files(dir.path(), BTreeMap::new()),
+        )
+        .await?;
+        assert!(result.is_err());
         Ok(())
     }
 

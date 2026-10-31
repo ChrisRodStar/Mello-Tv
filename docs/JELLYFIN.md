@@ -7,7 +7,7 @@ This integration is opt-in and currently configured through server environment v
 ## Set up
 
 1. Create a Mello profile, open it in the web app, and add movies or shows to **My List**. A separate profile makes it easy to curate the Jellyfin library. Obtain its `id` from `GET http://SERVER-IP:8080/api/v1/profiles`.
-2. Choose a new, dedicated export directory writable by Mello and readable by Jellyfin. Do not use an existing media collection or a path containing symlinks.
+2. Choose a new, dedicated export directory writable by Mello and readable by Jellyfin. Do not use an existing media collection or a path containing symlinks. Non-regular files such as FIFOs and devices are also refused.
 3. Generate a playback key with `openssl rand -hex 32`. Store it with your server configuration; keep the same value across restarts.
 4. Set all four variables below on the Mello server, then restart it. Partial configuration is rejected at startup.
 
@@ -46,7 +46,7 @@ Movies become `.strm` files under `movies/`. Shows become season folders and one
 
 Adding or removing a My List title updates the export on the next successful synchronization. Jellyfin sees removals on its next scan; removing titles can affect Jellyfin's library/history behavior. Mello does not change the profile's list or watch history. Jellyfin viewing progress is stored in Jellyfin and is not synchronized back to Mello.
 
-Mello maintains `.mello-jellyfin.json` to track files it owns. It preserves unrelated files and refuses to overwrite or remove a managed file whose contents were edited externally. Catalog lookup failures stop synchronization before file changes, so a temporary metadata failure does not erase the library. Keep the ownership manifest with the export. Do not manually edit generated `.strm` files; change the configuration or My List instead.
+Mello maintains `.mello-jellyfin.json` to track files it owns. It preserves unrelated files and refuses to overwrite or remove a managed file whose contents were edited externally. Catalog lookup failures stop synchronization before file changes, so a temporary metadata failure does not erase the library. If a season response contains fewer episodes than the show summary promises, Mello retains the previous export and retries rather than publishing an incomplete replacement. Once generated, owned folder and file names stay stable when metadata titles change, preserving Jellyfin item paths. Keep the ownership manifest with the export. Do not manually edit generated `.strm` files; change the configuration or My List instead. Exports are limited to 20,000 files; ownership manifests are limited to 32 MiB and individual `.strm` files to 8 KiB. Exceeding a limit stops synchronization and reports an error.
 
 ## Playback and credentials
 

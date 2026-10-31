@@ -552,22 +552,41 @@ impl MediaRelay {
             .map(str::to_owned);
 
         let mut byte_stream = res.bytes_stream();
-        let first_chunk = match byte_stream.next().await {
+        let mut first_chunk = match byte_stream.next().await {
             Some(Ok(chunk)) => chunk,
             Some(Err(e)) => return Err(RelayError::Upstream(e.without_url().to_string())),
             None => Bytes::new(),
         };
 
-        if looks_like_hls_manifest(&first_chunk) {
-            let mut full = BytesMut::from(first_chunk.as_ref());
+        // HTTP chunks do not align with the HLS header (or its UTF-8 BOM).
+        // Buffer only an ambiguous short prefix; ordinary binary delivery stays
+        // streaming and never waits for a larger sniff buffer.
+        while hls_prefix_needs_more(&first_chunk) {
+            let Some(next) = byte_stream.next().await else {
+                break;
+            };
+            let next = next.map_err(|e| RelayError::Upstream(e.without_url().to_string()))?;
+            let mut prefix = BytesMut::with_capacity(first_chunk.len() + next.len());
+            prefix.extend_from_slice(&first_chunk);
+            prefix.extend_from_slice(&next);
+            first_chunk = prefix.freeze();
+        }
+
+        let declared_type = content_type_header.split(';').next().unwrap_or("").trim();
+        let declared_hls = [
+            "application/vnd.apple.mpegurl",
+            "application/x-mpegurl",
+            "audio/mpegurl",
+            "audio/x-mpegurl",
+        ]
+        .iter()
+        .any(|value| declared_type.eq_ignore_ascii_case(value));
+        if declared_hls || looks_like_hls_manifest(&first_chunk) {
+            let mut full = BytesMut::new();
+            append_manifest_chunk(&mut full, &first_chunk)?;
             while let Some(next) = byte_stream.next().await {
                 let chunk = next.map_err(|e| RelayError::Upstream(e.without_url().to_string()))?;
-                if full.len() + chunk.len() > MAX_MANIFEST_BYTES {
-                    return Err(RelayError::InvalidManifest(
-                        "manifest exceeds byte limit".into(),
-                    ));
-                }
-                full.extend_from_slice(&chunk);
+                append_manifest_chunk(&mut full, &chunk)?;
             }
 
             let mut discovered = Vec::new();
@@ -660,6 +679,28 @@ fn remote_resource_extension(url: &str) -> &'static str {
     }
 }
 
+fn append_manifest_chunk(full: &mut BytesMut, chunk: &[u8]) -> Result<(), RelayError> {
+    if chunk.len() > MAX_MANIFEST_BYTES.saturating_sub(full.len()) {
+        return Err(RelayError::InvalidManifest(
+            "manifest exceeds byte limit".into(),
+        ));
+    }
+    full.extend_from_slice(chunk);
+    Ok(())
+}
+
+fn hls_prefix_needs_more(bytes: &[u8]) -> bool {
+    if bytes.len() >= 64 {
+        return false;
+    }
+    let bom = b"\xef\xbb\xbf";
+    if bytes.len() < bom.len() && bom.starts_with(bytes) {
+        return true;
+    }
+    let trimmed = bytes.strip_prefix(bom).unwrap_or(bytes).trim_ascii_start();
+    trimmed.len() < b"#EXTM3U".len() && b"#EXTM3U".starts_with(trimmed)
+}
+
 fn looks_like_hls_manifest(bytes: &[u8]) -> bool {
     let prefix = &bytes[..bytes.len().min(64)];
     let trimmed = prefix
@@ -696,6 +737,75 @@ fn sniff_media_content_type(first_chunk: &[u8], url: &Url, declared: &str) -> St
 #[cfg(test)]
 mod activity_tests {
     use super::*;
+
+    #[test]
+    fn manifest_limit_applies_to_first_and_subsequent_chunks() -> Result<(), RelayError> {
+        let mut body = BytesMut::new();
+        assert!(matches!(
+            append_manifest_chunk(&mut body, &vec![b'x'; MAX_MANIFEST_BYTES + 1]),
+            Err(RelayError::InvalidManifest(_))
+        ));
+        assert!(body.is_empty());
+        append_manifest_chunk(&mut body, &vec![b'x'; MAX_MANIFEST_BYTES])?;
+        assert!(matches!(
+            append_manifest_chunk(&mut body, b"x"),
+            Err(RelayError::InvalidManifest(_))
+        ));
+        assert_eq!(body.len(), MAX_MANIFEST_BYTES);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn fragmented_header_and_bom_still_rewrite_the_playlist()
+    -> Result<(), Box<dyn std::error::Error>> {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let address = listener.local_addr()?;
+        let pieces: [&[u8]; 5] = [
+            b"\xef",
+            b"\xbb",
+            b"\xbf \n#",
+            b"EXT",
+            b"M3U\n#EXTINF:4,\nsegment.ts\n#EXT-X-ENDLIST\n",
+        ];
+        let size: usize = pieces.iter().map(|piece| piece.len()).sum();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await?;
+            let mut request = Vec::new();
+            let mut byte = [0u8; 1];
+            while !request.ends_with(b"\r\n\r\n") {
+                socket.read_exact(&mut byte).await?;
+                request.push(byte[0]);
+            }
+            socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Length: {size}\r\nContent-Type: application/octet-stream\r\n\r\n").as_bytes()).await?;
+            for piece in pieces {
+                socket.write_all(piece).await?;
+                // Force separate network deliveries, including inside the BOM.
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+            Ok::<_, std::io::Error>(())
+        });
+        let relay = MediaRelay::new();
+        let response = relay
+            .proxy_url(
+                "fragmented",
+                "token",
+                &format!("http://{address}/playlist"),
+                &FetchContext::default(),
+                None,
+            )
+            .await?;
+        let RelayResponse::Manifest(manifest) = response else {
+            return Err(
+                "fragmented HLS was incorrectly delivered as an unrewritten binary body".into(),
+            );
+        };
+        assert!(manifest.starts_with("#EXTM3U\n"));
+        assert!(manifest.contains("\n/stream/fragmented/r/"));
+        assert!(!manifest.contains("segment.ts"));
+        server.await??;
+        Ok(())
+    }
 
     #[test]
     fn activity_expires_without_counting_retained_sessions_forever() {

@@ -113,6 +113,7 @@ async fn stable_url_auth_singleflight_nested_hls_and_ranges() -> TestResult {
         base.clone(),
         key.into(),
     )?)));
+    let relay = state.relay.clone();
     let server = tokio::spawn(async move {
         axum::serve(listener, routes::build_router(state))
             .await
@@ -319,6 +320,19 @@ async fn stable_url_auth_singleflight_nested_hls_and_ranges() -> TestResult {
             .send()
             .await?
             .status(),
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+    let entry_url = reqwest::Url::parse(&entry)?;
+    let session_id = entry_url
+        .path_segments()
+        .and_then(|mut segments| segments.nth(1))
+        .ok_or("missing relay session ID")?;
+    relay.revoke_session(session_id);
+    // Bridge sessions have no durable account row. The ordinary stream route
+    // must not restore them, even when presented with a formerly valid URL.
+    assert_eq!(
+        client.get(&entry).send().await?.status(),
         StatusCode::NOT_FOUND
     );
     assert_eq!(calls.load(Ordering::SeqCst), 2);
