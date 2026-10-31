@@ -127,6 +127,33 @@ actor FixtureState {
 struct PlaybackReliabilityChecks {
     @MainActor
     static func main() async throws {
+        var brightness = PlaybackBrightnessState()
+        brightness.select(1, current: 0.5)
+        precondition(brightness.resume(current: 1) == 1,
+                     "a new episode retains the presentation's selected brightness")
+        precondition(brightness.suspend() == 0.5 && brightness.selected == 1,
+                     "backgrounding restores the system baseline without losing the player choice")
+        precondition(brightness.suspend() == nil, "repeated background callbacks are harmless")
+        precondition(brightness.resume(current: 0.5) == 1,
+                     "returning from another app reapplies the chosen brightness")
+        brightness.select(0.8, current: 1)
+        precondition(brightness.suspend() == 0.5)
+        precondition(brightness.resume(current: 0.65) == 0.8,
+                     "outside brightness changes do not replace the player choice")
+        precondition(brightness.finish() == 0.65 && brightness.selected == nil,
+                     "closing the player restores the current outside-app baseline")
+        brightness.select(1, current: 0.4)
+        precondition(brightness.suspend() == 0.4 && brightness.finish() == nil,
+                     "closing while backgrounded must not overwrite another app's brightness")
+        var untouchedBrightness = PlaybackBrightnessState()
+        precondition(untouchedBrightness.suspend() == nil
+                     && untouchedBrightness.resume(current: 0.7) == nil
+                     && untouchedBrightness.finish() == nil,
+                     "an untouched brightness control must not change system brightness")
+        untouchedBrightness.select(.nan, current: 0.5)
+        precondition(untouchedBrightness.selected == nil)
+        print("PASS player brightness survives episodes/backgrounding and restores the outside-app baseline only on exit")
+
         var recoveryBudget = PlaybackRecoveryBudget()
         precondition(recoveryBudget.beginAttempt() && recoveryBudget.beginAttempt())
         precondition(!recoveryBudget.beginAttempt(), "a broken source still has a bounded budget")

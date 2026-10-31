@@ -2,6 +2,42 @@ import Foundation
 import AVFoundation
 import MelloKit
 
+/// A player-owned brightness choice outlives individual episodes. The system
+/// baseline is restored outside playback without forgetting the user's level.
+struct PlaybackBrightnessState {
+    private(set) var selected: Double?
+    private var original: Double?
+    private(set) var isSuspended = false
+
+    mutating func select(_ value: Double, current: Double) {
+        guard value.isFinite, current.isFinite else { return }
+        if original == nil { original = current }
+        selected = min(1, max(0, value))
+    }
+
+    mutating func suspend() -> Double? {
+        guard !isSuspended else { return nil }
+        isSuspended = true
+        return original
+    }
+
+    mutating func resume(current: Double) -> Double? {
+        if isSuspended, selected != nil, current.isFinite {
+            // Respect brightness changes made in another app or Control Center
+            // when restoring the system baseline after playback eventually ends.
+            original = current
+        }
+        isSuspended = false
+        return selected
+    }
+
+    mutating func finish() -> Double? {
+        let restore = isSuspended ? nil : original
+        self = Self()
+        return restore
+    }
+}
+
 // Coalesce repeated skips while AVPlayer finishes its current seek. Requests
 // accumulate from the user's latest target, not the player's stale position.
 struct PlaybackSeekQueue {

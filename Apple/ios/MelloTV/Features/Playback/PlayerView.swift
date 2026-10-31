@@ -13,8 +13,9 @@ struct PlayerView: View {
     let request: PlaybackRequest
     var onDismiss: () -> Void
     // The presentation owns episode changes. A new episode gets a fresh player
-    // lifetime while the chosen speed remains owned by this presentation.
+    // lifetime; brightness, speed and quality stay with this presentation.
     @State private var activeRequest: PlaybackRequest
+    @State private var gestureSettings = PlayerGestureSettings()
     @State private var playbackSpeed: Float = 1
     @State private var playbackQuality: PlaybackQuality = .automatic
     @State private var nextPreparation = NextEpisodePreparation()
@@ -31,7 +32,7 @@ struct PlayerView: View {
 
     var body: some View {
         ZStack {
-            if settingsLoaded { PlaybackSessionView(request: activeRequest, settings: playbackSettings, playbackSpeed: $playbackSpeed, playbackQuality: $playbackQuality,
+            if settingsLoaded { PlaybackSessionView(request: activeRequest, settings: playbackSettings, gestureSettings: gestureSettings, playbackSpeed: $playbackSpeed, playbackQuality: $playbackQuality,
                             nextPreparation: nextPreparation, preparedEpisode: activePreparation,
                             onDismiss: onDismiss, onPlayEpisode: { next in
                                 activePreparation = nextPreparation.claim(for: next)
@@ -54,7 +55,10 @@ struct PlayerView: View {
             playbackQuality = PlaybackQuality(rawValue: playbackSettings.maxHeight) ?? .automatic
             settingsLoaded = true
         }
-        .onDisappear { nextPreparation.cancel() }
+        .onDisappear {
+            nextPreparation.cancel()
+            gestureSettings.restoreBrightness()
+        }
     }
 }
 
@@ -62,6 +66,7 @@ struct PlayerView: View {
 private struct PlaybackSessionView: View {
     let request: PlaybackRequest
     let settings: ProfilePlaybackSettings
+    let gestureSettings: PlayerGestureSettings
     @Binding var playbackSpeed: Float
     @Binding var playbackQuality: PlaybackQuality
     let nextPreparation: NextEpisodePreparation
@@ -73,7 +78,6 @@ private struct PlaybackSessionView: View {
     @Environment(\.accessibilityVoiceOverEnabled) private var voiceOverEnabled
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    @State private var gestureSettings = PlayerGestureSettings()
     @State private var adjustmentState = PlayerAdjustmentState()
     @State private var isAdjusting = false
     @State private var adjustmentFeedbackTask: Task<Void, Never>?
@@ -348,11 +352,12 @@ private struct PlaybackSessionView: View {
                 playbackSegments = .empty(duration: 0)
                 nextPreparation.cancel()
                 finishAdjustment(immediately: true)
-                gestureSettings.restoreBrightness()
+                gestureSettings.suspendBrightness()
                 intendsToPlay = false
                 player?.pause()
                 progressTracker?.flush()
             } else if phase == .active {
+                gestureSettings.resumeBrightness()
                 if let seek = seekQueue.activeRequest, let player {
                     startSeekTimeout(for: seek, on: player)
                 }
@@ -1910,7 +1915,8 @@ private struct PlaybackSessionView: View {
         unlockHideTask?.cancel()
         unlockHideTask = nil
         finishAdjustment(immediately: true)
-        gestureSettings.restoreBrightness()
+        // Brightness belongs to PlayerView, so retrying or switching episodes
+        // must not restore the phone's baseline or forget the chosen level.
         preparationTask?.cancel()
         preparationTask = nil
         trackTask?.cancel()
@@ -2608,7 +2614,7 @@ private struct PlayerAdjustment {
 private final class PlayerGestureSettings {
     private weak var hostView: UIView?
     private weak var brightnessScreen: UIScreen?
-    private var originalBrightness: CGFloat?
+    private var brightnessState = PlaybackBrightnessState()
     private var pendingSetting: (value: Float, kind: PlayerAdjustment.Kind)?
     private var displayLink: CADisplayLink?
     // MPVolumeView owns the system output slider and tracks hardware-button
@@ -2627,10 +2633,7 @@ private final class PlayerGestureSettings {
         switch kind {
         case .brightness:
             guard let screen = hostView?.window?.windowScene?.screen else { return nil }
-            if originalBrightness == nil {
-                originalBrightness = screen.brightness
-                brightnessScreen = screen
-            }
+            brightnessScreen = screen
             return Float(screen.brightness)
         case .volume:
             guard volumeSlider != nil else { return nil }
@@ -2639,7 +2642,13 @@ private final class PlayerGestureSettings {
     }
 
     func schedule(_ value: Float, for kind: PlayerAdjustment.Kind) {
-        pendingSetting = (min(1, max(0, value)), kind)
+        let level = min(1, max(0, value))
+        if kind == .brightness, let screen = brightnessScreen {
+            // Retain the final gesture value even if backgrounding or an
+            // episode change cancels the next display-link write.
+            brightnessState.select(Double(level), current: Double(screen.brightness))
+        }
+        pendingSetting = (level, kind)
         if displayLink == nil {
             let link = CADisplayLink(target: FrameTarget(owner: self), selector: #selector(FrameTarget.tick))
             link.add(to: .main, forMode: .common)
@@ -2676,7 +2685,7 @@ private final class PlayerGestureSettings {
         let level = min(1, max(0, value))
         switch kind {
         case .brightness:
-            guard let screen = brightnessScreen else { return level }
+            guard let screen = brightnessScreen, !brightnessState.isSuspended else { return level }
             screen.brightness = CGFloat(level)
             return level
         case .volume:
@@ -2687,12 +2696,25 @@ private final class PlayerGestureSettings {
         }
     }
 
+    func suspendBrightness() {
+        cancelPendingUpdates()
+        if let level = brightnessState.suspend(), let screen = brightnessScreen {
+            screen.brightness = CGFloat(level)
+        }
+    }
+
+    func resumeBrightness() {
+        guard let screen = brightnessScreen else { return }
+        if let level = brightnessState.resume(current: Double(screen.brightness)) {
+            screen.brightness = CGFloat(level)
+        }
+    }
+
     func restoreBrightness() {
         cancelPendingUpdates()
-        if let originalBrightness, let brightnessScreen {
-            brightnessScreen.brightness = originalBrightness
+        if let level = brightnessState.finish(), let screen = brightnessScreen {
+            screen.brightness = CGFloat(level)
         }
-        originalBrightness = nil
         brightnessScreen = nil
     }
 
