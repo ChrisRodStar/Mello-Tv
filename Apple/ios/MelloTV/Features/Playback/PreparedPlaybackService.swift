@@ -32,6 +32,9 @@ final class NetworkMonitor: @unchecked Sendable {
             self._isConstrained = path.isConstrained
             self._isConnected = path.status == .satisfied
             self.lock.unlock()
+            if path.status == .satisfied {
+                Task { @MainActor in PlaybackProgressJournal.shared.flush() }
+            }
         }
         monitor.start(queue: queue)
     }
@@ -554,6 +557,164 @@ final class PreparedNextEpisode {
     }
 }
 
+// Persist measured samples before sending them. A failed final save survives
+// dismissal/relaunch; server sequence numbers make ambiguous retries idempotent.
+@MainActor
+final class PlaybackProgressJournal {
+    static let shared = PlaybackProgressJournal()
+
+    private struct Entry: Codable {
+        let household: String
+        let profileID: String
+        let update: WatchProgressUpdate
+        let savedAt: Date
+        var closed = false
+        var key: String { household + "/" + profileID + "/" + update.sessionId }
+        var progressKey: String {
+            "\(profileID)-\(update.title.type.rawValue)-\(update.title.tmdbID)" +
+                (update.title.type == .tv ? "-s\(update.season)e\(update.episode)" : "")
+        }
+    }
+    private struct State: Codable {
+        var pending: [Entry] = []
+        var checkpoints: [Entry] = []
+    }
+    private var state: State
+    private let storageURL: URL
+    private let api: MelloTVAPI
+    private let household: () -> String
+    private var writer: Task<Void, Never>?
+    #if canImport(UIKit)
+    private var backgroundTask: UIBackgroundTaskIdentifier = .invalid
+    #endif
+
+    init(storageURL: URL? = nil, api: MelloTVAPI = MelloTVAPI(baseURL: ServerAddress.baseURL),
+         household: @escaping () -> String = { ServerAddress.serverIdentityURL.absoluteString }) {
+        self.storageURL = storageURL ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appending(path: "MelloTV/playback-progress.json")
+        self.api = api
+        self.household = household
+        state = (try? Data(contentsOf: self.storageURL)).flatMap { try? JSONDecoder().decode(State.self, from: $0) } ?? State()
+    }
+
+    func enqueue(_ update: WatchProgressUpdate, request: PlaybackRequest) {
+        let entry = Entry(household: household(), profileID: request.profileID, update: update, savedAt: Date())
+        if let existing = state.pending.first(where: { $0.key == entry.key }), existing.update.sequence >= update.sequence { return }
+        state.pending.removeAll { $0.key == entry.key }
+        state.pending.append(entry)
+        state.checkpoints.removeAll { $0.household == entry.household && $0.progressKey == entry.progressKey }
+        state.checkpoints.append(entry)
+        persist()
+    }
+
+    func resumePosition(for request: PlaybackRequest) -> Double? {
+        guard !request.startFromBeginning else { return nil }
+        return state.checkpoints.last(where: {
+            $0.household == household() && $0.progressKey == request.progressKey && $0.savedAt.timeIntervalSinceNow > -86_400
+        })?.update.position
+    }
+
+    func overlay(_ library: ProfileLibrary, profileID: String) -> ProfileLibrary {
+        var result = library
+        for entry in state.checkpoints where entry.household == household() && entry.profileID == profileID
+            && entry.savedAt.timeIntervalSinceNow > -86_400 {
+            let update = entry.update
+            result.progress.removeAll { $0.title.id == update.title.id && $0.season == update.season && $0.episode == update.episode }
+            result.progress.append(WatchProgress(title: update.title, season: update.season, episode: update.episode,
+                episodeTitle: update.episodeTitle, position: update.position, duration: update.duration,
+                watchedSeconds: update.watchedSeconds, completed: false, updatedAt: entry.savedAt.timeIntervalSince1970))
+        }
+        result.progress.sort { $0.updatedAt > $1.updatedAt }
+        return result
+    }
+
+    // Return true when revocation must wait for an unsent final sample.
+    func deferClose(sessionID: String, profileID: String) -> Bool {
+        guard let index = state.pending.firstIndex(where: {
+            $0.household == household() && $0.profileID == profileID && $0.update.sessionId == sessionID
+        }) else { return false }
+        state.pending[index].closed = true
+        persist()
+        return true
+    }
+
+    @discardableResult
+    func flush() -> Task<Void, Never> {
+        if let writer { return writer }
+        let task = Task { [self] in
+            #if canImport(UIKit)
+            backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "Save playback progress") { [weak self] in
+                Task { @MainActor in self?.writer?.cancel() }
+            }
+            #endif
+            defer {
+                writer = nil
+                #if canImport(UIKit)
+                if backgroundTask != .invalid {
+                    UIApplication.shared.endBackgroundTask(backgroundTask)
+                    backgroundTask = .invalid
+                }
+                #endif
+            }
+            var attempted = Set<String>()
+            while !Task.isCancelled, let entry = state.pending.first(where: {
+                $0.household == household() && !attempted.contains($0.key + "/\($0.update.sequence)")
+            }) {
+                attempted.insert(entry.key + "/\(entry.update.sequence)")
+                var saved = false
+                var terminal = false
+                for attempt in 0..<3 {
+                    do {
+                        if attempt > 0 { try await Task.sleep(for: .seconds(attempt)) }
+                        _ = try await api.updateProgress(profileID: entry.profileID, update: entry.update)
+                        saved = true
+                        break
+                    } catch {
+                        if Task.isCancelled { return }
+                        if let failure = error as? APIError, failure.isExpiredPlayback {
+                            terminal = true
+                            break
+                        }
+                        if case .serverStatus(404) = error as? APIError {
+                            terminal = true
+                            break
+                        }
+                    }
+                }
+                guard saved || terminal else { continue }
+                let closed = state.pending.first(where: { $0.key == entry.key })?.closed ?? entry.closed
+                state.pending.removeAll { $0.key == entry.key && $0.update.sequence <= entry.update.sequence }
+                if saved {
+                    state.checkpoints.removeAll {
+                        $0.key == entry.key && $0.update.sequence <= entry.update.sequence
+                    }
+                }
+                // Expired sessions cannot accept late telemetry. Keep the local
+                // position for resuming; never invent a replacement watch event.
+                persist()
+                if saved, closed, !state.pending.contains(where: { $0.key == entry.key }) {
+                    try? await api.revokePlayback(id: entry.update.sessionId, profileID: entry.profileID)
+                }
+            }
+        }
+        writer = task
+        return task
+    }
+
+    private func persist() {
+        // Keep pending writes until acknowledged. Old position-only checkpoints
+        // have a bounded lifetime and cannot overwrite new household state.
+        state.checkpoints.removeAll { $0.savedAt.timeIntervalSinceNow < -86_400 }
+        do {
+            try FileManager.default.createDirectory(at: storageURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            let data = try JSONEncoder().encode(state)
+            try data.write(to: storageURL, options: .atomic)
+        } catch {
+            preparationLog.error("Could not persist pending playback progress")
+        }
+    }
+}
+
 // Close leaves the final progress owner alive, then releases server-side lookup
 // and relay resources. Jobs are bounded; server leases remain the offline fallback.
 @MainActor
@@ -569,7 +730,9 @@ final class PlaybackSessionFinalizer {
         let api = api
         jobs[source.id] = Task {
             await PlaybackWriteBarrier.settle(for: request)
-            try? await api.revokePlayback(source, request: request)
+            if !PlaybackProgressJournal.shared.deferClose(sessionID: source.id, profileID: request.profileID) {
+                try? await api.revokePlayback(source, request: request)
+            }
             jobs.removeValue(forKey: source.id)
         }
     }

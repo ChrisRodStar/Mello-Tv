@@ -19,19 +19,17 @@ final class PlaybackProgressTracker {
     private var timer: Timer?
     private var hasResumed = false
     private var isSeeking = false
-    private var pendingUpdate: WatchProgressUpdate?
-    private var saveTask: Task<Void, Never>?
     private let activityID = UUID().uuidString.lowercased()
     private var activityTask: Task<Void, Never>?
     private var activityTracking = false
     private var lastActivityState: String?
     private var lastActivitySent = Date.distantPast
 
-    init(player: AVPlayer, request: PlaybackRequest, source: AuthorizedPlayback) {
+    init(player: AVPlayer, request: PlaybackRequest, source: AuthorizedPlayback, resumePosition: Double? = nil) {
         self.player = player
         self.request = request
         self.sessionID = source.id
-        self.resumePosition = request.startFromBeginning ? 0 : source.resumeSeconds
+        self.resumePosition = resumePosition ?? (request.startFromBeginning ? 0 : source.resumeSeconds)
     }
 
     func start() {
@@ -153,41 +151,15 @@ final class PlaybackProgressTracker {
         guard totalWatchedSeconds > 0 || position >= 5 else { return }
         guard totalWatchedSeconds > lastSentSeconds || abs(position - lastSavedPosition) >= 1 else { return }
         sequence += 1
-        pendingUpdate = WatchProgressUpdate(title: request.catalogTitle, sessionId: sessionID, sequence: sequence,
+        let update = WatchProgressUpdate(title: request.catalogTitle, sessionId: sessionID, sequence: sequence,
             season: request.type == .tv ? (request.season ?? 0) : 0,
             episode: request.type == .tv ? (request.episode ?? 0) : 0,
             episodeTitle: request.episodeTitle ?? "", position: position, duration: duration,
             watchedSeconds: totalWatchedSeconds)
         lastSentSeconds = totalWatchedSeconds
         lastSavedPosition = position
-        guard saveTask == nil else { return }
-        // One owned writer serializes cumulative counters. Coalescing pending
-        // samples is safe: a later sequence includes all earlier measured time.
-        saveTask = Task { [self] in
-            defer { saveTask = nil }
-            while let update = pendingUpdate {
-                pendingUpdate = nil
-                do {
-                    _ = try await api.updateProgress(profileID: request.profileID, update: update)
-                } catch {
-                    if pendingUpdate == nil {
-                        lastSentSeconds = -1
-                        lastSavedPosition = -1
-                        // Retain the final sample through a short bounded retry,
-                        // including view dismissal; no password/source data logs.
-                        for attempt in 0..<2 {
-                            do {
-                                try await Task.sleep(for: .seconds(attempt + 1))
-                                _ = try await api.updateProgress(profileID: request.profileID, update: update)
-                                lastSentSeconds = update.watchedSeconds
-                                lastSavedPosition = update.position
-                                break
-                            } catch { }
-                        }
-                    }
-                }
-            }
-        }
-        if let saveTask { PlaybackWriteBarrier.register(saveTask, for: request) }
+        PlaybackProgressJournal.shared.enqueue(update, request: request)
+        let write = PlaybackProgressJournal.shared.flush()
+        PlaybackWriteBarrier.register(write, for: request)
     }
 }

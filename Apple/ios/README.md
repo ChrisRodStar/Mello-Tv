@@ -56,4 +56,10 @@ xcodebuild -project Apple/ios/MelloTV.xcodeproj -scheme MelloTV \
 
 ```bash
 ./Apple/ios/tools/check-playback-reliability.sh
+./Apple/ios/tools/check-client-reliability.sh
+./Apple/ios/tools/check-episode-prompts.sh
 ```
+
+These checks intercept API requests and cover partial outages, durable progress
+replay, recovery limits, seeks, and episode transitions without contacting a
+household server. Device playback and network handoffs still need an iPhone check.

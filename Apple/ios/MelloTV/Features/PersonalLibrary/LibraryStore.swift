@@ -101,7 +101,7 @@ final class LibraryStore {
         do {
             let data = try await task.value
             guard !task.isCancelled, loadGeneration == generation, activeProfileID == profileID else { return }
-            library = data
+            library = PlaybackProgressJournal.shared.overlay(data, profileID: profileID)
         } catch {
             guard !task.isCancelled, loadGeneration == generation else { return }
             errorMessage = "Couldn’t load your library. Try again."

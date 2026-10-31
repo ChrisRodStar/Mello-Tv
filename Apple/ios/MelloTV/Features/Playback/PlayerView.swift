@@ -1188,7 +1188,8 @@ private struct PlaybackSessionView: View {
                 playbackLog.info("Authorization ready after \(Date().timeIntervalSince(startupTime), privacy: .public) seconds; prepared player: \(prewarmedPlayer != nil, privacy: .public)")
                 acceptedPreparation = preparedEpisode != nil
 
-                let resumePosition = resumeAt ?? (request.startFromBeginning ? 0 : source.resumeSeconds)
+                let resumePosition = resumeAt ?? PlaybackProgressJournal.shared.resumePosition(for: request)
+                    ?? (request.startFromBeginning ? 0 : source.resumeSeconds)
                 let newPlayer: AVPlayer
                 if let prewarmedPlayer {
                     newPlayer = prewarmedPlayer
@@ -1242,7 +1243,7 @@ private struct PlaybackSessionView: View {
                     observeItem(currentItem)
                 }
 
-                let tracker = PlaybackProgressTracker(player: newPlayer, request: request, source: source)
+                let tracker = PlaybackProgressTracker(player: newPlayer, request: request, source: source, resumePosition: resumePosition)
                 self.progressTracker = tracker
                 tracker.start()
 

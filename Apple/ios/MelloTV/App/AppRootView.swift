@@ -42,6 +42,8 @@ struct AppRootView: View {
             }
         }
         .task {
+            _ = NetworkMonitor.shared
+            PlaybackProgressJournal.shared.flush()
             await profileStore.loadProfiles()
         }
         .onReceive(NotificationCenter.default.publisher(for: .streamTVRecommendationsChanged)) { notification in
@@ -52,6 +54,7 @@ struct AppRootView: View {
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .background { PreparedPlaybackService.shared.clearAll() }
+            if phase == .active { PlaybackProgressJournal.shared.flush() }
         }
         .onChange(of: profileStore.activeProfile?.id) { _, _ in
             PreparedPlaybackService.shared.clearAll()
