@@ -18,7 +18,7 @@ Apple/ios/
 │   │   └── Styles/            # Tactile neumorphic materials & surface button styles
 │   ├── Features/
 │   │   ├── Catalog/           # Home, Movies, TV shelves & 3D FeaturedCarouselView
-│   │   ├── Onboarding/        # First-launch 3-step WelcomeOnboardingView
+│   │   ├── Onboarding/        # First-launch welcome, server discovery & QR connection
 │   │   ├── PersonalLibrary/   # ContinueWatchingShelf, LibraryStore & ProfilePageView
 │   │   ├── Playback/          # Custom AVKit PlayerView, pre-warming & progress tracking
 │   │   ├── Profiles/          # WhoIsWatchingView, ProfileEditorView & taste OnboardingView

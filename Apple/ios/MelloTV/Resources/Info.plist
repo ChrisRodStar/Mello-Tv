@@ -35,6 +35,8 @@
 	<array>
 		<string>_mellotv._tcp</string>
 	</array>
+	<key>NSCameraUsageDescription</key>
+	<string>Scan the QR code shown by your Mello TV server to connect to your library.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Mello TV discovers and connects to your household streaming server on your local network.</string>
 	<key>UILaunchScreen</key>

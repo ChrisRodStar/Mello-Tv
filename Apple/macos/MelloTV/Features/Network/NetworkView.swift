@@ -355,7 +355,7 @@ private struct AddressQRSheet: View {
                     .multilineTextAlignment(.center)
             }
             Text(address.id).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
-            Text("Scan with your device’s camera to open this address in a browser. In the Mello TV app, enter the address when connecting.")
+            Text("In the Mello TV iPhone app, choose Scan server code when connecting. You can also scan with Camera to open this address in a browser.")
                 .font(.callout).foregroundStyle(.secondary)
                 .multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
             Button("Done") { dismiss() }.keyboardShortcut(.defaultAction)

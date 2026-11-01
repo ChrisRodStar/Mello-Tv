@@ -203,7 +203,7 @@ enum ServerAddress {
         return !hasWiFi && hasCellular
     }
 
-    /// Collects all candidate endpoints across active, fallback, Tailscale, and clipboard sources.
+    /// Collects candidate endpoints from saved addresses and network discovery.
     static func allKnownCandidateURLs() async -> [URL] {
         var candidates: [URL] = []
 
@@ -214,12 +214,6 @@ enum ServerAddress {
             }
         }
 
-        #if canImport(UIKit)
-        if let clip = await MainActor.run(body: { UIPasteboard.general.string }),
-           let clipURL = normalizeServerURL(clip) {
-            add(clipURL)
-        }
-        #endif
 
         if isCellularOnly, let ts = tailscaleURL {
             add(ts)
@@ -386,14 +380,7 @@ enum ServerAddress {
     }
 
     private static func discoverViaTailscale(timeout: TimeInterval) async -> [DiscoveredServer] {
-        var candidates = tailscaleCandidateURLs
-        #if canImport(UIKit)
-        if let clip = await MainActor.run(body: { UIPasteboard.general.string }),
-           let clipURL = normalizeServerURL(clip),
-           !candidates.contains(clipURL) {
-            candidates.insert(clipURL, at: 0)
-        }
-        #endif
+        let candidates = tailscaleCandidateURLs
         guard !candidates.isEmpty else { return [] }
         if let match = await raceStatusProbes(candidates, timeout: timeout) {
             return [match]
