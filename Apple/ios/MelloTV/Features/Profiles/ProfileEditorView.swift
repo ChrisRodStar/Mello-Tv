@@ -96,7 +96,7 @@ struct ProfileEditorView: View {
                         .padding(.horizontal, 24)
 
                         // Edit preferences button if editing
-                        if let editingProfile = profileStore.editingProfile {
+                        if profileStore.editingProfile != nil {
                             Button {
                                 showPreferenceSetup = true
                             } label: {
