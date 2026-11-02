@@ -17,15 +17,25 @@ function standardQualityHeight(level: Level): 360 | 480 | 720 | 1080 | null {
 }
 
 /** Expose standard quality tiers declared in the manifest, including cropped widescreen encodes. */
-export function videoQualityOptions(levels: readonly Level[]) {
+export function videoQualityOptions(
+  levels: readonly Level[],
+  fallbackLevels: readonly Level[] = [],
+) {
   const byHeight = new Map<number, { id: number; bitrate: number }>();
-  levels.forEach((level, id) => {
-    const height = standardQualityHeight(level);
-    if (!height) return;
-    const bitrate = level.bitrate ?? 0;
-    const previous = byHeight.get(height);
-    if (!previous || bitrate > previous.bitrate) byHeight.set(height, { id, bitrate });
-  });
+  const collect = (items: readonly Level[], fixedId?: number) => {
+    items.forEach((level, index) => {
+      const height = standardQualityHeight(level);
+      if (!height) return;
+      const id = fixedId ?? index;
+      const bitrate = level.bitrate ?? 0;
+      const previous = byHeight.get(height);
+      if (!previous || bitrate > previous.bitrate) byHeight.set(height, { id, bitrate });
+    });
+  };
+  collect(levels);
+  if (byHeight.size === 0 && fallbackLevels.length > 0) {
+    collect(fallbackLevels, levels.length === 1 ? 0 : undefined);
+  }
   return Array.from(byHeight, ([height, level]) => ({
     id: level.id,
     label: `${height}p`,

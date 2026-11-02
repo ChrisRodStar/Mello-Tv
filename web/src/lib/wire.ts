@@ -113,6 +113,7 @@ export const playbackWire = z.object({
   }),
   url: z.string(),
   format: z.enum(['hls', 'mp4']),
+  available_heights: z.array(z.number().int().positive()).optional(),
   expires_at: z.iso.datetime({ offset: true }),
   revision: z.number().int().positive(),
   source_generation: z.number().int().positive(),

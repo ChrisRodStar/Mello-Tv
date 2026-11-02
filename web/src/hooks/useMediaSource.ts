@@ -84,7 +84,13 @@ export function useMediaSource(
     const syncTracks = () => {
       if (disposed) return;
       if (instance) {
-        setQualities(videoQualityOptions(instance.levels));
+        const fallbackLevels = [
+          ...(source.session.available_heights?.map((height) => ({ height })) ?? []),
+          ...(element.videoHeight > 0
+            ? [{ width: element.videoWidth, height: element.videoHeight }]
+            : []),
+        ];
+        setQualities(videoQualityOptions(instance.levels, fallbackLevels));
         setQualityState(instance.manualLevel);
       }
       if (instance?.audioTracks.length) {
@@ -138,6 +144,8 @@ export function useMediaSource(
       });
     };
     element.addEventListener('playing', onPlaying);
+    element.addEventListener('loadedmetadata', syncTracks);
+    element.addEventListener('resize', syncTracks);
     element.textTracks.addEventListener('addtrack', syncTracks);
     element.textTracks.addEventListener('removetrack', syncTracks);
     element.textTracks.addEventListener('change', syncTracks);
@@ -191,6 +199,8 @@ export function useMediaSource(
     return () => {
       disposed = true;
       element.removeEventListener('playing', onPlaying);
+      element.removeEventListener('loadedmetadata', syncTracks);
+      element.removeEventListener('resize', syncTracks);
       element.textTracks.removeEventListener('addtrack', syncTracks);
       element.textTracks.removeEventListener('removetrack', syncTracks);
       element.textTracks.removeEventListener('change', syncTracks);

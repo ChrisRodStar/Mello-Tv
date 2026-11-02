@@ -55,6 +55,11 @@ describe('video quality options', () => {
       { id: 3, label: '360p' },
     ]);
   });
+  test('uses server or decoded video dimensions when a single-rendition HLS media playlist omits RESOLUTION', () => {
+    expect(videoQualityOptions([{ width: 0, height: 0 }], [{ height: 1080 }])).toEqual([
+      { id: 0, label: '1080p' },
+    ]);
+  });
   test('does not infer a resolution from bitrate or an unmapped height alone', () => {
     expect(videoQualityOptions([{ bitrate: 1000000 }, { height: 800 }, { height: 0 }])).toEqual(
       [],
