@@ -4,7 +4,10 @@ use async_trait::async_trait;
 use serde_json::{Value, json};
 use std::{
     collections::VecDeque,
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
 };
 use stream_core::{
     error::DomainError,
@@ -19,12 +22,18 @@ type TestResult = Result<(), Box<dyn std::error::Error>>;
 struct ScriptedMedia {
     selections: Mutex<VecDeque<Selection>>,
     lookups: Mutex<Vec<Lookup>>,
+    fail_infrastructure: AtomicBool,
 }
 
 #[async_trait]
 impl MediaEngine for ScriptedMedia {
     async fn resolve_stream(&self, lookup: &Lookup) -> Result<Selection, DomainError> {
         self.lookups.lock().unwrap().push(lookup.clone());
+        if self.fail_infrastructure.load(Ordering::SeqCst) {
+            return Err(DomainError::Infrastructure(
+                std::io::Error::other("synthetic failure").into(),
+            ));
+        }
         self.selections
             .lock()
             .unwrap()
@@ -75,6 +84,7 @@ async fn server_with_selections(
     let media = Arc::new(ScriptedMedia {
         selections: Mutex::new(selections),
         lookups: Mutex::new(Vec::new()),
+        fail_infrastructure: AtomicBool::new(false),
     });
     let state = AppState::new(catalog, accounts, media.clone(), household);
     let relay = state.relay.clone();
@@ -250,5 +260,109 @@ async fn concurrent_upgrade_requests_publish_only_one_source_generation() -> Tes
         .json()
         .await?;
     assert_eq!(current["source_generation"], 2);
+    Ok(())
+}
+
+#[tokio::test]
+async fn backup_skips_variants_with_the_same_master_and_reports_when_exhausted() -> TestResult {
+    let mut initial_selection = selection(720);
+    let first = initial_selection.selected.as_ref().unwrap().clone();
+    let mut same_master = first.clone();
+    same_master.candidate.source.id = "another-variant".into();
+    same_master
+        .candidate
+        .observation
+        .variant
+        .as_mut()
+        .unwrap()
+        .height = Some(480);
+    let distinct = selection(1080).selected.unwrap();
+    initial_selection.backups = Some(vec![same_master.clone(), distinct, same_master]);
+    let (base, _, relay) = server_with_selections(VecDeque::from([initial_selection])).await?;
+    let initial = create(&base).await?;
+    let id = initial["id"].as_str().unwrap();
+    let client = reqwest::Client::new();
+    let changed: Value = client
+        .post(format!("{base}/api/playback/{id}/backup"))
+        .json(&json!({"expected_revision":initial["revision"]}))
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+    assert_eq!(relay.active_height(id), Some(1080));
+    assert_ne!(changed["url"], initial["url"]);
+    let token = relay.token_for(id);
+    let exhausted = client
+        .post(format!("{base}/api/playback/{id}/backup"))
+        .json(&json!({"expected_revision":changed["revision"]}))
+        .send()
+        .await?;
+    assert_eq!(
+        exhausted.status(),
+        reqwest::StatusCode::UNPROCESSABLE_ENTITY
+    );
+    let error: Value = exhausted.json().await?;
+    assert_eq!(error["error"], "source_refresh_required");
+    assert_eq!(relay.token_for(id), token);
+    Ok(())
+}
+
+#[tokio::test]
+async fn failed_refresh_does_not_rotate_token_or_advance_revision() -> TestResult {
+    let (base, media, relay) = server(&[720]).await?;
+    let initial = create(&base).await?;
+    let id = initial["id"].as_str().unwrap();
+    let token = relay.token_for(id);
+    media.fail_infrastructure.store(true, Ordering::SeqCst);
+    let client = reqwest::Client::new();
+    let response = client
+        .post(format!("{base}/api/playback/{id}/refresh"))
+        .json(&json!({"expected_revision":initial["revision"]}))
+        .send()
+        .await?;
+    assert_eq!(
+        response.status(),
+        reqwest::StatusCode::INTERNAL_SERVER_ERROR
+    );
+    let current: Value = client
+        .get(format!("{base}/api/playback/{id}"))
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+    assert_eq!(current["revision"], initial["revision"]);
+    assert_eq!(current["source_generation"], initial["source_generation"]);
+    assert_eq!(relay.token_for(id), token);
+    assert!(media.lookups.lock().unwrap().last().unwrap().refresh);
+    Ok(())
+}
+
+#[tokio::test]
+async fn backup_can_use_same_url_with_a_different_fetch_context() -> TestResult {
+    let mut initial_selection = selection(720);
+    let mut different_context = initial_selection.selected.as_ref().unwrap().clone();
+    different_context.candidate.source.id = "alternate-context".into();
+    different_context
+        .candidate
+        .source
+        .fetch_context
+        .public_resources = Some(stream_core::providers::PublicResourceContext {
+        origin: "https://other.example".into(),
+        referer: "https://other.example/".into(),
+    });
+    initial_selection.backups = Some(vec![different_context]);
+    let (base, _, relay) = server_with_selections(VecDeque::from([initial_selection])).await?;
+    let initial = create(&base).await?;
+    let id = initial["id"].as_str().unwrap();
+    let previous = relay.token_for(id);
+    reqwest::Client::new()
+        .post(format!("{base}/api/playback/{id}/backup"))
+        .json(&json!({"expected_revision": initial["revision"]}))
+        .send()
+        .await?
+        .error_for_status()?;
+    assert_ne!(relay.token_for(id), previous);
     Ok(())
 }

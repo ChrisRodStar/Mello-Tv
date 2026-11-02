@@ -4,6 +4,11 @@ use std::{sync::Arc, time::SystemTime};
 
 use chrono::{DateTime, Duration, Utc};
 use serde_json::{Value, json};
+use stream_core::{
+    error::DomainError,
+    ports::MediaEngine,
+    providers::{Lookup, Selection},
+};
 use stream_server::{
     routes,
     state::{AppState, NoopMediaEngine},
@@ -22,6 +27,12 @@ fn now() -> DateTime<Utc> {
 
 async fn spawn_test_server()
 -> Result<(String, Arc<AccountStore>, Arc<CatalogStore>, String), Box<dyn std::error::Error>> {
+    spawn_test_server_with_media(Arc::new(NoopMediaEngine)).await
+}
+
+async fn spawn_test_server_with_media(
+    media: Arc<dyn MediaEngine>,
+) -> Result<(String, Arc<AccountStore>, Arc<CatalogStore>, String), Box<dyn std::error::Error>> {
     let catalog_db = Database::in_memory(64).await?;
     let catalog = Arc::new(CatalogStore::from_database(catalog_db).await?);
 
@@ -30,7 +41,6 @@ async fn spawn_test_server()
     let accounts = Arc::new(AccountStore::from_database(accounts_db, key).await?);
     let household_id = accounts.select_household(None).await?;
 
-    let media = Arc::new(NoopMediaEngine);
     let state = AppState::new(
         catalog.clone(),
         accounts.clone(),
@@ -351,9 +361,42 @@ async fn home_and_recommendations_parity() -> TestResult {
     Ok(())
 }
 
+// A real relay selection is required for backup and refresh lifecycle assertions.
+struct PlaybackMedia;
+
+#[async_trait::async_trait]
+impl MediaEngine for PlaybackMedia {
+    async fn resolve_stream(&self, lookup: &Lookup) -> Result<Selection, DomainError> {
+        let ranked = |id: &str| {
+            json!({
+                "score": 1.0, "reasons": null,
+                "candidate": {
+                    "source": {
+                        "id": id, "provider": "fixture", "url": format!("https://fixture.example/{id}.m3u8"),
+                        "format": "hls", "title": lookup.title, "fetch_context": {},
+                        "resolver_metadata": {"tracks_known": false}, "content_verified": false
+                    },
+                    "observation": {
+                        "at": now(), "format": "hls", "sample_bytes": 1, "samples_completed": 1,
+                        "delivery_bps": 3000000.0, "playlist_metadata": {"tracks_known": false},
+                        "variant": {"url": format!("https://fixture.example/{id}-variant.m3u8"),
+                            "width": 1280, "height": 720, "bitrate": 1000000, "codecs": ["avc1.4d401f"]},
+                        "accessible": true, "encrypted": false, "protection_known": true
+                    }
+                }
+            })
+        };
+        serde_json::from_value(json!({
+            "version": "providers.v1", "selected": ranked("primary"),
+            "backups": [ranked("backup")], "providers": null, "rejected": null
+        }))
+        .map_err(|error| DomainError::Infrastructure(error.into()))
+    }
+}
+
 #[tokio::test]
 async fn playback_lifecycle_and_progress_parity() -> TestResult {
-    let (base, _, _, _) = spawn_test_server().await?;
+    let (base, _, _, _) = spawn_test_server_with_media(Arc::new(PlaybackMedia)).await?;
     let client = reqwest::Client::new();
 
     let res = client
@@ -570,6 +613,7 @@ async fn playback_lifecycle_and_progress_parity() -> TestResult {
     assert_eq!(backed_up["revision"], 3);
     assert_eq!(backed_up["source_generation"], 2);
     assert_eq!(backed_up["reload_required"], true);
+    assert_ne!(backed_up["url"], renewed["url"]);
 
     // 9. Source Refresh (refresh)
     let res = client
@@ -585,6 +629,7 @@ async fn playback_lifecycle_and_progress_parity() -> TestResult {
     assert_eq!(refreshed["revision"], 4);
     assert_eq!(refreshed["source_generation"], 3);
     assert_eq!(refreshed["reload_required"], true);
+    assert_ne!(refreshed["url"], backed_up["url"]);
 
     // 10. Revoke Session
     let res = client

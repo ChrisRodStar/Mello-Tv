@@ -1,5 +1,5 @@
 import { usePlaybackSession } from '../../hooks/usePlaybackSession';
-import { useEffect, useRef, useState, type FocusEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type FocusEvent } from 'react';
 
 import { useMediaSource } from '../../hooks/useMediaSource';
 import { usePlayerControls } from '../../hooks/usePlayerControls';
@@ -50,7 +50,18 @@ export function PlaybackView({
   );
   const feedbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const player = usePlayerControls(video);
-  const mediaError = session.mediaError;
+  const position = useRef({ request, seconds: request.startAt ?? 0 });
+  if (position.current.request !== request)
+    position.current = { request, seconds: request.startAt ?? 0 };
+  const mediaError = useCallback(() => {
+    const element = video.current;
+    if (element && element.readyState >= 1 && Number.isFinite(element.currentTime))
+      position.current.seconds = element.currentTime;
+    session.mediaError(position.current.seconds);
+  }, [session.mediaError]);
+  useEffect(() => {
+    if (source) position.current.seconds = source.session.resume_seconds;
+  }, [source]);
   const ready = status === 'ready' && !!source;
   const media = useMediaSource(video, ready ? source : null, mediaError);
   const progress = useWatchProgress(video, request, ready ? source : null);
@@ -338,7 +349,15 @@ export function PlaybackView({
           }}
           onDurationChange={player.sync}
           onEmptied={player.sync}
-          onTimeUpdate={player.sync}
+          onTimeUpdate={(event) => {
+            if (event.currentTarget !== video.current) return;
+            if (
+              event.currentTarget.readyState >= 1 &&
+              Number.isFinite(event.currentTarget.currentTime)
+            )
+              position.current.seconds = event.currentTarget.currentTime;
+            player.sync();
+          }}
           onVolumeChange={player.sync}
           onPlay={player.sync}
           onPause={player.sync}
@@ -356,7 +375,9 @@ export function PlaybackView({
             player.sync();
             player.setBuffering(false);
           }}
-          onError={mediaError}
+          onError={(event) => {
+            if (event.currentTarget === video.current) mediaError();
+          }}
         />
       )}
       <div className="player-scrim player-chrome" aria-hidden="true" />
@@ -364,7 +385,11 @@ export function PlaybackView({
         <div className="playback-status player-preparing" role="status">
           <span className="player-spinner" aria-hidden="true" />
           <p className="player-status-title">
-            {status === 'loading' ? 'Finding a playable source' : 'Preparing video'}
+            {session.recovering
+              ? 'Refreshing playback'
+              : status === 'loading'
+                ? 'Finding a playable source'
+                : 'Preparing video'}
           </p>
           <p className="player-status-detail">{request.title}</p>
         </div>
@@ -380,7 +405,7 @@ export function PlaybackView({
               className="player-retry"
               onClick={() => {
                 void progress.flush();
-                session.retry(player.time);
+                session.retry(position.current.seconds);
               }}
             >
               Try again
@@ -390,13 +415,13 @@ export function PlaybackView({
             <div className="player-status-actions">
               <button
                 disabled={session.busy}
-                onClick={() => void session.mutate('backup', player.time)}
+                onClick={() => void session.mutate('backup', position.current.seconds, true)}
               >
                 Try backup
               </button>
               <button
                 disabled={session.busy}
-                onClick={() => void session.mutate('refresh', player.time)}
+                onClick={() => void session.mutate('refresh', position.current.seconds, true)}
               >
                 Reload video
               </button>

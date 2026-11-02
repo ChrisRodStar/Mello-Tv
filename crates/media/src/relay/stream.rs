@@ -87,7 +87,6 @@ struct SessionState {
     token: String,
     active: ProbedStream,
     backups: Vec<ProbedStream>,
-    backup_index: usize,
     resources: BTreeMap<String, String>,
     created_at: Instant,
 }
@@ -221,7 +220,6 @@ impl MediaRelay {
                     token,
                     active: selected.candidate,
                     backups,
-                    backup_index: 0,
                     resources: BTreeMap::new(),
                     created_at: Instant::now(),
                 },
@@ -344,11 +342,16 @@ impl MediaRelay {
             .lock()
             .map_err(|_| RelayError::SessionNotFound)?;
         let session = map.get_mut(session_id).ok_or(RelayError::SessionNotFound)?;
-        if session.backup_index >= session.backups.len() {
+        // Variants of one HLS master share the same entry request. Retrying
+        // another variant cannot fix a failed request for that master.
+        session.backups.retain(|backup| {
+            backup.source.url != session.active.source.url
+                || backup.source.fetch_context != session.active.source.fetch_context
+        });
+        if session.backups.is_empty() {
             return Err(RelayError::NoBackupAvailable);
         }
-        session.active = session.backups[session.backup_index].clone();
-        session.backup_index += 1;
+        session.active = session.backups.remove(0);
         session.resources.clear();
         let new_token = Self::generate_token();
         session.token = new_token.clone();

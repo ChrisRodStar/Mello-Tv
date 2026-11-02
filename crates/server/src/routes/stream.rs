@@ -596,12 +596,16 @@ async fn mutate_session(
                 let lookup = build_lookup_from_request(&profile_id, &stored.request, true)?;
                 match state.media.resolve_stream(&lookup).await {
                     Ok(selection) => {
-                        let _ = state.relay.replace_selection(&id, selection);
+                        if state.relay.replace_selection(&id, selection).is_none() {
+                            return Err(AppError::Internal(
+                                "playback refresh could not replace relay selection".into(),
+                            ));
+                        }
                     }
                     Err(DomainError::NotFound(_)) => {
                         return Err(AppError::Unprocessable("no_source".into()));
                     }
-                    Err(_) => {}
+                    Err(error) => return Err(AppError::Domain(error)),
                 }
             }
             "upgrade" => {
