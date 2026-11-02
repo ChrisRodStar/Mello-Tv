@@ -29,7 +29,33 @@ describe('video quality options', () => {
       ]),
     ).toEqual([{ id: 1, label: '720p' }]);
   });
-  test('does not infer a resolution from bitrate or a cropped height', () => {
+  test('maps cropped widescreen and macroblock-aligned encodes to their standard quality tier', () => {
+    expect(
+      videoQualityOptions([
+        { width: 640, height: 358, bitrate: 791244 },
+        { width: 1280, height: 714, bitrate: 3059982 },
+        { width: 1920, height: 1072, bitrate: 5609061 },
+      ]),
+    ).toEqual([
+      { id: 2, label: '1080p' },
+      { id: 1, label: '720p' },
+      { id: 0, label: '360p' },
+    ]);
+    expect(
+      videoQualityOptions([
+        { width: 1920, height: 800, bitrate: 4500000 },
+        { width: 1280, height: 534, bitrate: 2200000 },
+        { width: 854, height: 356, bitrate: 1100000 },
+        { width: 640, height: 268, bitrate: 600000 },
+      ]),
+    ).toEqual([
+      { id: 0, label: '1080p' },
+      { id: 1, label: '720p' },
+      { id: 2, label: '480p' },
+      { id: 3, label: '360p' },
+    ]);
+  });
+  test('does not infer a resolution from bitrate or an unmapped height alone', () => {
     expect(videoQualityOptions([{ bitrate: 1000000 }, { height: 800 }, { height: 0 }])).toEqual(
       [],
     );
