@@ -1,5 +1,5 @@
 import { usePlaybackSession } from '../../hooks/usePlaybackSession';
-import { useEffect, useRef, useState, type FocusEvent, type PointerEvent } from 'react';
+import { useEffect, useRef, useState, type FocusEvent } from 'react';
 
 import { useMediaSource } from '../../hooks/useMediaSource';
 import { usePlayerControls } from '../../hooks/usePlayerControls';
@@ -41,6 +41,7 @@ export function PlaybackView({
   const stage = useRef<HTMLElement>(null);
   const panelNode = useRef<HTMLDivElement>(null);
   const panelTrigger = useRef<HTMLElement | null>(null);
+  const keyboardInteraction = useRef(false);
   const transitioning = useRef(false);
   const video = useRef<HTMLVideoElement>(null);
   const lastTap = useRef<{ x: number; y: number } | null>(null);
@@ -191,12 +192,7 @@ export function PlaybackView({
     feedbackTimer.current = setTimeout(() => setSeekFeedback(null), 750);
   }
   const chromeHandlers = {
-    onPointerEnter: (event: PointerEvent) => {
-      if (event.pointerType === 'mouse') chrome.setHovered(true);
-    },
-    onPointerLeave: () => chrome.setHovered(false),
-    onFocusCapture: (event: FocusEvent) =>
-      chrome.setFocused((event.target as HTMLElement).matches(':focus-visible')),
+    onFocusCapture: () => chrome.setFocused(keyboardInteraction.current),
     onBlurCapture: (event: FocusEvent) => {
       if (!event.currentTarget.contains(event.relatedTarget as Node | null))
         chrome.setFocused(false);
@@ -217,6 +213,8 @@ export function PlaybackView({
         chrome.wake();
       }}
       onPointerDown={(event) => {
+        keyboardInteraction.current = false;
+        chrome.setFocused(false);
         if ((event.target as HTMLElement).closest('button, input, select')) chrome.wake();
       }}
       onClick={(event) => {
@@ -248,17 +246,22 @@ export function PlaybackView({
         }
       }}
       onKeyDown={(event) => {
+        keyboardInteraction.current = true;
         if (event.key === 'Tab' && !panel) {
           chrome.wake();
           if (!chromeVisible) {
             event.preventDefault();
             const backwards = event.shiftKey;
-            requestAnimationFrame(() => {
-              const controls = stage.current?.querySelectorAll<HTMLElement>(
-                '.player-header button, .player-footer button, .player-footer input:not(:disabled)',
-              );
-              (backwards ? controls?.[controls.length - 1] : controls?.[0])?.focus();
-            });
+            chrome.setFocused(true);
+            // Wait for the chrome to render and become focusable after waking.
+            requestAnimationFrame(() =>
+              requestAnimationFrame(() => {
+                const controls = stage.current?.querySelectorAll<HTMLElement>(
+                  '.player-header button, .player-footer button, .player-footer input:not(:disabled)',
+                );
+                (backwards ? controls?.[controls.length - 1] : controls?.[0])?.focus();
+              }),
+            );
             return;
           }
         }

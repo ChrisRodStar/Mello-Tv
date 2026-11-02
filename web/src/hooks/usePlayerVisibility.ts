@@ -3,14 +3,16 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 export function usePlayerVisibility(canHide: boolean) {
   const [visible, setVisible] = useState(true);
   const [focused, updateFocused] = useState(false);
-  const [hovered, updateHovered] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const allowed = useRef(false);
-  allowed.current = canHide && !focused && !hovered;
+  allowed.current = canHide && !focused;
   const wake = useCallback(() => {
     setVisible(true);
     if (timer.current) clearTimeout(timer.current);
-    if (allowed.current) timer.current = setTimeout(() => setVisible(false), 2400);
+    if (allowed.current)
+      timer.current = setTimeout(() => {
+        if (allowed.current) setVisible(false);
+      }, 2400);
   }, []);
   function toggle() {
     if (visible) {
@@ -25,28 +27,20 @@ export function usePlayerVisibility(canHide: boolean) {
     },
     [wake],
   );
-  const setHovered = useCallback(
-    (value: boolean) => {
-      updateHovered(value);
-      if (value) wake();
-    },
-    [wake],
-  );
   useEffect(() => {
     if (!canHide) setVisible(true);
-    if (canHide && visible && !focused && !hovered)
+    if (canHide && visible && !focused)
       timer.current = setTimeout(() => {
         if (allowed.current) setVisible(false);
       }, 2400);
     return () => {
       if (timer.current) clearTimeout(timer.current);
     };
-  }, [canHide, focused, hovered, visible, wake]);
+  }, [canHide, focused, visible, wake]);
   return {
     visible,
     wake,
     toggle,
     setFocused,
-    setHovered,
   };
 }
