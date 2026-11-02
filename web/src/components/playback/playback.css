@@ -66,7 +66,7 @@
   pointer-events: none;
 }
 
-/* Header: close, title, lock. */
+/* Header: close, title, fullscreen. */
 .player-header {
   display: flex;
   position: absolute;
@@ -538,60 +538,6 @@ button.player-action:hover,
   color: var(--accent, #2997ff);
   font-weight: 700;
 }
-.player-source-options {
-  display: grid;
-  gap: 4px;
-}
-.player-source-options button {
-  display: grid;
-  min-height: 48px;
-  padding: 8px 12px;
-  gap: 2px;
-  border: 0;
-  border-radius: 12px;
-  background: transparent;
-  color: #fff;
-  text-align: left;
-}
-.player-source-options button:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.08);
-}
-.player-source-options button:disabled {
-  opacity: 0.5;
-}
-.player-source-options strong {
-  font-weight: 600;
-  font-size: 15px;
-}
-.player-source-options span {
-  color: rgba(255, 255, 255, 0.6);
-  font-size: 12px;
-}
-
-/* Control lock. */
-.player-unlock {
-  display: flex;
-  position: absolute;
-  bottom: max(24px, env(safe-area-inset-bottom));
-  left: 50%;
-  align-items: center;
-  min-height: 48px;
-  padding: 0 20px;
-  gap: 8px;
-  border: 0;
-  border-radius: 999px;
-  background: var(--player-surface);
-  color: #fff;
-  font-weight: 600;
-  font-size: 15px;
-  transform: translateX(-50%);
-  animation: player-fade-in 150ms ease-out;
-}
-.player-unlock svg {
-  width: 16px;
-  height: 16px;
-}
-
 @keyframes player-buffer {
   to {
     transform: rotate(360deg);
@@ -647,8 +593,7 @@ button.player-action:hover,
     transition: none;
   }
   .player-seek-feedback,
-  .player-panel-layer,
-  .player-unlock {
+  .player-panel-layer {
     animation: none;
   }
   .player-spinner,
@@ -736,27 +681,6 @@ button.player-action:hover,
 .player-action > svg {
   width: clamp(19px, 2vw, 27px);
   height: clamp(19px, 2vw, 27px);
-}
-.player-browser-tools {
-  display: flex;
-  align-items: center;
-  align-self: flex-end;
-  gap: 18px;
-}
-.player-browser-tools .player-action {
-  flex: 0 0 auto;
-  font-size: 12px;
-  min-height: 36px;
-}
-.player-browser-tools .player-action > svg {
-  width: 17px;
-  height: 17px;
-}
-.player-browser-tools .player-volume-toggle {
-  height: 36px;
-}
-.player-browser-tools .player-volume {
-  gap: 2px;
 }
 .player-panel-layer {
   padding: 24px var(--player-inset-x) max(40px, 6vh);
@@ -861,9 +785,6 @@ button.player-action:hover,
     padding: 3px 2px;
     font-size: 11px;
   }
-  .player-browser-tools .player-action {
-    flex-direction: row;
-  }
   .player-panel-layer {
     padding: 16px 12px max(20px, env(safe-area-inset-bottom));
   }
@@ -894,9 +815,6 @@ button.player-action:hover,
   .player-action {
     flex-direction: row;
   }
-  .player-browser-tools .player-action {
-    min-height: 28px;
-  }
   .player-timeline-row {
     height: 32px;
   }
@@ -905,5 +823,66 @@ button.player-action:hover,
   }
   .player-panel {
     max-height: calc(100dvh - 24px);
+  }
+}
+
+.player-actions .player-volume {
+  flex: 0 0 auto;
+  flex-direction: row;
+  gap: 6px;
+  padding: 0 8px 0 0;
+}
+.player-actions .player-volume-toggle {
+  width: 44px;
+  height: 44px;
+}
+.player-actions .player-volume-toggle svg {
+  width: 22px;
+  height: 22px;
+}
+.player-actions .player-volume input {
+  width: clamp(44px, 5vw, 80px);
+}
+@media (max-width: 600px) {
+  .player-actions .player-volume {
+    padding: 0;
+  }
+  .player-actions .player-volume input {
+    display: none;
+  }
+  .player-actions {
+    gap: 2px;
+  }
+}
+
+/* Keep native video compositing behind every control, including letterboxed areas. */
+.playback-view {
+  isolation: isolate;
+}
+.playback-view > video {
+  z-index: 0;
+}
+.player-scrim {
+  z-index: 1;
+}
+.player-header,
+.player-footer,
+.player-transport,
+.playback-status,
+.player-seek-feedback {
+  z-index: 2;
+}
+.player-panel-layer,
+.player-episodes-layer {
+  z-index: 3;
+}
+@media (max-width: 360px) {
+  .player-action[aria-label='Episodes'] span,
+  .player-action[aria-label='Audio & subtitles'] span,
+  .player-action[aria-label='Next episode'] span {
+    display: none;
+  }
+  .player-action {
+    min-height: 44px;
   }
 }

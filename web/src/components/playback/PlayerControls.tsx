@@ -3,16 +3,13 @@ import { useRef, type CSSProperties } from 'react';
 import { formatPlaybackTime, type usePlayerControls } from '../../hooks/usePlayerControls';
 import { Icon, type IconName } from '../common/Icon';
 
-export type PlayerPanel = 'speed' | 'source' | 'quality' | 'tracks' | 'episodes';
+export type PlayerPanel = 'speed' | 'quality' | 'tracks' | 'episodes';
 export const PLAYBACK_SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2] as const;
 
 /** Bottom chrome mirroring the iOS player: timeline with remaining time above a capsule of actions. */
 export function PlayerControls({
   player,
   speed,
-  fullscreen,
-  canFullscreen,
-  onFullscreen,
   onPanel,
   onNext,
   qualityLabel,
@@ -20,9 +17,6 @@ export function PlayerControls({
 }: {
   player: ReturnType<typeof usePlayerControls>;
   speed: number;
-  fullscreen: boolean;
-  canFullscreen: boolean;
-  onFullscreen: () => void;
   onPanel: (panel: PlayerPanel) => void;
   onNext?: () => void;
   qualityLabel: string;
@@ -84,6 +78,30 @@ export function PlayerControls({
         </span>
       </div>
       <div className="player-actions">
+        <div className="player-action player-volume">
+          <button
+            className="player-volume-toggle"
+            aria-label={player.muted ? 'Unmute' : 'Mute'}
+            onClick={player.toggleMute}
+          >
+            <Icon name={player.muted || player.volume === 0 ? 'muted' : 'volume'} />
+          </button>
+          <input
+            type="range"
+            aria-label="Volume"
+            min={0}
+            max={1}
+            step={0.05}
+            value={player.muted ? 0 : player.volume}
+            onChange={(event) => player.changeVolume(Number(event.target.value))}
+            style={
+              {
+                '--progress': `${(player.muted ? 0 : player.volume) * 100}%`,
+              } as CSSProperties
+            }
+          />
+        </div>
+
         <PlayerAction
           icon="speedometer"
           label={`${speed}×`}
@@ -113,40 +131,6 @@ export function PlayerControls({
             onClick={onNext}
           />
         )}
-      </div>
-      <div className="player-browser-tools">
-        <div className="player-action player-volume">
-          <button
-            className="player-volume-toggle"
-            aria-label={player.muted ? 'Unmute' : 'Mute'}
-            onClick={player.toggleMute}
-          >
-            <Icon name={player.muted || player.volume === 0 ? 'muted' : 'volume'} />
-          </button>
-          <input
-            type="range"
-            aria-label="Volume"
-            min={0}
-            max={1}
-            step={0.05}
-            value={player.muted ? 0 : player.volume}
-            onChange={(event) => player.changeVolume(Number(event.target.value))}
-            style={
-              {
-                '--progress': `${(player.muted ? 0 : player.volume) * 100}%`,
-              } as CSSProperties
-            }
-          />
-        </div>
-        {canFullscreen && (
-          <PlayerAction
-            icon={fullscreen ? 'collapse' : 'expand'}
-            label={fullscreen ? 'Exit full screen' : 'Full screen'}
-            short={fullscreen ? 'Exit' : 'Full'}
-            onClick={onFullscreen}
-          />
-        )}
-        <PlayerAction icon="refresh" label="Source" onClick={() => onPanel('source')} />
       </div>
     </>
   );

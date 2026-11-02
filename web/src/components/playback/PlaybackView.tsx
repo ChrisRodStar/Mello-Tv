@@ -34,8 +34,6 @@ export function PlaybackView({
   const [fullscreenError, setFullscreenError] = useState('');
   const [speed, setSpeed] = useState(1);
   const [panel, setPanel] = useState<PlayerPanel | null>(null);
-  const [locked, setLocked] = useState(false);
-  const [unlockVisible, setUnlockVisible] = useState(false);
   const [seekFeedback, setSeekFeedback] = useState<SeekFeedback | null>(null);
   // The first rendered frame for the current source, as on iOS. Until then the
   // player shows preparation instead of transport controls.
@@ -49,7 +47,6 @@ export function PlaybackView({
   const pendingTap = useRef<{ timer: ReturnType<typeof setTimeout>; zone: number } | null>(
     null,
   );
-  const unlockTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const feedbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const player = usePlayerControls(video);
   const mediaError = session.mediaError;
@@ -63,7 +60,11 @@ export function PlaybackView({
   const chrome = usePlayerVisibility(
     ready && !preparing && !player.paused && !player.buffering && !player.scrubbing && !panel,
   );
-  const chromeVisible = !locked && (chrome.visible || !ready || preparing || !!panel);
+  const chromeVisible = chrome.visible || !ready || preparing || !!panel;
+  const canFullscreen =
+    !!document.fullscreenEnabled ||
+    typeof (video.current as (HTMLVideoElement & { webkitEnterFullscreen?: () => void }) | null)
+      ?.webkitEnterFullscreen === 'function';
 
   useEffect(() => {
     stage.current?.focus();
@@ -79,7 +80,6 @@ export function PlaybackView({
       document.removeEventListener('fullscreenchange', update);
       screen.orientation?.unlock?.();
       if (pendingTap.current) clearTimeout(pendingTap.current.timer);
-      if (unlockTimer.current) clearTimeout(unlockTimer.current);
       if (feedbackTimer.current) clearTimeout(feedbackTimer.current);
     };
   }, []);
@@ -112,7 +112,11 @@ export function PlaybackView({
   async function toggleFullscreen() {
     try {
       if (document.fullscreenElement) await document.exitFullscreen();
-      else {
+      else if (!document.fullscreenEnabled) {
+        (
+          video.current as (HTMLVideoElement & { webkitEnterFullscreen?: () => void }) | null
+        )?.webkitEnterFullscreen?.();
+      } else {
         await stage.current?.requestFullscreen();
         if (window.matchMedia('(pointer: coarse)').matches) {
           const orientation = screen.orientation as ScreenOrientation & {
@@ -167,7 +171,6 @@ export function PlaybackView({
   useEffect(() => {
     transitioning.current = false;
     setPanel(null);
-    setLocked(false);
     setStartedURL(null);
     if (pendingTap.current) clearTimeout(pendingTap.current.timer);
     pendingTap.current = null;
@@ -176,24 +179,6 @@ export function PlaybackView({
     if (!panel) return;
     panelNode.current?.querySelector<HTMLElement>('button, select')?.focus();
   }, [panel]);
-  function revealUnlock() {
-    setUnlockVisible(true);
-    if (unlockTimer.current) clearTimeout(unlockTimer.current);
-    unlockTimer.current = setTimeout(() => setUnlockVisible(false), 2400);
-  }
-  function lock() {
-    setPanel(null);
-    setLocked(true);
-    requestAnimationFrame(() => stage.current?.focus());
-    revealUnlock();
-  }
-  function unlock() {
-    if (unlockTimer.current) clearTimeout(unlockTimer.current);
-    setUnlockVisible(false);
-    setLocked(false);
-    chrome.wake();
-    requestAnimationFrame(() => stage.current?.focus());
-  }
   function seekBy(direction: -1 | 1) {
     if (!player.duration) return;
     player.seek(player.time + direction * 10);
@@ -204,13 +189,6 @@ export function PlaybackView({
     }));
     if (feedbackTimer.current) clearTimeout(feedbackTimer.current);
     feedbackTimer.current = setTimeout(() => setSeekFeedback(null), 750);
-  }
-  function runSourceAction(kind: 'backup' | 'refresh' | 'renew') {
-    setPanel(null);
-    const position = video.current?.currentTime ?? player.time;
-    video.current?.pause();
-    void progress.flush();
-    void session.mutate(kind, position);
   }
   const chromeHandlers = {
     onPointerEnter: (event: PointerEvent) => {
@@ -232,7 +210,7 @@ export function PlaybackView({
       className={chromeVisible ? 'playback-view' : 'playback-view player-idle'}
       aria-labelledby="detail-title"
       onPointerMove={(event) => {
-        if (event.pointerType !== 'mouse' || locked) return;
+        if (event.pointerType !== 'mouse') return;
         const tap = lastTap.current;
         if (tap && Math.hypot(event.clientX - tap.x, event.clientY - tap.y) < 8) return;
         lastTap.current = null;
@@ -248,10 +226,6 @@ export function PlaybackView({
           )
         )
           return;
-        if (locked) {
-          revealUnlock();
-          return;
-        }
         if (!ready || preparing) return;
         lastTap.current = { x: event.clientX, y: event.clientY };
         const bounds = event.currentTarget.getBoundingClientRect();
@@ -274,7 +248,7 @@ export function PlaybackView({
         }
       }}
       onKeyDown={(event) => {
-        if (event.key === 'Tab' && !panel && !locked) {
+        if (event.key === 'Tab' && !panel) {
           chrome.wake();
           if (!chromeVisible) {
             event.preventDefault();
@@ -319,14 +293,9 @@ export function PlaybackView({
           closePanel();
           return;
         }
-        if (locked) {
-          if (event.key !== 'Escape') {
-            revealUnlock();
-            return;
-          }
-        } else chrome.wake();
+        chrome.wake();
         if ((event.target as HTMLElement).closest('button, input, select')) {
-          if (!locked) chrome.setFocused(true);
+          chrome.setFocused(true);
           if (event.key !== 'Escape') return;
         }
         if (event.key === 'Escape') {
@@ -349,8 +318,7 @@ export function PlaybackView({
           seekBy(1);
         }
         if (event.key.toLowerCase() === 'm') player.toggleMute();
-        if (event.key.toLowerCase() === 'f' && document.fullscreenEnabled)
-          void toggleFullscreen();
+        if (event.key.toLowerCase() === 'f' && canFullscreen) void toggleFullscreen();
       }}
     >
       {ready && (
@@ -427,7 +395,7 @@ export function PlaybackView({
                 disabled={session.busy}
                 onClick={() => void session.mutate('refresh', player.time)}
               >
-                Refresh source
+                Reload video
               </button>
             </div>
           )}
@@ -445,11 +413,6 @@ export function PlaybackView({
             <Icon name={player.paused ? 'play' : 'pause'} />
           )}
         </button>
-      )}
-      {locked && player.buffering && !player.paused && (
-        <div className="player-buffering" role="status" aria-label="Buffering video">
-          <span />
-        </div>
       )}
       {seekFeedback && (
         <div
@@ -483,13 +446,14 @@ export function PlaybackView({
             </p>
           )}
         </div>
-        {started && (
+        {canFullscreen && (
           <button
             className="player-round-button"
-            aria-label="Lock playback controls"
-            onClick={lock}
+            aria-label={fullscreen ? 'Exit full screen' : 'Full screen'}
+            title={fullscreen ? 'Exit full screen' : 'Full screen'}
+            onClick={() => void toggleFullscreen()}
           >
-            <Icon name="lock-open" />
+            <Icon name={fullscreen ? 'collapse' : 'expand'} />
           </button>
         )}
       </header>
@@ -512,9 +476,6 @@ export function PlaybackView({
           <PlayerControls
             player={player}
             speed={speed}
-            fullscreen={fullscreen}
-            canFullscreen={!!document.fullscreenEnabled}
-            onFullscreen={() => void toggleFullscreen()}
             onPanel={openPanel}
             qualityLabel={
               media.qualities.find((item) => item.id === media.quality)?.label ?? 'Auto'
@@ -545,9 +506,7 @@ export function PlaybackView({
                   ? 'Playback speed'
                   : panel === 'quality'
                     ? 'Video quality'
-                    : panel === 'tracks'
-                      ? 'Audio & subtitles'
-                      : 'Playback source'}
+                    : 'Audio & subtitles'}
               </h3>
               <button
                 className="player-panel-close"
@@ -589,10 +548,9 @@ export function PlaybackView({
                   </button>
                 ))}
                 <p className="player-panel-note">
-                  Quality adapts to your connection and the available stream.
-                  {!media.qualities.length
-                    ? ' This browser or source does not expose manual quality choices.'
-                    : ''}
+                  {media.qualities.length
+                    ? 'Auto adjusts to your connection.'
+                    : 'Quality is managed automatically for this video.'}
                 </p>
               </div>
             ) : panel === 'tracks' ? (
@@ -635,22 +593,7 @@ export function PlaybackView({
                   )}
                 </div>
               </div>
-            ) : (
-              <div className="player-source-options">
-                <button disabled={session.busy} onClick={() => runSourceAction('backup')}>
-                  <strong>Try backup</strong>
-                  <span>Switch to the next available source</span>
-                </button>
-                <button disabled={session.busy} onClick={() => runSourceAction('refresh')}>
-                  <strong>Refresh source</strong>
-                  <span>Reload the current source</span>
-                </button>
-                <button disabled={session.busy} onClick={() => runSourceAction('renew')}>
-                  <strong>Extend playback</strong>
-                  <span>Renew this playback session</span>
-                </button>
-              </div>
-            )}
+            ) : null}
           </div>
         </div>
       )}
@@ -674,12 +617,6 @@ export function PlaybackView({
             }}
           />
         </div>
-      )}
-      {locked && unlockVisible && (
-        <button className="player-unlock" onClick={unlock}>
-          <Icon name="lock" />
-          Unlock controls
-        </button>
       )}
     </section>
   );

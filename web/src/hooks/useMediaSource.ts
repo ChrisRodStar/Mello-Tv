@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 import type Hls from 'hls.js';
 import type { PlaybackSource } from '../lib/playback';
+import { videoQualityOptions } from '../lib/video-quality';
 
 type Option = { id: number; label: string };
 type AudioTrack = { enabled: boolean; label: string; language: string };
@@ -83,16 +84,7 @@ export function useMediaSource(
     const syncTracks = () => {
       if (disposed) return;
       if (instance) {
-        setQualities(
-          instance.levels.map((level, id) => ({
-            id,
-            label: level.height
-              ? `${level.height}p`
-              : level.bitrate
-                ? `${Math.round(level.bitrate / 1000)} kbps`
-                : `Level ${id + 1}`,
-          })),
-        );
+        setQualities(videoQualityOptions(instance.levels));
         setQualityState(instance.manualLevel);
       }
       if (instance?.audioTracks.length) {
@@ -156,17 +148,23 @@ export function useMediaSource(
       /mpegurl/i.test(source.mimeType ?? '') ||
       /\.m3u8$/i.test(new URL(source.url, document.baseURI).pathname);
     async function attach() {
-      if (!hls || element!.canPlayType('application/vnd.apple.mpegurl')) {
+      if (!hls) {
         element!.src = source!.url;
         element!.load();
         syncTracks();
         play();
         return;
       }
-      const { default: Hls } = await import('hls.js');
+      const nativeHls = !!element!.canPlayType('application/vnd.apple.mpegurl');
+      const Hls = await import('hls.js').then((module) => module.default).catch(() => null);
       if (disposed) return;
-      if (!Hls.isSupported()) {
-        onError();
+      if (!Hls || !Hls.isSupported()) {
+        if (nativeHls) {
+          element!.src = source!.url;
+          element!.load();
+          syncTracks();
+          play();
+        } else onError();
         return;
       }
       instance = new Hls({ maxBufferLength: 30, maxMaxBufferLength: 60, backBufferLength: 30 });
