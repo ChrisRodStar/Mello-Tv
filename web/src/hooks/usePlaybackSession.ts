@@ -34,6 +34,8 @@ export function usePlaybackSession(request: PlaybackRequest, resolver?: Playback
       pending.current = null;
       owner.current = request;
       retryPosition.current = null;
+      restart.current = false;
+      setSource(null);
     }
     const abort = new AbortController();
     controller.current = abort;
@@ -42,13 +44,10 @@ export function usePlaybackSession(request: PlaybackRequest, resolver?: Playback
     setBusy(false);
     lock.current = false;
     const previous = current.current;
+    const signal = AbortSignal.any([abort.signal, AbortSignal.timeout(40000)]);
     const work = previous
-      ? recoverPlayback(request, previous.session.id, abort.signal)
-      : resolvePlaybackSource(
-          request,
-          AbortSignal.any([abort.signal, AbortSignal.timeout(40000)]),
-          resolver,
-        );
+      ? recoverPlayback(request, previous.session.id, signal)
+      : resolvePlaybackSource(request, signal, resolver);
     void work
       .then((result) => {
         if (abort.signal.aborted) return;
@@ -134,8 +133,12 @@ export function usePlaybackSession(request: PlaybackRequest, resolver?: Playback
         e instanceof APIError ? e.message : 'Couldn’t change playback. Retry the same action.',
       );
     } finally {
-      lock.current = false;
-      if (!abort.signal.aborted) setBusy(false);
+      // An aborted operation can finish after a newer operation has acquired
+      // the lock. Only its owner may release it.
+      if (controller.current === abort) {
+        lock.current = false;
+        if (!abort.signal.aborted) setBusy(false);
+      }
     }
   }
   return {

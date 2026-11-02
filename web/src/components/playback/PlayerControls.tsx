@@ -1,9 +1,9 @@
-import type { CSSProperties } from 'react';
+import { useRef, type CSSProperties } from 'react';
 
 import { formatPlaybackTime, type usePlayerControls } from '../../hooks/usePlayerControls';
 import { Icon, type IconName } from '../common/Icon';
 
-export type PlayerPanel = 'speed' | 'source';
+export type PlayerPanel = 'speed' | 'source' | 'quality' | 'tracks' | 'episodes';
 export const PLAYBACK_SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2] as const;
 
 /** Bottom chrome mirroring the iOS player: timeline with remaining time above a capsule of actions. */
@@ -15,6 +15,8 @@ export function PlayerControls({
   onFullscreen,
   onPanel,
   onNext,
+  qualityLabel,
+  hasEpisodes,
 }: {
   player: ReturnType<typeof usePlayerControls>;
   speed: number;
@@ -23,7 +25,10 @@ export function PlayerControls({
   onFullscreen: () => void;
   onPanel: (panel: PlayerPanel) => void;
   onNext?: () => void;
+  qualityLabel: string;
+  hasEpisodes: boolean;
 }) {
+  const scrubbing = useRef(false);
   const remaining = Math.max(0, player.duration - player.time);
   return (
     <>
@@ -38,7 +43,36 @@ export function PlayerControls({
           step={0.1}
           value={player.time}
           disabled={!player.duration}
-          onChange={(event) => player.seek(Number(event.target.value))}
+          onPointerDown={(event) => {
+            scrubbing.current = true;
+            event.currentTarget.setPointerCapture(event.pointerId);
+            player.beginScrub();
+          }}
+          onChange={(event) =>
+            scrubbing.current
+              ? player.updateScrub(Number(event.target.value))
+              : player.seek(Number(event.target.value))
+          }
+          onPointerUp={() => {
+            scrubbing.current = false;
+            player.commitScrub();
+          }}
+          onPointerCancel={() => {
+            scrubbing.current = false;
+            player.cancelScrub();
+          }}
+          onLostPointerCapture={() => {
+            if (scrubbing.current) {
+              scrubbing.current = false;
+              player.cancelScrub();
+            }
+          }}
+          onBlur={() => {
+            if (scrubbing.current) {
+              scrubbing.current = false;
+              player.commitScrub();
+            }
+          }}
           style={
             {
               '--progress': `${player.duration ? (player.time / player.duration) * 100 : 0}%`,
@@ -56,7 +90,31 @@ export function PlayerControls({
           aria-label={`Playback speed, ${speed} times`}
           onClick={() => onPanel('speed')}
         />
-        <PlayerAction icon="refresh" label="Source" onClick={() => onPanel('source')} />
+        <PlayerAction
+          icon="stack"
+          label={qualityLabel}
+          aria-label="Video quality"
+          onClick={() => onPanel('quality')}
+        />
+        {hasEpisodes && (
+          <PlayerAction icon="stack" label="Episodes" onClick={() => onPanel('episodes')} />
+        )}
+        <PlayerAction
+          icon="subtitles"
+          label="Audio & subtitles"
+          short="Audio"
+          onClick={() => onPanel('tracks')}
+        />
+        {onNext && (
+          <PlayerAction
+            icon="skip-forward"
+            label="Next episode"
+            short="Next"
+            onClick={onNext}
+          />
+        )}
+      </div>
+      <div className="player-browser-tools">
         <div className="player-action player-volume">
           <button
             className="player-volume-toggle"
@@ -88,14 +146,7 @@ export function PlayerControls({
             onClick={onFullscreen}
           />
         )}
-        {onNext && (
-          <PlayerAction
-            icon="skip-forward"
-            label="Next episode"
-            short="Next"
-            onClick={onNext}
-          />
-        )}
+        <PlayerAction icon="refresh" label="Source" onClick={() => onPanel('source')} />
       </div>
     </>
   );
@@ -115,7 +166,12 @@ function PlayerAction({
   'aria-label'?: string;
 }) {
   return (
-    <button className="player-action" aria-label={ariaLabel ?? label} onClick={onClick}>
+    <button
+      className="player-action"
+      aria-label={ariaLabel ?? label}
+      title={ariaLabel ?? label}
+      onClick={onClick}
+    >
       <Icon name={icon} />
       <span className={short ? 'player-action-full' : undefined}>{label}</span>
       {short && (

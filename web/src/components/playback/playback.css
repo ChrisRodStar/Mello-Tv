@@ -639,24 +639,6 @@ button.player-action:hover,
     flex: 0 0 auto;
   }
 }
-@media (pointer: coarse) and (orientation: portrait) {
-  .playback-view {
-    inset: auto;
-    top: 50%;
-    left: 50%;
-    width: 100dvh;
-    height: 100dvw;
-    min-height: 0;
-    transform: translate(-50%, -50%) rotate(90deg);
-    transform-origin: center;
-  }
-  .playback-view .player-header {
-    padding: 12px max(20px, env(safe-area-inset-top)) 0 max(20px, env(safe-area-inset-bottom));
-  }
-  .playback-view .player-footer {
-    padding: 0 max(20px, env(safe-area-inset-top)) 8px max(20px, env(safe-area-inset-bottom));
-  }
-}
 @media (prefers-reduced-motion: reduce) {
   .player-chrome {
     transition: none;
@@ -672,5 +654,256 @@ button.player-action:hover,
   .player-spinner,
   .player-buffering span {
     animation-duration: 2.4s;
+  }
+}
+
+/* Match the iOS playback proportions while keeping browser controls close at hand. */
+.playback-view {
+  --player-inset-x: clamp(20px, 5.5vw, 120px);
+  --player-surface: rgba(0, 0, 0, 0.72);
+  --player-blue: #2997ff;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+.player-header {
+  padding-top: max(clamp(18px, 3vh, 40px), env(safe-area-inset-top));
+  gap: clamp(14px, 1.6vw, 30px);
+}
+.player-round-button {
+  width: clamp(48px, 6vw, 76px);
+  height: clamp(48px, 6vw, 76px);
+}
+.player-round-button svg {
+  width: 30%;
+  height: 30%;
+}
+.player-title h2 {
+  font-size: clamp(18px, 2vw, 30px);
+  font-weight: 700;
+}
+.player-title p {
+  font-size: clamp(13px, 1.4vw, 20px);
+  margin-top: 5px;
+}
+.player-transport svg {
+  width: clamp(38px, 4vw, 58px);
+  height: clamp(38px, 4vw, 58px);
+}
+.player-footer {
+  gap: 12px;
+  padding-bottom: max(18px, env(safe-area-inset-bottom));
+}
+.player-timeline-row {
+  height: 44px;
+  gap: 24px;
+}
+.player-timeline {
+  margin: 0;
+}
+.player-time {
+  margin: 0;
+  min-width: 64px;
+  font-size: clamp(14px, 1.5vw, 20px);
+  font-weight: 500;
+}
+.player-timeline::-webkit-slider-runnable-track {
+  height: 5px;
+  border-radius: 8px;
+}
+.player-timeline::-moz-range-track,
+.player-timeline::-moz-range-progress {
+  height: 5px;
+  border-radius: 8px;
+}
+.player-timeline::-webkit-slider-thumb {
+  width: 18px;
+  height: 18px;
+  margin-top: -6.5px;
+}
+.player-timeline::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+}
+.player-actions {
+  min-height: clamp(60px, 7vw, 88px);
+  padding: 6px 22px;
+  gap: 12px;
+}
+.player-action {
+  font-size: clamp(13px, 1.5vw, 20px);
+  font-weight: 600;
+  gap: clamp(7px, 1vw, 14px);
+}
+.player-action > svg {
+  width: clamp(19px, 2vw, 27px);
+  height: clamp(19px, 2vw, 27px);
+}
+.player-browser-tools {
+  display: flex;
+  align-items: center;
+  align-self: flex-end;
+  gap: 18px;
+}
+.player-browser-tools .player-action {
+  flex: 0 0 auto;
+  font-size: 12px;
+  min-height: 36px;
+}
+.player-browser-tools .player-action > svg {
+  width: 17px;
+  height: 17px;
+}
+.player-browser-tools .player-volume-toggle {
+  height: 36px;
+}
+.player-browser-tools .player-volume {
+  gap: 2px;
+}
+.player-panel-layer {
+  padding: 24px var(--player-inset-x) max(40px, 6vh);
+}
+.player-panel {
+  width: min(780px, 100%);
+  max-height: calc(100dvh - 80px);
+  overflow-y: auto;
+  padding: clamp(20px, 3vw, 38px);
+  border-radius: clamp(24px, 3vw, 42px);
+  background: rgba(8, 8, 9, 0.92);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+.player-panel-header {
+  margin-bottom: 24px;
+}
+.player-panel-header h3 {
+  font-size: clamp(21px, 2.1vw, 28px);
+  font-weight: 700;
+}
+.player-panel-close svg {
+  width: 24px;
+  height: 24px;
+}
+.player-choice-options {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.player-choice-options h4 {
+  margin: 4px 0 12px;
+  color: #a8a8af;
+  font-size: 16px;
+}
+.player-choice-options > button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 52px;
+  padding: 12px 0;
+  border: 0;
+  background: transparent;
+  color: #fff;
+  font-size: 18px;
+  text-align: left;
+}
+.player-choice-options > button svg {
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+}
+.player-choice-options > button:hover {
+  color: #8ac6ff;
+}
+.player-choice-options > .is-selected {
+  color: var(--player-blue);
+  font-weight: 700;
+}
+.player-panel-note {
+  margin: 8px 0;
+  color: #a8a8af;
+  font-size: 14px;
+  line-height: 1.6;
+}
+.player-track-columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: clamp(24px, 4vw, 60px);
+}
+.player-episodes-layer {
+  position: absolute;
+  inset: 0;
+}
+@media (min-width: 1600px) {
+  .player-footer {
+    padding-bottom: max(32px, env(safe-area-inset-bottom));
+  }
+}
+@media (max-width: 600px) {
+  .playback-view {
+    --player-inset-x: 18px;
+  }
+  .player-header {
+    gap: 12px;
+  }
+  .player-title h2 {
+    font-size: 18px;
+  }
+  .player-title p {
+    font-size: 12px;
+  }
+  .player-actions {
+    padding: 6px 10px;
+    gap: 4px;
+    border-radius: 28px;
+  }
+  .player-action {
+    flex-direction: column;
+    gap: 5px;
+    padding: 3px 2px;
+    font-size: 11px;
+  }
+  .player-browser-tools .player-action {
+    flex-direction: row;
+  }
+  .player-panel-layer {
+    padding: 16px 12px max(20px, env(safe-area-inset-bottom));
+  }
+  .player-panel {
+    max-height: calc(100dvh - 40px);
+  }
+  .player-track-columns {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+}
+@media (max-height: 500px) {
+  .player-header {
+    padding-top: max(10px, env(safe-area-inset-top));
+  }
+  .player-round-button {
+    width: 44px;
+    height: 44px;
+  }
+  .player-footer {
+    gap: 2px;
+    padding-bottom: max(6px, env(safe-area-inset-bottom));
+  }
+  .player-actions {
+    min-height: 48px;
+    padding: 2px 12px;
+  }
+  .player-action {
+    flex-direction: row;
+  }
+  .player-browser-tools .player-action {
+    min-height: 28px;
+  }
+  .player-timeline-row {
+    height: 32px;
+  }
+  .player-panel-layer {
+    padding-bottom: 12px;
+  }
+  .player-panel {
+    max-height: calc(100dvh - 24px);
   }
 }

@@ -5,6 +5,8 @@ import { useMediaSource } from '../../hooks/useMediaSource';
 import { usePlayerControls } from '../../hooks/usePlayerControls';
 import { usePlayerVisibility } from '../../hooks/usePlayerVisibility';
 import { useWatchProgress } from '../../hooks/useWatchProgress';
+import type { WatchProgress, Episode } from '../../model';
+import { PlayerEpisodes } from './PlayerEpisodes';
 import type { PlaybackRequest, PlaybackResolver } from '../../lib/playback';
 import { Icon } from '../common/Icon';
 import { PLAYBACK_SPEEDS, PlayerControls, type PlayerPanel } from './PlayerControls';
@@ -16,11 +18,15 @@ export function PlaybackView({
   resolver,
   onBack,
   onNext,
+  onEpisode,
+  progress: savedProgress,
 }: {
   request: PlaybackRequest;
   resolver?: PlaybackResolver;
   onBack: () => void;
   onNext?: () => void;
+  onEpisode?: (season: number, episode: Episode) => void;
+  progress?: WatchProgress[];
 }) {
   const session = usePlaybackSession(request, resolver);
   const { source, status } = session;
@@ -35,6 +41,9 @@ export function PlaybackView({
   // player shows preparation instead of transport controls.
   const [startedURL, setStartedURL] = useState<string | null>(null);
   const stage = useRef<HTMLElement>(null);
+  const panelNode = useRef<HTMLDivElement>(null);
+  const panelTrigger = useRef<HTMLElement | null>(null);
+  const transitioning = useRef(false);
   const video = useRef<HTMLVideoElement>(null);
   const lastTap = useRef<{ x: number; y: number } | null>(null);
   const pendingTap = useRef<{ timer: ReturnType<typeof setTimeout>; zone: number } | null>(
@@ -45,13 +54,14 @@ export function PlaybackView({
   const player = usePlayerControls(video);
   const mediaError = session.mediaError;
   const ready = status === 'ready' && !!source;
-  useMediaSource(video, ready ? source : null, mediaError);
+  const media = useMediaSource(video, ready ? source : null, mediaError);
   const progress = useWatchProgress(video, request, ready ? source : null);
   const started = ready && startedURL === source.url;
   const preparing =
-    status === 'loading' || (ready && !started && !(player.paused && !player.buffering));
+    status === 'loading' ||
+    (ready && !started && !media.autoplayBlocked && !(player.paused && !player.buffering));
   const chrome = usePlayerVisibility(
-    ready && !preparing && !player.paused && !player.buffering && !panel,
+    ready && !preparing && !player.paused && !player.buffering && !player.scrubbing && !panel,
   );
   const chromeVisible = !locked && (chrome.visible || !ready || preparing || !!panel);
 
@@ -84,6 +94,21 @@ export function PlaybackView({
     if (!ready) setPanel(null);
   }, [ready]);
 
+  useEffect(() => {
+    if (!ready || media.autoplayBlocked || (!preparing && (!player.buffering || player.paused)))
+      return;
+    const timer = setTimeout(mediaError, 45000);
+    return () => clearTimeout(timer);
+  }, [
+    ready,
+    source?.url,
+    preparing,
+    player.buffering,
+    player.paused,
+    media.autoplayBlocked,
+    mediaError,
+  ]);
+
   async function toggleFullscreen() {
     try {
       if (document.fullscreenElement) await document.exitFullscreen();
@@ -107,7 +132,10 @@ export function PlaybackView({
     }
   }
   async function back() {
-    await progress.flush();
+    if (transitioning.current) return;
+    transitioning.current = true;
+    video.current?.pause();
+    void progress.flush();
     if (document.fullscreenElement === stage.current) {
       try {
         await document.exitFullscreen();
@@ -117,6 +145,37 @@ export function PlaybackView({
     }
     onBack();
   }
+  function openPanel(value: PlayerPanel) {
+    panelTrigger.current = document.activeElement as HTMLElement | null;
+    setPanel(value);
+  }
+  function closePanel() {
+    setPanel(null);
+    chrome.wake();
+    requestAnimationFrame(() => {
+      if (panelTrigger.current?.isConnected) panelTrigger.current.focus();
+      else stage.current?.focus();
+    });
+  }
+  function next() {
+    if (!onNext || transitioning.current) return;
+    transitioning.current = true;
+    video.current?.pause();
+    void progress.flush();
+    onNext();
+  }
+  useEffect(() => {
+    transitioning.current = false;
+    setPanel(null);
+    setLocked(false);
+    setStartedURL(null);
+    if (pendingTap.current) clearTimeout(pendingTap.current.timer);
+    pendingTap.current = null;
+  }, [request]);
+  useEffect(() => {
+    if (!panel) return;
+    panelNode.current?.querySelector<HTMLElement>('button, select')?.focus();
+  }, [panel]);
   function revealUnlock() {
     setUnlockVisible(true);
     if (unlockTimer.current) clearTimeout(unlockTimer.current);
@@ -125,6 +184,7 @@ export function PlaybackView({
   function lock() {
     setPanel(null);
     setLocked(true);
+    requestAnimationFrame(() => stage.current?.focus());
     revealUnlock();
   }
   function unlock() {
@@ -147,7 +207,10 @@ export function PlaybackView({
   }
   function runSourceAction(kind: 'backup' | 'refresh' | 'renew') {
     setPanel(null);
-    void progress.flush().then(() => session.mutate(kind, player.time));
+    const position = video.current?.currentTime ?? player.time;
+    video.current?.pause();
+    void progress.flush();
+    void session.mutate(kind, position);
   }
   const chromeHandlers = {
     onPointerEnter: (event: PointerEvent) => {
@@ -176,12 +239,12 @@ export function PlaybackView({
         chrome.wake();
       }}
       onPointerDown={(event) => {
-        if ((event.target as HTMLElement).closest('button, input')) chrome.wake();
+        if ((event.target as HTMLElement).closest('button, input, select')) chrome.wake();
       }}
       onClick={(event) => {
         if (
           (event.target as HTMLElement).closest(
-            'button, input, .playback-status, .player-panel',
+            'button, input, select, .playback-status, .player-panel, .player-episodes',
           )
         )
           return;
@@ -192,10 +255,7 @@ export function PlaybackView({
         if (!ready || preparing) return;
         lastTap.current = { x: event.clientX, y: event.clientY };
         const bounds = event.currentTarget.getBoundingClientRect();
-        const rotated = getComputedStyle(event.currentTarget).transform !== 'none';
-        const fraction = rotated
-          ? (event.clientY - bounds.top) / bounds.height
-          : (event.clientX - bounds.left) / bounds.width;
+        const fraction = (event.clientX - bounds.left) / bounds.width;
         const zone = fraction < 0.35 ? -1 : fraction > 0.65 ? 1 : 0;
         const previous = pendingTap.current;
         if (previous) {
@@ -214,11 +274,49 @@ export function PlaybackView({
         }
       }}
       onKeyDown={(event) => {
+        if (event.key === 'Tab' && !panel && !locked) {
+          chrome.wake();
+          if (!chromeVisible) {
+            event.preventDefault();
+            const backwards = event.shiftKey;
+            requestAnimationFrame(() => {
+              const controls = stage.current?.querySelectorAll<HTMLElement>(
+                '.player-header button, .player-footer button, .player-footer input:not(:disabled)',
+              );
+              (backwards ? controls?.[controls.length - 1] : controls?.[0])?.focus();
+            });
+            return;
+          }
+        }
+        if (panel && event.key === 'Tab') {
+          const items = panelNode.current?.querySelectorAll<HTMLElement>(
+            'button:not(:disabled), select:not(:disabled), input:not(:disabled), [tabindex="0"]',
+          );
+          if (items?.length) {
+            const first = items[0],
+              last = items[items.length - 1];
+            if (
+              event.shiftKey &&
+              (document.activeElement === first ||
+                !panelNode.current?.contains(document.activeElement))
+            ) {
+              event.preventDefault();
+              last?.focus();
+            } else if (
+              !event.shiftKey &&
+              (document.activeElement === last ||
+                !panelNode.current?.contains(document.activeElement))
+            ) {
+              event.preventDefault();
+              first?.focus();
+            }
+          }
+          return;
+        }
         if (event.key === 'Escape' && panel) {
           event.preventDefault();
           event.stopPropagation();
-          setPanel(null);
-          stage.current?.focus();
+          closePanel();
           return;
         }
         if (locked) {
@@ -227,7 +325,7 @@ export function PlaybackView({
             return;
           }
         } else chrome.wake();
-        if ((event.target as HTMLElement).closest('button, input')) {
+        if ((event.target as HTMLElement).closest('button, input, select')) {
           if (!locked) chrome.setFocused(true);
           if (event.key !== 'Escape') return;
         }
@@ -237,7 +335,7 @@ export function PlaybackView({
           void back();
           return;
         }
-        if (!ready || panel) return;
+        if (!ready || panel || event.altKey || event.ctrlKey || event.metaKey) return;
         if (event.key === ' ' || event.key.toLowerCase() === 'k') {
           event.preventDefault();
           void player.toggle();
@@ -257,7 +355,7 @@ export function PlaybackView({
     >
       {ready && (
         <video
-          ref={video}
+          ref={player.attach}
           key={source.url}
           autoPlay
           playsInline
@@ -267,13 +365,15 @@ export function PlaybackView({
             event.currentTarget.playbackRate = speed;
             player.sync();
           }}
+          onDurationChange={player.sync}
+          onEmptied={player.sync}
           onTimeUpdate={player.sync}
           onVolumeChange={player.sync}
           onPlay={player.sync}
           onPause={player.sync}
           onEnded={() => {
             player.sync();
-            onNext?.();
+            next();
           }}
           onWaiting={() => player.setBuffering(true)}
           onPlaying={() => {
@@ -281,7 +381,10 @@ export function PlaybackView({
             player.setBuffering(false);
             setStartedURL(source.url);
           }}
-          onCanPlay={() => player.setBuffering(false)}
+          onCanPlay={() => {
+            player.sync();
+            player.setBuffering(false);
+          }}
           onError={mediaError}
         />
       )}
@@ -305,7 +408,8 @@ export function PlaybackView({
             <button
               className="player-retry"
               onClick={() => {
-                void progress.flush().finally(() => session.retry(player.time));
+                void progress.flush();
+                session.retry(player.time);
               }}
             >
               Try again
@@ -331,6 +435,7 @@ export function PlaybackView({
       ) : (
         <button
           className="player-transport player-chrome"
+          inert={!!panel || !chromeVisible}
           aria-label={player.paused ? 'Play' : player.buffering ? 'Pause, buffering' : 'Pause'}
           onClick={() => void player.toggle()}
         >
@@ -357,7 +462,11 @@ export function PlaybackView({
           {seekFeedback.seconds}s
         </div>
       )}
-      <header className="player-header player-chrome" {...chromeHandlers}>
+      <header
+        inert={!!panel || !chromeVisible}
+        className="player-header player-chrome"
+        {...chromeHandlers}
+      >
         <button
           className="player-round-button"
           aria-label="Close player"
@@ -385,7 +494,11 @@ export function PlaybackView({
         )}
       </header>
       {ready && !preparing && (
-        <footer className="player-footer player-chrome" {...chromeHandlers}>
+        <footer
+          inert={!!panel || !chromeVisible}
+          className="player-footer player-chrome"
+          {...chromeHandlers}
+        >
           {session.error && (
             <p className="player-notice" role="alert">
               {session.error}
@@ -402,20 +515,25 @@ export function PlaybackView({
             fullscreen={fullscreen}
             canFullscreen={!!document.fullscreenEnabled}
             onFullscreen={() => void toggleFullscreen()}
-            onPanel={setPanel}
-            onNext={onNext}
+            onPanel={openPanel}
+            qualityLabel={
+              media.qualities.find((item) => item.id === media.quality)?.label ?? 'Auto'
+            }
+            hasEpisodes={request.type === 'tv' && !!onEpisode}
+            onNext={onNext ? next : undefined}
           />
         </footer>
       )}
-      {panel && (
+      {panel && panel !== 'episodes' && (
         <div className="player-panel-layer">
           <button
             className="player-panel-dismiss"
             aria-label="Dismiss playback menu"
             tabIndex={-1}
-            onClick={() => setPanel(null)}
+            onClick={closePanel}
           />
           <div
+            ref={panelNode}
             className="player-panel"
             role="dialog"
             aria-modal="true"
@@ -423,42 +541,99 @@ export function PlaybackView({
           >
             <div className="player-panel-header">
               <h3 id="player-panel-title">
-                {panel === 'speed' ? 'Playback speed' : 'Playback source'}
+                {panel === 'speed'
+                  ? 'Playback speed'
+                  : panel === 'quality'
+                    ? 'Video quality'
+                    : panel === 'tracks'
+                      ? 'Audio & subtitles'
+                      : 'Playback source'}
               </h3>
               <button
                 className="player-panel-close"
                 aria-label="Close playback menu"
                 autoFocus
-                onClick={() => {
-                  setPanel(null);
-                  stage.current?.focus();
-                }}
+                onClick={closePanel}
               >
                 <Icon name="close" />
               </button>
             </div>
             {panel === 'speed' ? (
-              <div
-                className="player-speed-options"
-                role="radiogroup"
-                aria-label="Playback speed"
-              >
+              <div className="player-speed-options" role="group" aria-label="Playback speed">
                 {PLAYBACK_SPEEDS.map((value) => (
                   <button
                     key={value}
-                    role="radio"
-                    aria-checked={speed === value}
+                    aria-pressed={speed === value}
                     aria-label={value === 1 ? 'Normal speed' : `${value} times speed`}
                     className={speed === value ? 'is-selected' : undefined}
                     onClick={() => {
                       setSpeed(value);
-                      setPanel(null);
-                      stage.current?.focus();
+                      closePanel();
                     }}
                   >
                     {value}×
                   </button>
                 ))}
+              </div>
+            ) : panel === 'quality' ? (
+              <div className="player-choice-options" role="group" aria-label="Video quality">
+                {[{ id: -1, label: 'Auto' }, ...media.qualities].map((item) => (
+                  <button
+                    key={item.id}
+                    aria-pressed={media.quality === item.id}
+                    className={media.quality === item.id ? 'is-selected' : ''}
+                    onClick={() => media.setQuality(item.id)}
+                  >
+                    <span>{item.label}</span>
+                    {media.quality === item.id && <Icon name="check" />}
+                  </button>
+                ))}
+                <p className="player-panel-note">
+                  Quality adapts to your connection and the available stream.
+                  {!media.qualities.length
+                    ? ' This browser or source does not expose manual quality choices.'
+                    : ''}
+                </p>
+              </div>
+            ) : panel === 'tracks' ? (
+              <div className="player-track-columns">
+                <div className="player-choice-options" role="group" aria-label="Audio">
+                  <h4>Audio</h4>
+                  {media.audioTracks.length ? (
+                    media.audioTracks.map((item) => (
+                      <button
+                        key={item.id}
+                        aria-pressed={media.audioTrack === item.id}
+                        className={media.audioTrack === item.id ? 'is-selected' : ''}
+                        onClick={() => media.setAudioTrack(item.id)}
+                      >
+                        <span>{item.label}</span>
+                        {media.audioTrack === item.id && <Icon name="check" />}
+                      </button>
+                    ))
+                  ) : (
+                    <p className="player-panel-note">Default audio</p>
+                  )}
+                </div>
+                <div className="player-choice-options" role="group" aria-label="Subtitles">
+                  <h4>Subtitles</h4>
+                  {[{ id: -1, label: 'Off' }, ...media.subtitleTracks].map((item) => (
+                    <button
+                      key={item.id}
+                      aria-pressed={media.subtitleTrack === item.id}
+                      className={media.subtitleTrack === item.id ? 'is-selected' : ''}
+                      onClick={() => media.setSubtitleTrack(item.id)}
+                    >
+                      <span>{item.label}</span>
+                      {media.subtitleTrack === item.id && <Icon name="check" />}
+                    </button>
+                  ))}
+                  {!media.subtitleTracks.length && (
+                    <p className="player-panel-note">
+                      No subtitles are available in this stream.
+                    </p>
+                  )}
+                </div>
               </div>
             ) : (
               <div className="player-source-options">
@@ -477,6 +652,27 @@ export function PlaybackView({
               </div>
             )}
           </div>
+        </div>
+      )}
+      {panel === 'episodes' && request.type === 'tv' && onEpisode && (
+        <div ref={panelNode} className="player-episodes-layer">
+          <PlayerEpisodes
+            progress={savedProgress}
+            request={request}
+            onClose={closePanel}
+            onSelect={(season, episode) => {
+              if (season === request.season && episode.number === request.episode) {
+                closePanel();
+                return;
+              }
+              if (transitioning.current) return;
+              transitioning.current = true;
+              video.current?.pause();
+              void progress.flush();
+              setPanel(null);
+              onEpisode(season, episode);
+            }}
+          />
         </div>
       )}
       {locked && unlockVisible && (

@@ -4,7 +4,7 @@ import type { Episode, Title } from '../../model';
 
 import { useProfileLibrary } from '../../hooks/useProfileLibrary';
 import { useTitleDetails } from '../../hooks/useTitleDetails';
-import { loadCatalog } from '../../lib/catalog';
+import { loadCatalog, loadEpisodes } from '../../lib/catalog';
 import type { PlaybackRequest, PlaybackResolver } from '../../lib/playback';
 import { Icon } from '../common/Icon';
 import { EpisodeList } from './EpisodeList';
@@ -134,14 +134,50 @@ export function TitleDetails({
   const [playback, setPlayback] = useState<PlaybackRequest | null>(initialPlayback ?? null);
   const playButton = useRef<HTMLButtonElement>(null);
 
+  const [nextSeasonEpisode, setNextSeasonEpisode] = useState<{
+    from: PlaybackRequest;
+    season: number;
+    episode: Episode;
+  } | null>(null);
+  const nextSeason = nextSeasonEpisode?.from === playback ? nextSeasonEpisode : null;
   const nextEpisode =
     playback?.type === 'tv' && playback.season === season
-      ? episodes?.find((episode) => episode.number === playback.episode + 1)
+      ? episodes
+          ?.filter((episode) => episode.number > playback.episode)
+          .sort((a, b) => a.number - b.number)[0]
       : undefined;
 
   useEffect(() => {
+    setNextSeasonEpisode(null);
+    if (
+      playback?.type !== 'tv' ||
+      playback.season !== season ||
+      !episodes?.some((item) => item.number === playback.episode) ||
+      nextEpisode ||
+      !details
+    )
+      return;
+    const nextSeason = details.seasons
+      .filter((item) => item.number > playback.season && item.episodeCount > 0)
+      .sort((a, b) => a.number - b.number)[0];
+    if (!nextSeason) return;
+    const controller = new AbortController();
+    void loadEpisodes(
+      title.id,
+      nextSeason.number,
+      AbortSignal.any([controller.signal, AbortSignal.timeout(10000)]),
+    )
+      .then((items) => {
+        const first = items.slice().sort((a, b) => a.number - b.number)[0];
+        if (!controller.signal.aborted && first)
+          setNextSeasonEpisode({ from: playback, season: nextSeason.number, episode: first });
+      })
+      .catch(() => {});
+    return () => controller.abort();
+  }, [playback, season, episodes, nextEpisode, details, title.id]);
+
+  useEffect(() => {
     void loadPlayback().catch(() => {});
-    void import('hls.js').catch(() => {});
   }, []);
 
   function preloadEpisode(_episode: Episode) {
@@ -212,9 +248,7 @@ export function TitleDetails({
   const metadataLine = [
     title.year,
     title.rating > 0 ? `${title.rating.toFixed(1)} / 10` : '',
-    details?.runtime
-      ? `${details.runtime} min${title.type === 'tv' ? ' / ep' : ''}`
-      : '',
+    details?.runtime ? `${details.runtime} min${title.type === 'tv' ? ' / ep' : ''}` : '',
     title.type === 'tv' && details
       ? `${seasonCount} ${seasonCount === 1 ? 'season' : 'seasons'}`
       : '',
@@ -253,9 +287,7 @@ export function TitleDetails({
                   <img src={item.posterUrl} alt="" loading="lazy" decoding="async" />
                 ) : (
                   <div className="detail-suggestion-poster-placeholder">
-                    <Icon
-                      name={item.type === 'movie' ? 'film-slate' : 'television-simple'}
-                    />
+                    <Icon name={item.type === 'movie' ? 'film-slate' : 'television-simple'} />
                   </div>
                 )}
               </div>
@@ -266,7 +298,8 @@ export function TitleDetails({
         </div>
       ) : (
         <p className="metadata-status">
-          More {title.type === 'movie' ? 'movies' : 'TV shows'} will appear as the catalog updates.
+          More {title.type === 'movie' ? 'movies' : 'TV shows'} will appear as the catalog
+          updates.
         </p>
       )}
     </div>
@@ -304,7 +337,41 @@ export function TitleDetails({
             <PlaybackView
               request={playback}
               resolver={resolvePlayback}
-              onNext={nextEpisode ? () => play(nextEpisode) : undefined}
+              onEpisode={(chosenSeason: number, episode: Episode) => {
+                setSeason(chosenSeason);
+                setPlayback((current) =>
+                  current?.type === 'tv'
+                    ? {
+                        ...current,
+                        season: chosenSeason,
+                        episode: episode.number,
+                        episodeTitle: episode.name,
+                        startAt: undefined,
+                      }
+                    : current,
+                );
+              }}
+              progress={library.progress}
+              onNext={
+                nextEpisode
+                  ? () => play(nextEpisode)
+                  : nextSeason
+                    ? () => {
+                        setSeason(nextSeason.season);
+                        setPlayback((current) =>
+                          current?.type === 'tv'
+                            ? {
+                                ...current,
+                                season: nextSeason.season,
+                                episode: nextSeason.episode.number,
+                                episodeTitle: nextSeason.episode.name,
+                                startAt: undefined,
+                              }
+                            : current,
+                        );
+                      }
+                    : undefined
+              }
               onBack={() => {
                 if (initialPlayback) {
                   onClose();
@@ -474,8 +541,7 @@ export function TitleDetails({
                           )}
                           {episodes && (
                             <span className="episode-count">
-                              {episodes.length}{' '}
-                              {episodes.length === 1 ? 'episode' : 'episodes'}
+                              {episodes.length} {episodes.length === 1 ? 'episode' : 'episodes'}
                             </span>
                           )}
                         </div>
