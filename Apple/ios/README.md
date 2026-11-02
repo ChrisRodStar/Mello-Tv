@@ -10,7 +10,7 @@ Native SwiftUI and AVKit client for **Mello TV** (`v0.1.0-alpha.2`), featuring z
 Apple/ios/
 ├── MelloTV.xcodeproj/         # Xcode project linked to shared MelloKit
 ├── MelloTV/
-│   ├── App/                   # MelloTVApp entry point, AppRootView, MainTabView
+│   ├── App/                   # App entry point, root routing & native tab navigation
 │   ├── Services/              # MelloTVAPI HTTP client & Bonjour ServerAddress discovery
 │   ├── UI/
 │   │   ├── Components/        # PosterTile, LandscapeCard, ProfileAvatarView
@@ -19,10 +19,11 @@ Apple/ios/
 │   ├── Features/
 │   │   ├── Catalog/           # Home, Movies, TV shelves & 3D FeaturedCarouselView
 │   │   ├── Onboarding/        # First-launch welcome, server discovery & QR connection
-│   │   ├── PersonalLibrary/   # ContinueWatchingShelf, LibraryStore & ProfilePageView
+│   │   ├── PersonalLibrary/   # Library state, shelves & full-page collections
 │   │   ├── Playback/          # Custom AVKit PlayerView, pre-warming & progress tracking
 │   │   ├── Profiles/          # WhoIsWatchingView, ProfileEditorView & taste OnboardingView
 │   │   ├── Search/            # Live catalog & TMDB discovery SearchView
+│   │   ├── Settings/          # App preferences, profile access & shared viewing editors
 │   │   └── TitleDetails/      # TitleDetailSheet & EpisodeRowView
 │   └── Resources/             # Info.plist, Assets.xcassets, AppIcon.icon & PrivacyInfo.xcprivacy
 └── tools/                     # Offline playback reliability checks & timing scripts

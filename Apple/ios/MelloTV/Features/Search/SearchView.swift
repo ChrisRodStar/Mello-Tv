@@ -15,7 +15,6 @@ struct SearchView: View {
     @State private var playbackRequest: PlaybackRequest?
     @FocusState private var isFieldFocused: Bool
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    @Environment(\.dismiss) private var dismiss
 
     let api: MelloTVAPI
     let profileID: String?
@@ -31,26 +30,6 @@ struct SearchView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                HStack {
-                    Text("Search")
-                        .font(.title2.weight(.bold))
-                        .foregroundStyle(MelloTVTheme.text)
-                        .frame(maxWidth: .infinity)
-                }
-                .frame(height: 48)
-                .overlay(alignment: .trailing) {
-                    Button { dismiss() } label: {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 14, weight: .semibold))
-                            .frame(width: 44, height: 44)
-                            .searchGlass()
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(MelloTVTheme.textSecondary)
-                    .accessibilityLabel("Close search")
-                }
-                .padding(.horizontal, 20)
-
                 searchHeaderBar
 
                 searchBody
@@ -97,7 +76,6 @@ struct SearchView: View {
             }
         }
         .background { CatalogPageSurface().ignoresSafeArea() }
-        .presentationBackground(.clear)
     }
 
     // MARK: - Search Header
