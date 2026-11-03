@@ -10,15 +10,21 @@ void main() {
 }
 `;
 
-// Pass 1 (RGBA16F intermediate):
-// 1. BT.709 YCbCr separation + Luma-guided bilateral deblocking & 4:2:0 chroma denoising (KrigBilateral principle)
-// 2. libplacebo / f3kdb 2-iteration randomized 4-point compass debanding for dark gradients
+// Pass 1 (RGBA16F):
+// 1. RemoveGrain(mode=2) 2nd-extrema impulse clamp (strips 1-2px film grain & mosquito speckles)
+// 2. Weber relative contrast (ΔY / Y) gate: smooths grain/blocks on skin & walls (<7.2% Weber)
+//    while preserving & restoring hair strands, eyes, eyelashes, eyebrows, lips, and fabric (>=8% Weber)
+// 3. Despiked 13-tap Adaptive-Sharpen on Weber-gated structural features
 const RESTORE_FRAGMENT_SHADER = `#version 300 es
 precision highp float;
 in vec2 vUv;
 out vec4 fragColor;
 uniform sampler2D uSource;
 uniform vec2 uTexelSize;
+
+float luma(vec3 c) {
+  return dot(c, vec3(0.2126, 0.7152, 0.0722));
+}
 
 vec3 rgbToYCbCr(vec3 rgb) {
   float y  = dot(rgb, vec3(0.2126, 0.7152, 0.0722));
@@ -41,59 +47,78 @@ vec2 hash22(vec2 p) {
 }
 
 void main() {
-  vec3 centerRgb = texture(uSource, vUv).rgb;
-  vec3 center = rgbToYCbCr(centerRgb);
-  float centerY = center.x;
+  vec3 center = rgbToYCbCr(texture(uSource, vUv).rgb);
+  float cY = center.x;
 
-  // Dark scenes (Y < 0.30) suffer heaviest H.264 8x8 macroblocking & 4:2:0 chroma blotches
-  float darkFactor = smoothstep(0.32, 0.02, centerY);
-  float sigmaY = mix(0.020, 0.042, darkFactor);
-  float sigmaC = mix(0.038, 0.075, darkFactor);
+  vec3 n  = rgbToYCbCr(texture(uSource, vUv + vec2( 0.0, -1.0) * uTexelSize).rgb);
+  vec3 s  = rgbToYCbCr(texture(uSource, vUv + vec2( 0.0,  1.0) * uTexelSize).rgb);
+  vec3 e  = rgbToYCbCr(texture(uSource, vUv + vec2( 1.0,  0.0) * uTexelSize).rgb);
+  vec3 w  = rgbToYCbCr(texture(uSource, vUv + vec2(-1.0,  0.0) * uTexelSize).rgb);
+  vec3 nw = rgbToYCbCr(texture(uSource, vUv + vec2(-1.0, -1.0) * uTexelSize).rgb);
+  vec3 ne = rgbToYCbCr(texture(uSource, vUv + vec2( 1.0, -1.0) * uTexelSize).rgb);
+  vec3 sw = rgbToYCbCr(texture(uSource, vUv + vec2(-1.0,  1.0) * uTexelSize).rgb);
+  vec3 se = rgbToYCbCr(texture(uSource, vUv + vec2( 1.0,  1.0) * uTexelSize).rgb);
+
+  float nnY = luma(texture(uSource, vUv + vec2( 0.0, -2.0) * uTexelSize).rgb);
+  float ssY = luma(texture(uSource, vUv + vec2( 0.0,  2.0) * uTexelSize).rgb);
+  float eeY = luma(texture(uSource, vUv + vec2( 2.0,  0.0) * uTexelSize).rgb);
+  float wwY = luma(texture(uSource, vUv + vec2(-2.0,  0.0) * uTexelSize).rgb);
+
+  // 1. RemoveGrain(mode=2): 1st and 2nd extrema of the 8 neighbors
+  float vals[8] = float[8](n.x, s.x, e.x, w.x, nw.x, ne.x, sw.x, se.x);
+  float min1 = 1.0, min2 = 1.0;
+  float max1 = 0.0, max2 = 0.0;
+  for (int i = 0; i < 8; i++) {
+    float v = vals[i];
+    if (v < min1) { min2 = min1; min1 = v; }
+    else if (v < min2) { min2 = v; }
+    if (v > max1) { max2 = max1; max1 = v; }
+    else if (v > max2) { max2 = v; }
+  }
+
+  float despikeY = clamp(cY, min2, max2);
+  float blur3x3 = (2.0 * (n.x + s.x + e.x + w.x) + (nw.x + ne.x + sw.x + se.x) + 4.0 * despikeY) / 16.0;
+
+  // 2. Despiked local range & Weber contrast (ΔY / Y)
+  float cleanRangeY = max2 - min2;
+  float weber = cleanRangeY / max(blur3x3, 0.028);
+
+  // Smooth skin & walls have weber < 0.072 -> featureGate = 0 (denoised, zero sharpen)
+  // Hair waves, eyes, eyelashes, eyebrows, lips, fabric weave have weber >= 0.080 -> sharpened
+  float featureGate = smoothstep(0.072, 0.140, weber) * smoothstep(0.010, 0.026, blur3x3);
+
+  // 3. KrigBilateral Chroma denoising + low-Weber surface smoothing (cleans skin & walls)
+  float darkFactor = smoothstep(0.30, 0.02, blur3x3);
+  float sigmaY = mix(0.016, 0.028, darkFactor);
+  float sigmaC = mix(0.042, 0.068, darkFactor);
   float inv2SigmaY2 = 1.0 / (2.0 * sigmaY * sigmaY);
   float inv2SigmaC2 = 1.0 / (2.0 * sigmaC * sigmaC);
 
-  // 1. Luma-guided bilateral deblocking + stronger chroma denoising
-  const vec2 offsets[12] = vec2[12](
-    vec2(-2.0,  0.0), vec2( 2.0,  0.0), vec2( 0.0, -2.0), vec2( 0.0,  2.0),
-    vec2(-2.0, -2.0), vec2( 2.0, -2.0), vec2(-2.0,  2.0), vec2( 2.0,  2.0),
-    vec2(-5.0,  0.0), vec2( 5.0,  0.0), vec2( 0.0, -5.0), vec2( 0.0,  5.0)
-  );
-  const float weights[12] = float[12](
-    0.85, 0.85, 0.85, 0.85,
-    0.70, 0.70, 0.70, 0.70,
-    0.45, 0.45, 0.45, 0.45
-  );
-
-  float sumY = center.x;
+  float sumY = despikeY;
   float wSumY = 1.0;
   vec2 sumC = center.yz;
   float wSumC = 1.0;
-
-  for (int i = 0; i < 12; i++) {
-    vec2 sampleUv = clamp(vUv + offsets[i] * uTexelSize, vec2(0.0), vec2(1.0));
-    vec3 s = rgbToYCbCr(texture(uSource, sampleUv).rgb);
-    float dy = s.x - center.x;
-    vec2 dc = s.yz - center.yz;
-    float wy = exp(-(dy * dy) * inv2SigmaY2) * weights[i];
-    // Guide chroma weights by BOTH luma edge agreement and chroma similarity (KrigBilateral)
-    float wc = exp(-(dy * dy) * inv2SigmaY2 * 0.7 - dot(dc, dc) * inv2SigmaC2) * weights[i];
-    sumY += s.x * wy;
+  vec3 ring[8] = vec3[8](n, s, e, w, nw, ne, sw, se);
+  for (int i = 0; i < 8; i++) {
+    float dy = ring[i].x - despikeY;
+    vec2 dc = ring[i].yz - center.yz;
+    float wy = exp(-(dy * dy) * inv2SigmaY2);
+    float wc = exp(-(dy * dy) * inv2SigmaY2 * 0.6 - dot(dc, dc) * inv2SigmaC2);
+    sumY += ring[i].x * wy;
     wSumY += wy;
-    sumC += s.yz * wc;
+    sumC += ring[i].yz * wc;
     wSumC += wc;
   }
 
-  vec3 res = vec3(sumY / wSumY, sumC / wSumC);
+  float baseLuma = mix(sumY / wSumY, despikeY, featureGate);
+  vec2 cleanC = sumC / wSumC;
 
-  // 2. libplacebo / f3kdb 2-iteration randomized compass debanding
-  // Expanding radius (12px -> 24px) with diminishing threshold to eliminate contour steps
-  vec2 pixelCoord = vUv / uTexelSize;
-  vec3 baseBound = vec3(mix(0.016, 0.028, darkFactor), 0.022, 0.022);
-
-  for (int iter = 1; iter <= 2; iter++) {
-    float fi = float(iter);
-    vec2 rnd = hash22(pixelCoord + vec2(fi * 19.37, fi * 47.13));
-    float radius = (0.25 + 0.75 * rnd.x) * (12.0 * fi);
+  // 4. Compass debanding on flat walls & dark gradients (where featureGate == 0)
+  float flatMask = (1.0 - featureGate) * (1.0 - smoothstep(0.008, 0.020, cleanRangeY));
+  if (flatMask > 0.01) {
+    vec2 pixelCoord = vUv / uTexelSize;
+    vec2 rnd = hash22(pixelCoord + vec2(19.37, 47.13));
+    float radius = 3.0 + 10.0 * rnd.x;
     float angle = rnd.y * 6.2831853;
     vec2 d = vec2(cos(angle), sin(angle)) * radius * uTexelSize;
     vec2 dOrtho = vec2(-d.y, d.x);
@@ -104,27 +129,32 @@ void main() {
     vec3 p4 = rgbToYCbCr(texture(uSource, clamp(vUv - dOrtho, vec2(0.0), vec2(1.0))).rgb);
 
     vec3 avg = 0.25 * (p1 + p2 + p3 + p4);
-    vec3 maxDiff = max(
-      max(abs(p1 - avg), abs(p2 - avg)),
-      max(abs(p3 - avg), abs(p4 - avg))
-    );
-    vec3 diff = abs(res - avg);
-    vec3 bound = baseBound / fi;
-
-    // Smoothly blend toward compass average only when both center diff and local spread are within gradient threshold
-    vec3 factor = (1.0 - smoothstep(bound * 0.5, bound, diff)) *
-                  (1.0 - smoothstep(bound * 0.8, bound * 1.6, maxDiff));
-    res = mix(res, avg, factor * 0.85);
+    float maxDiffY = max(max(abs(p1.x - avg.x), abs(p2.x - avg.x)), max(abs(p3.x - avg.x), abs(p4.x - avg.x)));
+    float diffY = abs(baseLuma - avg.x);
+    float thresh = mix(0.014, 0.025, darkFactor);
+    float bandFactor = (1.0 - smoothstep(thresh * 0.5, thresh, diffY)) *
+                       (1.0 - smoothstep(thresh * 0.8, thresh * 1.6, maxDiffY)) *
+                       flatMask;
+    baseLuma = mix(baseLuma, avg.x, bandFactor * 0.82);
+    cleanC = mix(cleanC, avg.yz, bandFactor * 0.85);
   }
 
-  fragColor = vec4(yCbCrToRgb(res), 1.0);
+  // 5. Despiked 13-tap Adaptive-Sharpen on Weber-gated structural features
+  float outerAvg = 0.25 * (nnY + ssY + eeY + wwY);
+  float laplacian = (despikeY - blur3x3) + 0.22 * (despikeY - clamp(outerAvg, min1, max1));
+  float curveHeight = 0.95;
+  float sharpenVal = (curveHeight / (curveHeight * 0.60 * cleanRangeY + 0.52)) * featureGate;
+  float over = 0.008 * featureGate;
+  float restoredY = clamp(baseLuma + laplacian * sharpenVal, min1 - over, max1 + over);
+
+  fragColor = vec4(yCbCrToRgb(vec3(restoredY, cleanC)), 1.0);
 }
 `;
 
-// Pass 2 (Output 4K):
-// 1. Jorge Jimenez 5-tap hardware-folded Catmull-Rom Bicubic upscale with 3x3 anti-ringing clamp
-// 2. AMD FidelityFX RCAS (Robust Contrast-Adaptive Sharpening) in Luma space (prevents chroma halos)
-// 3. Perceptual dark-aware triangular blue-noise dither (suppressed near pure black so letterboxing stays clean)
+// Pass 2 (4K Output):
+// 1. 5-tap Catmull-Rom Bicubic reconstruction
+// 2. Weber-gated sub-pixel half-texel FidelityFX RCAS (-0.21 peak) for crisp 4K detail without skin grain
+// 3. Dark-floor perceptual dithering
 const UPSCALE_FRAGMENT_SHADER = `#version 300 es
 precision highp float;
 in vec2 vUv;
@@ -177,29 +207,24 @@ vec3 sampleCatmullRom5(vec2 uv) {
 void main() {
   vec2 uv = vec2(vUv.x, 1.0 - vUv.y);
 
-  // 1. 5-tap Catmull-Rom bicubic reconstruction
   vec3 bicubic = sampleCatmullRom5(uv);
 
-  // 2. Fetch 3x3 neighborhood for anti-ringing clamp + Luma RCAS
-  vec3 c  = texture(uRestored, uv).rgb;
-  vec3 n  = texture(uRestored, uv + vec2( 0.0, -1.0) * uTexelSize).rgb;
-  vec3 s  = texture(uRestored, uv + vec2( 0.0,  1.0) * uTexelSize).rgb;
-  vec3 e  = texture(uRestored, uv + vec2( 1.0,  0.0) * uTexelSize).rgb;
-  vec3 w  = texture(uRestored, uv + vec2(-1.0,  0.0) * uTexelSize).rgb;
-  vec3 nw = texture(uRestored, uv + vec2(-1.0, -1.0) * uTexelSize).rgb;
-  vec3 ne = texture(uRestored, uv + vec2( 1.0, -1.0) * uTexelSize).rgb;
-  vec3 sw = texture(uRestored, uv + vec2(-1.0,  1.0) * uTexelSize).rgb;
-  vec3 se = texture(uRestored, uv + vec2( 1.0,  1.0) * uTexelSize).rgb;
+  // Sample at sub-pixel 4K step (0.5 source texel) for true high-DPI edge definition
+  vec2 subStep = uTexelSize * 0.5;
+  vec3 n  = texture(uRestored, uv + vec2( 0.0, -1.0) * subStep).rgb;
+  vec3 s  = texture(uRestored, uv + vec2( 0.0,  1.0) * subStep).rgb;
+  vec3 e  = texture(uRestored, uv + vec2( 1.0,  0.0) * subStep).rgb;
+  vec3 w  = texture(uRestored, uv + vec2(-1.0,  0.0) * subStep).rgb;
+  vec3 nw = texture(uRestored, uv + vec2(-1.0, -1.0) * subStep).rgb;
+  vec3 ne = texture(uRestored, uv + vec2( 1.0, -1.0) * subStep).rgb;
+  vec3 sw = texture(uRestored, uv + vec2(-1.0,  1.0) * subStep).rgb;
+  vec3 se = texture(uRestored, uv + vec2( 1.0,  1.0) * subStep).rgb;
 
-  vec3 minCross = min(c, min(min(n, s), min(e, w)));
-  vec3 maxCross = max(c, max(max(n, s), max(e, w)));
-  vec3 minBox = min(minCross, min(min(nw, ne), min(sw, se)));
-  vec3 maxBox = max(maxCross, max(max(nw, ne), max(sw, se)));
+  vec3 minBox = min(bicubic, min(min(min(n, s), min(e, w)), min(min(nw, ne), min(sw, se))));
+  vec3 maxBox = max(bicubic, max(max(max(n, s), max(e, w)), max(max(nw, ne), max(sw, se))));
 
-  // Clamp Catmull-Rom negative lobes to prevent bright/dark ringing halos
   vec3 base = clamp(bicubic, minBox, maxBox);
 
-  // 3. AMD FidelityFX RCAS in Luma space (prevents color fringes and noise amplification in deep shadows)
   float bY = luma(base);
   float nY = luma(n);
   float sY = luma(s);
@@ -209,20 +234,23 @@ void main() {
   float minY = min(bY, min(min(nY, sY), min(eY, wY)));
   float maxY = max(bY, max(max(nY, sY), max(eY, wY)));
   float contrast = maxY - minY;
+  float weber = contrast / max(bY, 0.028);
 
-  // Attenuate sharpening in near-black or flat gradient areas so compression grain is never sharpened
-  float edgeMask = smoothstep(0.018, 0.085, contrast) * smoothstep(0.015, 0.12, bY);
+  // Smooth skin & walls (weber < 0.062) stay 100% untouched;
+  // Hair strands, eyes, eyebrows, lips, fingers, and fabric weave get crisp 4K RCAS (-0.21)
+  float detailMask = smoothstep(0.062, 0.130, weber) * smoothstep(0.010, 0.028, bY);
   float amp = clamp(min(minY, 1.0 - maxY) / max(maxY, 0.0001), 0.0, 1.0);
-  amp = sqrt(amp) * edgeMask;
+  amp = sqrt(amp) * detailMask;
 
-  float wght = -amp * 0.18;
-  float sharpY = clamp(((nY + sY + eY + wY) * wght + bY) / (1.0 + 4.0 * wght), minY, maxY);
-  vec3 sharpened = clamp(base + (sharpY - bY), minBox, maxBox);
+  float wght = -amp * 0.21;
+  float rcasY = ((nY + sY + eY + wY) * wght + bY) / (1.0 + 4.0 * wght);
+  float over = 0.006 * detailMask;
+  float sharpY = clamp(rcasY, minY - over, maxY + over);
+  vec3 sharpened = clamp(base + (sharpY - bY), minBox - over, maxBox + over);
 
-  // 4. Perceptual dark-aware triangular dither (fades to 0 at pitch black Y < 0.008 so black bars stay pure)
-  float ditherMask = smoothstep(0.004, 0.025, sharpY);
+  float ditherMask = smoothstep(0.004, 0.025, sharpY) * (1.0 - detailMask);
   float triNoise = ign(gl_FragCoord.xy) - ign(gl_FragCoord.xy + vec2(17.0, 31.0));
-  float dither = triNoise * (1.1 / 255.0) * ditherMask;
+  float dither = triNoise * (0.65 / 255.0) * ditherMask;
 
   fragColor = vec4(clamp(sharpened + dither, 0.0, 1.0), 1.0);
 }
@@ -278,7 +306,6 @@ export function VideoUpscalerCanvas({
     });
     if (!gl) return;
 
-    // Enable 16-bit floating-point render targets so Pass 1 debanding never re-quantizes to 8-bit
     const hasFloatFbo = !!gl.getExtension('EXT_color_buffer_float');
 
     const restoreProg = compileProgram(gl, VERTEX_SHADER, RESTORE_FRAGMENT_SHADER);
@@ -353,7 +380,7 @@ export function VideoUpscalerCanvas({
         gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, fboTex, 0);
       }
 
-      const dpr = Math.min(window.devicePixelRatio || 1, 2.5);
+      const dpr = Math.max(window.devicePixelRatio || 1, 2.0);
       const cw = Math.max(1, Math.min(3840, Math.round(canvas.clientWidth * dpr)));
       const ch = Math.max(1, Math.min(2160, Math.round(canvas.clientHeight * dpr)));
       if (canvas.width !== cw || canvas.height !== ch) {
@@ -369,7 +396,7 @@ export function VideoUpscalerCanvas({
         return;
       }
 
-      // Pass 1: YCbCr Luma-Guided Deblock & Chroma Denoise + 2-Pass Compass Deband into RGBA16F FBO
+      // Pass 1: Micro-detail Adaptive-Sharpen + Chroma Denoise + Flat-Shadow Deband
       gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
       gl.viewport(0, 0, fboW, fboH);
       gl.useProgram(restoreProg);
@@ -391,7 +418,7 @@ export function VideoUpscalerCanvas({
         drawY = Math.round((ch - drawH) * 0.5);
       }
 
-      // Pass 2: 5-Tap Catmull-Rom Bicubic + Anti-Ringing + Luma RCAS + Dark-Aware Dither
+      // Pass 2: 4K Catmull-Rom + Sub-Pixel RCAS + Dark-Floor Dither
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       gl.viewport(0, 0, cw, ch);
       gl.clearColor(0, 0, 0, 1);

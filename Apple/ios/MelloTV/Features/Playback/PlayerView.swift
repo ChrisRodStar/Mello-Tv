@@ -2493,56 +2493,82 @@ kernel void restore_frame(
     constexpr sampler linSampler(coord::normalized, address::clamp_to_edge, filter::linear);
     float2 texel = 1.0 / float2(w, h);
     float2 uv = (float2(gid) + 0.5) * texel;
+    int2 p = int2(gid);
+    int2 maxCoord = int2(w - 1, h - 1);
 
     float3 center = rgbToYCbCr(inTex.read(gid).rgb);
-    float centerY = center.x;
+    float cY = center.x;
 
-    float darkFactor = smoothstep(0.32, 0.02, centerY);
-    float sigmaY = mix(0.020, 0.042, darkFactor);
-    float sigmaC = mix(0.038, 0.075, darkFactor);
+    // 1. 3x3 + outer diamond neighborhood
+    float3 n  = rgbToYCbCr(inTex.read(uint2(clamp(p + int2( 0, -1), int2(0), maxCoord))).rgb);
+    float3 s  = rgbToYCbCr(inTex.read(uint2(clamp(p + int2( 0,  1), int2(0), maxCoord))).rgb);
+    float3 e  = rgbToYCbCr(inTex.read(uint2(clamp(p + int2( 1,  0), int2(0), maxCoord))).rgb);
+    float3 w1 = rgbToYCbCr(inTex.read(uint2(clamp(p + int2(-1,  0), int2(0), maxCoord))).rgb);
+    float3 nw = rgbToYCbCr(inTex.read(uint2(clamp(p + int2(-1, -1), int2(0), maxCoord))).rgb);
+    float3 ne = rgbToYCbCr(inTex.read(uint2(clamp(p + int2( 1, -1), int2(0), maxCoord))).rgb);
+    float3 sw = rgbToYCbCr(inTex.read(uint2(clamp(p + int2(-1,  1), int2(0), maxCoord))).rgb);
+    float3 se = rgbToYCbCr(inTex.read(uint2(clamp(p + int2( 1,  1), int2(0), maxCoord))).rgb);
+
+    float nnY = luma(inTex.read(uint2(clamp(p + int2( 0, -2), int2(0), maxCoord))).rgb);
+    float ssY = luma(inTex.read(uint2(clamp(p + int2( 0,  2), int2(0), maxCoord))).rgb);
+    float eeY = luma(inTex.read(uint2(clamp(p + int2( 2,  0), int2(0), maxCoord))).rgb);
+    float wwY = luma(inTex.read(uint2(clamp(p + int2(-2,  0), int2(0), maxCoord))).rgb);
+
+    // 2. RemoveGrain(mode=2): 1st and 2nd extrema of the 8 neighbors
+    float vals[8] = { n.x, s.x, e.x, w1.x, nw.x, ne.x, sw.x, se.x };
+    float min1 = 1.0, min2 = 1.0;
+    float max1 = 0.0, max2 = 0.0;
+    for (int i = 0; i < 8; i++) {
+        float v = vals[i];
+        if (v < min1) { min2 = min1; min1 = v; }
+        else if (v < min2) { min2 = v; }
+        if (v > max1) { max2 = max1; max1 = v; }
+        else if (v > max2) { max2 = v; }
+    }
+
+    float despikeY = clamp(cY, min2, max2);
+    float blur3x3 = (2.0 * (n.x + s.x + e.x + w1.x) + (nw.x + ne.x + sw.x + se.x) + 4.0 * despikeY) / 16.0;
+
+    // Despiked local range & Weber contrast (ΔY / Y)
+    float cleanRangeY = max2 - min2;
+    float weber = cleanRangeY / max(blur3x3, 0.028);
+
+    // Single Weber gate:
+    // - Smooth skin & flat walls have cleanRangeY weber < 0.072 -> featureGate = 0 (denoised, zero sharpen)
+    // - Hair waves, eyes, eyelashes, eyebrows, lips, blazer weave, fingers have weber >= 0.080 -> sharpened!
+    float featureGate = smoothstep(0.072, 0.140, weber) * smoothstep(0.010, 0.026, blur3x3);
+
+    // 3. KrigBilateral Chroma denoising + low-Weber surface smoothing (cleans skin & walls)
+    float darkFactor = smoothstep(0.30, 0.02, blur3x3);
+    float sigmaY = mix(0.016, 0.028, darkFactor);
+    float sigmaC = mix(0.042, 0.068, darkFactor);
     float inv2SigmaY2 = 1.0 / (2.0 * sigmaY * sigmaY);
     float inv2SigmaC2 = 1.0 / (2.0 * sigmaC * sigmaC);
 
-    const int2 offsets[12] = {
-        int2(-2,  0), int2( 2,  0), int2( 0, -2), int2( 0,  2),
-        int2(-2, -2), int2( 2, -2), int2(-2,  2), int2( 2,  2),
-        int2(-5,  0), int2( 5,  0), int2( 0, -5), int2( 0,  5)
-    };
-    const float weights[12] = {
-        0.85, 0.85, 0.85, 0.85,
-        0.70, 0.70, 0.70, 0.70,
-        0.45, 0.45, 0.45, 0.45
-    };
-
-    float sumY = center.x;
+    float sumY = despikeY;
     float wSumY = 1.0;
     float2 sumC = center.yz;
     float wSumC = 1.0;
-    int2 p = int2(gid);
-
-    for (int i = 0; i < 12; i++) {
-        int2 q = clamp(p + offsets[i], int2(0), int2(w - 1, h - 1));
-        float3 s = rgbToYCbCr(inTex.read(uint2(q)).rgb);
-        float dy = s.x - center.x;
-        float2 dc = s.yz - center.yz;
-        float wy = exp(-(dy * dy) * inv2SigmaY2) * weights[i];
-        float wc = exp(-(dy * dy) * inv2SigmaY2 * 0.7 - dot(dc, dc) * inv2SigmaC2) * weights[i];
-        sumY += s.x * wy;
+    float3 ring[8] = { n, s, e, w1, nw, ne, sw, se };
+    for (int i = 0; i < 8; i++) {
+        float dy = ring[i].x - despikeY;
+        float2 dc = ring[i].yz - center.yz;
+        float wy = exp(-(dy * dy) * inv2SigmaY2);
+        float wc = exp(-(dy * dy) * inv2SigmaY2 * 0.6 - dot(dc, dc) * inv2SigmaC2);
+        sumY += ring[i].x * wy;
         wSumY += wy;
-        sumC += s.yz * wc;
+        sumC += ring[i].yz * wc;
         wSumC += wc;
     }
 
-    float3 res = float3(sumY / wSumY, sumC / wSumC);
+    float baseLuma = mix(sumY / wSumY, despikeY, featureGate);
+    float2 cleanC = sumC / wSumC;
 
-    // libplacebo / f3kdb 2-iteration randomized compass debanding
-    float2 pixelCoord = float2(gid);
-    float3 baseBound = float3(mix(0.016, 0.028, darkFactor), 0.022, 0.022);
-
-    for (int iter = 1; iter <= 2; iter++) {
-        float fi = float(iter);
-        float2 rnd = hash22(pixelCoord + float2(fi * 19.37, fi * 47.13));
-        float radius = (0.25 + 0.75 * rnd.x) * (12.0 * fi);
+    // 4. Compass debanding on flat walls & dark gradients (where featureGate == 0)
+    float flatMask = (1.0 - featureGate) * (1.0 - smoothstep(0.008, 0.020, cleanRangeY));
+    if (flatMask > 0.01) {
+        float2 rnd = hash22(float2(gid) + float2(19.37, 47.13));
+        float radius = (3.0 + 10.0 * rnd.x);
         float angle = rnd.y * 6.2831853;
         float2 d = float2(cos(angle), sin(angle)) * radius * texel;
         float2 dOrtho = float2(-d.y, d.x);
@@ -2553,19 +2579,25 @@ kernel void restore_frame(
         float3 p4 = rgbToYCbCr(inTex.sample(linSampler, clamp(uv - dOrtho, 0.0, 1.0)).rgb);
 
         float3 avg = 0.25 * (p1 + p2 + p3 + p4);
-        float3 maxDiff = max(
-            max(abs(p1 - avg), abs(p2 - avg)),
-            max(abs(p3 - avg), abs(p4 - avg))
-        );
-        float3 diff = abs(res - avg);
-        float3 bound = baseBound / fi;
-
-        float3 factor = (1.0 - smoothstep(bound * 0.5, bound, diff)) *
-                        (1.0 - smoothstep(bound * 0.8, bound * 1.6, maxDiff));
-        res = mix(res, avg, factor * 0.85);
+        float maxDiffY = max(max(abs(p1.x - avg.x), abs(p2.x - avg.x)), max(abs(p3.x - avg.x), abs(p4.x - avg.x)));
+        float diffY = abs(baseLuma - avg.x);
+        float thresh = mix(0.014, 0.025, darkFactor);
+        float bandFactor = (1.0 - smoothstep(thresh * 0.5, thresh, diffY)) *
+                           (1.0 - smoothstep(thresh * 0.8, thresh * 1.6, maxDiffY)) *
+                           flatMask;
+        baseLuma = mix(baseLuma, avg.x, bandFactor * 0.82);
+        cleanC = mix(cleanC, avg.yz, bandFactor * 0.85);
     }
 
-    outTex.write(half4(half3(yCbCrToRgb(res)), 1.0h), gid);
+    // 5. Despiked 13-tap Adaptive-Sharpen on Weber-gated structural features
+    float outerAvg = 0.25 * (nnY + ssY + eeY + wwY);
+    float laplacian = (despikeY - blur3x3) + 0.22 * (despikeY - clamp(outerAvg, min1, max1));
+    float curveHeight = 0.95;
+    float sharpenVal = (curveHeight / (curveHeight * 0.60 * cleanRangeY + 0.52)) * featureGate;
+    float over = 0.008 * featureGate;
+    float restoredY = clamp(baseLuma + laplacian * sharpenVal, min1 - over, max1 + over);
+
+    outTex.write(half4(half3(yCbCrToRgb(float3(restoredY, cleanC))), 1.0h), gid);
 }
 
 struct VertexOut {
@@ -2623,46 +2655,49 @@ fragment float4 upscale_fragment(
     float2 texel = 1.0 / texSize;
     float2 uv = in.uv;
 
+    // 1. 5-tap Catmull-Rom bicubic interpolation into 4K grid
     float3 bicubic = sampleCatmullRom5(restoredTex, linSampler, uv, texSize, texel);
 
-    float3 c  = restoredTex.sample(linSampler, uv).rgb;
-    float3 n  = restoredTex.sample(linSampler, uv + float2( 0.0, -1.0) * texel).rgb;
-    float3 s  = restoredTex.sample(linSampler, uv + float2( 0.0,  1.0) * texel).rgb;
-    float3 e  = restoredTex.sample(linSampler, uv + float2( 1.0,  0.0) * texel).rgb;
-    float3 w  = restoredTex.sample(linSampler, uv + float2(-1.0,  0.0) * texel).rgb;
-    float3 nw = restoredTex.sample(linSampler, uv + float2(-1.0, -1.0) * texel).rgb;
-    float3 ne = restoredTex.sample(linSampler, uv + float2( 1.0, -1.0) * texel).rgb;
-    float3 sw = restoredTex.sample(linSampler, uv + float2(-1.0,  1.0) * texel).rgb;
-    float3 se = restoredTex.sample(linSampler, uv + float2( 1.0,  1.0) * texel).rgb;
+    // 2. Sub-pixel half-texel (4K step) neighborhood
+    float2 subTexel = texel * 0.5;
+    float3 n  = restoredTex.sample(linSampler, uv + float2( 0.0, -1.0) * subTexel).rgb;
+    float3 s  = restoredTex.sample(linSampler, uv + float2( 0.0,  1.0) * subTexel).rgb;
+    float3 e  = restoredTex.sample(linSampler, uv + float2( 1.0,  0.0) * subTexel).rgb;
+    float3 w  = restoredTex.sample(linSampler, uv + float2(-1.0,  0.0) * subTexel).rgb;
+    float3 nw = restoredTex.sample(linSampler, uv + float2(-1.0, -1.0) * subTexel).rgb;
+    float3 ne = restoredTex.sample(linSampler, uv + float2( 1.0, -1.0) * subTexel).rgb;
+    float3 sw = restoredTex.sample(linSampler, uv + float2(-1.0,  1.0) * subTexel).rgb;
+    float3 se = restoredTex.sample(linSampler, uv + float2( 1.0,  1.0) * subTexel).rgb;
 
-    float3 minCross = min(c, min(min(n, s), min(e, w)));
-    float3 maxCross = max(c, max(max(n, s), max(e, w)));
-    float3 minBox = min(minCross, min(min(nw, ne), min(sw, se)));
-    float3 maxBox = max(maxCross, max(max(nw, ne), max(sw, se)));
+    float3 minBox = min(bicubic, min(min(min(n, s), min(e, w)), min(min(nw, ne), min(sw, se))));
+    float3 maxBox = max(bicubic, max(max(max(n, s), max(e, w)), max(max(nw, ne), max(sw, se))));
 
     float3 base = clamp(bicubic, minBox, maxBox);
 
     float bY = luma(base);
-    float nY = luma(n);
-    float sY = luma(s);
-    float eY = luma(e);
-    float wY = luma(w);
-
+    float nY = luma(n), sY = luma(s), eY = luma(e), wY = luma(w);
     float minY = min(bY, min(min(nY, sY), min(eY, wY)));
     float maxY = max(bY, max(max(nY, sY), max(eY, wY)));
     float contrast = maxY - minY;
+    float weber = contrast / max(bY, 0.028);
 
-    float edgeMask = smoothstep(0.018, 0.085, contrast) * smoothstep(0.015, 0.12, bY);
+    // 3. Weber-gated sub-pixel RCAS:
+    // Smooth skin & walls (weber < 0.062) stay 100% untouched;
+    // Hair strands, eyes, eyebrows, lips, fingers, and fabric weave get crisp 4K RCAS (-0.21)
+    float detailMask = smoothstep(0.062, 0.130, weber) * smoothstep(0.010, 0.028, bY);
     float amp = clamp(min(minY, 1.0 - maxY) / max(maxY, 0.0001), 0.0, 1.0);
-    amp = sqrt(amp) * edgeMask;
+    amp = sqrt(amp) * detailMask;
 
-    float wght = -amp * 0.18;
-    float sharpY = clamp(((nY + sY + eY + wY) * wght + bY) / (1.0 + 4.0 * wght), minY, maxY);
-    float3 sharpened = clamp(base + (sharpY - bY), minBox, maxBox);
+    float wght = -amp * 0.21;
+    float rcasY = ((nY + sY + eY + wY) * wght + bY) / (1.0 + 4.0 * wght);
+    float over = 0.006 * detailMask;
+    float sharpY = clamp(rcasY, minY - over, maxY + over);
+    float3 sharpened = clamp(base + (sharpY - bY), minBox - over, maxBox + over);
 
-    float ditherMask = smoothstep(0.004, 0.025, sharpY);
+    // 4. Subtle dark-floor dither
+    float ditherMask = smoothstep(0.004, 0.025, sharpY) * (1.0 - detailMask);
     float triNoise = ign(in.position.xy) - ign(in.position.xy + float2(17.0, 31.0));
-    float dither = triNoise * (1.1 / 255.0) * ditherMask;
+    float dither = triNoise * (0.65 / 255.0) * ditherMask;
 
     return float4(clamp(sharpened + dither, 0.0, 1.0), 1.0);
 }
