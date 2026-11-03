@@ -13,6 +13,7 @@ use thiserror::Error;
 use url::Url;
 
 use super::hls::HlsManifestRewriter;
+use crate::selection::normalize_quality_height;
 
 const DEFAULT_USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36";
 const MAX_SESSIONS: usize = 256;
@@ -266,13 +267,10 @@ impl MediaRelay {
             .variants
             .iter()
             .chain(session.active.source.resolver_metadata.variants.iter())
-            .filter_map(|v| v.height)
-            .filter(|h| *h > 0 && *h <= 16384)
+            .filter_map(|v| normalize_quality_height(v.width, v.height))
             .collect();
         if let Some(v) = &session.active.observation.variant
-            && let Some(h) = v.height
-            && h > 0
-            && h <= 16384
+            && let Some(h) = normalize_quality_height(v.width, v.height)
         {
             heights.push(h);
         }
@@ -287,13 +285,8 @@ impl MediaRelay {
     /// Height of the measured active rendition, when the source exposes one.
     pub fn active_height(&self, session_id: &str) -> Option<i64> {
         let map = self.sessions.lock().ok()?;
-        map.get(session_id)?
-            .active
-            .observation
-            .variant
-            .as_ref()
-            .and_then(|variant| variant.height)
-            .filter(|height| *height > 0 && *height <= 16384)
+        let variant = map.get(session_id)?.active.observation.variant.as_ref()?;
+        normalize_quality_height(variant.width, variant.height)
     }
 
     /// Resolve public playback details from a measured selection before it is
@@ -310,15 +303,13 @@ impl MediaRelay {
             .variants
             .iter()
             .chain(active.source.resolver_metadata.variants.iter())
-            .filter_map(|variant| variant.height)
-            .filter(|height| *height > 0 && *height <= 16384)
+            .filter_map(|variant| normalize_quality_height(variant.width, variant.height))
             .collect();
         if let Some(height) = active
             .observation
             .variant
             .as_ref()
-            .and_then(|variant| variant.height)
-            .filter(|height| *height > 0 && *height <= 16384)
+            .and_then(|variant| normalize_quality_height(variant.width, variant.height))
         {
             heights.push(height);
         }
@@ -331,8 +322,7 @@ impl MediaRelay {
             .observation
             .variant
             .as_ref()
-            .and_then(|variant| variant.height)
-            .filter(|height| *height > 0 && *height <= 16384)?;
+            .and_then(|variant| normalize_quality_height(variant.width, variant.height))?;
         Some((format, heights, active_height))
     }
 

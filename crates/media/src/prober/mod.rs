@@ -407,7 +407,10 @@ impl StreamProber {
                 .options
                 .max_height
                 .filter(|height| *height > 0)
-                .is_none_or(|ceiling| variant.height.is_none_or(|height| height <= ceiling))
+                .is_none_or(|ceiling| {
+                    crate::selection::normalize_quality_height(variant.width, variant.height)
+                        .is_none_or(|height| height <= ceiling)
+                })
         });
         // Probe the best rung at or below the startup target first so a
         // progressive caller can begin quickly. Keep higher rungs in the
@@ -415,7 +418,8 @@ impl StreamProber {
         // playback and complete quality reporting.
         let startup_height = round.options.startup_height.filter(|height| *height > 0);
         variants.sort_by_key(|variant| {
-            let height = variant.height.unwrap_or(0);
+            let height = crate::selection::normalize_quality_height(variant.width, variant.height)
+                .unwrap_or(0);
             let priority = match startup_height {
                 Some(target) if height == target => 0,
                 Some(target) if height > target => 1,

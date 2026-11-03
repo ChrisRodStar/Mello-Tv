@@ -25,8 +25,12 @@ export function useMediaSource(
   const [autoplayBlocked, setAutoplayBlocked] = useState(false);
   const setQuality = useCallback((id: number) => {
     const hls = hlsRef.current;
-    if (!hls || (id !== -1 && (id < 0 || id >= hls.levels.length))) return;
-    hls.currentLevel = id;
+    if (hls) {
+      if (id !== -1 && (id < 0 || id >= hls.levels.length)) return;
+      hls.currentLevel = id;
+    } else if (id !== -1 && id !== 0) {
+      return;
+    }
     setQualityState(id);
   }, []);
   const setAudioTrack = useCallback(
@@ -83,15 +87,17 @@ export function useMediaSource(
     const nativeAudio = (element as VideoWithAudio).audioTracks;
     const syncTracks = () => {
       if (disposed) return;
+      const fallbackLevels = [
+        ...(source.session.available_heights?.map((height) => ({ height })) ?? []),
+        ...(element.videoHeight > 0
+          ? [{ width: element.videoWidth, height: element.videoHeight }]
+          : []),
+      ];
       if (instance) {
-        const fallbackLevels = [
-          ...(source.session.available_heights?.map((height) => ({ height })) ?? []),
-          ...(element.videoHeight > 0
-            ? [{ width: element.videoWidth, height: element.videoHeight }]
-            : []),
-        ];
         setQualities(videoQualityOptions(instance.levels, fallbackLevels));
         setQualityState(instance.manualLevel);
+      } else {
+        setQualities(videoQualityOptions([], fallbackLevels));
       }
       if (instance?.audioTracks.length) {
         setAudioTracks(
@@ -137,7 +143,10 @@ export function useMediaSource(
         setSubtitleTrackState(tracks.find(({ track }) => track.mode === 'showing')?.id ?? -1);
       }
     };
-    const onPlaying = () => setAutoplayBlocked(false);
+    const onPlaying = () => {
+      setAutoplayBlocked(false);
+      syncTracks();
+    };
     const play = () => {
       void element.play().catch(() => {
         if (!disposed) setAutoplayBlocked(true);
@@ -145,6 +154,7 @@ export function useMediaSource(
     };
     element.addEventListener('playing', onPlaying);
     element.addEventListener('loadedmetadata', syncTracks);
+    element.addEventListener('loadeddata', syncTracks);
     element.addEventListener('resize', syncTracks);
     element.textTracks.addEventListener('addtrack', syncTracks);
     element.textTracks.addEventListener('removetrack', syncTracks);
@@ -185,6 +195,7 @@ export function useMediaSource(
         if (!disposed) play();
       });
       instance.on(Hls.Events.LEVELS_UPDATED, syncTracks);
+      instance.on(Hls.Events.LEVEL_LOADED, syncTracks);
       instance.on(Hls.Events.LEVEL_SWITCHED, syncTracks);
       instance.on(Hls.Events.AUDIO_TRACKS_UPDATED, syncTracks);
       instance.on(Hls.Events.AUDIO_TRACK_SWITCHED, syncTracks);
@@ -200,6 +211,7 @@ export function useMediaSource(
       disposed = true;
       element.removeEventListener('playing', onPlaying);
       element.removeEventListener('loadedmetadata', syncTracks);
+      element.removeEventListener('loadeddata', syncTracks);
       element.removeEventListener('resize', syncTracks);
       element.textTracks.removeEventListener('addtrack', syncTracks);
       element.textTracks.removeEventListener('removetrack', syncTracks);

@@ -16,7 +16,7 @@ fn lookup() -> Result<Lookup, serde_json::Error> {
 fn source(id: &str, height: i64, delivery: f64) -> Result<ProbedStream, serde_json::Error> {
     serde_json::from_value(json!({
         "source":{"id":id,"provider":"vidcore","url":"https://cdn.example/master.m3u8","format":"hls","title":{"type":"tv","tmdb_id":60625,"season":1,"episode":1},"fetch_context":{},"resolver_metadata":{"tracks_known":false},"content_verified":false},
-        "observation":{"at":"2026-10-25T12:00:00Z","delivery_bps":delivery,"variant":{"url":format!("https://cdn.example/{height}.m3u8"),"width":1920,"height":height,"bitrate":6000000,"codecs":["avc1.4d401f"]},"sample_bytes":393216,"format":"hls","playlist_metadata":{"tracks_known":true},"samples_completed":3,"accessible":true,"encrypted":false,"protection_known":true}
+        "observation":{"at":"2026-10-25T12:00:00Z","delivery_bps":delivery,"variant":{"url":format!("https://cdn.example/{height}.m3u8"),"width":height * 16 / 9,"height":height,"bitrate":6000000,"codecs":["avc1.4d401f"]},"sample_bytes":393216,"format":"hls","playlist_metadata":{"tracks_known":true},"samples_completed":3,"accessible":true,"encrypted":false,"protection_known":true}
     }))
 }
 fn ids(selection: &Selection) -> Vec<&str> {
@@ -228,5 +228,35 @@ fn duplicate_sources_and_invalid_lookup_fail_without_ambiguous_results() -> Test
         select(&request, Vec::new(), now()?),
         Err(SelectionError::InvalidLookup)
     ));
+    Ok(())
+}
+
+#[test]
+fn cropped_widescreen_adaptive_renditions_normalize_to_standard_quality_tiers() -> TestResult {
+    let mut adaptive = source("adaptive_cropped", 1072, 12_000_000.0)?;
+    if let Some(variant) = adaptive.observation.variant.as_mut() {
+        variant.width = Some(1920);
+        variant.height = Some(1072);
+    }
+    let mut lower = source("lower_cropped", 714, 12_000_000.0)?;
+    if let Some(variant) = lower.observation.variant.as_mut() {
+        variant.width = Some(1280);
+        variant.height = Some(714);
+    }
+    adaptive.observation.playlist_metadata.variants =
+        lower.observation.variant.iter().cloned().collect();
+
+    let mut single_1080 = source("single_1080", 1080, 12_000_000.0)?;
+    single_1080.source.url = "https://other.example/single.m3u8".into();
+
+    let mut request = lookup()?;
+    request.startup_height = 720;
+    let ready_selection = select(&request, vec![lower.clone()], now()?)?;
+    assert!(startup_ready(&request, &ready_selection, now()?));
+
+    request.startup_height = 1080;
+    let ranked = select(&request, vec![single_1080, adaptive, lower], now()?)?;
+    assert!(startup_ready(&request, &ranked, now()?));
+    assert_eq!(ids(&ranked).first(), Some(&"adaptive_cropped"));
     Ok(())
 }

@@ -4,14 +4,16 @@ function standardQualityHeight(level: Level): 360 | 480 | 720 | 1080 | null {
   const { width, height } = level;
   if (height === 1080 || height === 720 || height === 480 || height === 360) return height;
   if (typeof height === 'number' && height > 0) {
-    if (width === 1920 && height <= 1080) return 1080;
-    if (width === 1280 && height <= 720) return 720;
-    if ((width === 854 || width === 852 || width === 848) && height <= 480) return 480;
-    if (width === 640 && height <= 360) return 360;
-    if (height >= 1064 && height <= 1080) return 1080;
-    if (height >= 704 && height <= 720) return 720;
-    if (height >= 464 && height <= 480) return 480;
-    if (height >= 344 && height <= 360) return 360;
+    if (typeof width === 'number' && width > 0) {
+      if (width >= 1904 && width <= 1920 && height <= 1088) return 1080;
+      if (width >= 1264 && width <= 1280 && height <= 728) return 720;
+      if (width >= 840 && width <= 864 && height <= 488) return 480;
+      if (width >= 624 && width <= 648 && height <= 368) return 360;
+    }
+    if (height >= 1060 && height <= 1088) return 1080;
+    if (height >= 700 && height <= 728) return 720;
+    if (height >= 460 && height <= 488) return 480;
+    if (height >= 340 && height <= 368) return 360;
   }
   return null;
 }
@@ -33,8 +35,8 @@ export function videoQualityOptions(
     });
   };
   collect(levels);
-  if (byHeight.size === 0 && fallbackLevels.length > 0) {
-    collect(fallbackLevels, levels.length === 1 ? 0 : undefined);
+  if (byHeight.size === 0 && fallbackLevels.length > 0 && levels.length <= 1) {
+    collect(fallbackLevels, 0);
   }
   return Array.from(byHeight, ([height, level]) => ({
     id: level.id,

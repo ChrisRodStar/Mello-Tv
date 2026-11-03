@@ -55,11 +55,45 @@ fn language_rank(preferred: &[String], item: &ProbedStream, kind: &str) -> (usiz
     (preferred.len(), false)
 }
 
+pub fn normalize_quality_height(width: Option<i64>, height: Option<i64>) -> Option<i64> {
+    let h = height.filter(|h| *h > 0 && *h <= 16384)?;
+    if matches!(h, 360 | 480 | 720 | 1080 | 1440 | 2160) {
+        return Some(h);
+    }
+    if let Some(w) = width {
+        if (1904..=1920).contains(&w) && h <= 1088 {
+            return Some(1080);
+        }
+        if (1264..=1280).contains(&w) && h <= 728 {
+            return Some(720);
+        }
+        if (840..=864).contains(&w) && h <= 488 {
+            return Some(480);
+        }
+        if (624..=648).contains(&w) && h <= 368 {
+            return Some(360);
+        }
+    }
+    if (1060..=1088).contains(&h) {
+        return Some(1080);
+    }
+    if (700..=728).contains(&h) {
+        return Some(720);
+    }
+    if (460..=488).contains(&h) {
+        return Some(480);
+    }
+    if (340..=368).contains(&h) {
+        return Some(360);
+    }
+    Some(h)
+}
+
 fn height(item: &ProbedStream) -> i64 {
     item.observation
         .variant
         .as_ref()
-        .and_then(|variant| variant.height)
+        .and_then(|variant| normalize_quality_height(variant.width, variant.height))
         .unwrap_or(0)
 }
 
@@ -110,7 +144,13 @@ pub fn eligible(
         return Err("required subtitles not established");
     }
     let variant = observation.variant.as_ref();
-    match variant.and_then(|variant| variant.height) {
+    match variant.and_then(|variant| {
+        if variant.height.is_some_and(|h| h <= 0) {
+            Some(-1)
+        } else {
+            normalize_quality_height(variant.width, variant.height)
+        }
+    }) {
         None if !lookup.device.allow_unknown_resolution => return Err("resolution unknown"),
         Some(height) if height <= 0 => return Err("invalid resolution height"),
         Some(height) if lookup.device.max_height > 0 && height > lookup.device.max_height => {
@@ -438,8 +478,7 @@ pub fn startup_ready(lookup: &Lookup, result: &Selection, now: DateTime<Utc>) ->
             .variants
             .iter()
             .any(|other| {
-                other
-                    .height
+                normalize_quality_height(other.width, other.height)
                     .is_some_and(|height| height < self::height(item))
                     && compatible_codecs(&other.codecs, &variant.codecs)
                     && other.audio_group == variant.audio_group
