@@ -7,6 +7,7 @@ type Option = { id: number; label: string };
 type AudioTrack = { enabled: boolean; label: string; language: string };
 type AudioTracks = EventTarget & { length: number; [index: number]: AudioTrack };
 type VideoWithAudio = HTMLVideoElement & { audioTracks?: AudioTracks };
+const UPSCALE_QUALITY_ID = -2;
 const trackLabel = (name: string | undefined, language: string | undefined, fallback: string) =>
   name || language || fallback;
 
@@ -16,6 +17,7 @@ export function useMediaSource(
   onError: () => void,
 ) {
   const hlsRef = useRef<Hls | null>(null);
+  const upscaledRef = useRef(false);
   const [qualities, setQualities] = useState<Option[]>([]);
   const [quality, setQualityState] = useState(-1);
   const [audioTracks, setAudioTracks] = useState<Option[]>([]);
@@ -25,6 +27,27 @@ export function useMediaSource(
   const [autoplayBlocked, setAutoplayBlocked] = useState(false);
   const setQuality = useCallback((id: number) => {
     const hls = hlsRef.current;
+    if (id === UPSCALE_QUALITY_ID) {
+      upscaledRef.current = true;
+      if (hls && hls.levels.length > 0) {
+        let bestIdx = 0;
+        for (let i = 1; i < hls.levels.length; i++) {
+          const cur = hls.levels[i]!;
+          const best = hls.levels[bestIdx]!;
+          if (
+            (cur.height ?? 0) > (best.height ?? 0) ||
+            ((cur.height ?? 0) === (best.height ?? 0) &&
+              (cur.bitrate ?? 0) > (best.bitrate ?? 0))
+          ) {
+            bestIdx = i;
+          }
+        }
+        hls.currentLevel = bestIdx;
+      }
+      setQualityState(UPSCALE_QUALITY_ID);
+      return;
+    }
+    upscaledRef.current = false;
     if (hls) {
       if (id !== -1 && (id < 0 || id >= hls.levels.length)) return;
       hls.currentLevel = id;
@@ -74,6 +97,7 @@ export function useMediaSource(
   );
   useEffect(() => {
     const element = video.current;
+    upscaledRef.current = false;
     setQualities([]);
     setQualityState(-1);
     setAudioTracks([]);
@@ -93,11 +117,12 @@ export function useMediaSource(
           ? [{ width: element.videoWidth, height: element.videoHeight }]
           : []),
       ];
-      if (instance) {
-        setQualities(videoQualityOptions(instance.levels, fallbackLevels));
+      const baseQualities = instance
+        ? videoQualityOptions(instance.levels, fallbackLevels)
+        : videoQualityOptions([], fallbackLevels);
+      setQualities([{ id: UPSCALE_QUALITY_ID, label: '4K Upscaled' }, ...baseQualities]);
+      if (instance && !upscaledRef.current) {
         setQualityState(instance.manualLevel);
-      } else {
-        setQualities(videoQualityOptions([], fallbackLevels));
       }
       if (instance?.audioTracks.length) {
         setAudioTracks(
@@ -185,7 +210,12 @@ export function useMediaSource(
         } else onError();
         return;
       }
-      instance = new Hls({ maxBufferLength: 30, maxMaxBufferLength: 60, backBufferLength: 30 });
+      instance = new Hls({
+        maxBufferLength: 30,
+        maxMaxBufferLength: 60,
+        backBufferLength: 30,
+        abrEwmaDefaultEstimate: 8_000_000,
+      });
       hlsRef.current = instance;
       instance.on(Hls.Events.ERROR, (_event, data) => {
         if (data.fatal && !disposed) onError();
@@ -229,6 +259,7 @@ export function useMediaSource(
   return {
     qualities,
     quality,
+    upscaled: quality === UPSCALE_QUALITY_ID,
     setQuality,
     audioTracks,
     audioTrack,

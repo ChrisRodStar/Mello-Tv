@@ -1,7 +1,9 @@
 import SwiftUI
 import AVKit
 import Combine
+import CoreVideo
 import MediaPlayer
+import Metal
 import Observation
 import OSLog
 import MelloKit
@@ -171,7 +173,7 @@ private struct PlaybackSessionView: View {
                 Color.black.ignoresSafeArea()
 
                 if let player {
-                    VideoSurface(player: player, gestureSettings: gestureSettings, timing: timing) {
+                    VideoSurface(player: player, upscaled: playbackQuality == .upscaled4K, gestureSettings: gestureSettings, timing: timing) {
                         guard errorMessage == nil, player.currentItem?.status != .failed else { return }
                         if !recordedFirstFrame {
                             recordedFirstFrame = true
@@ -736,7 +738,9 @@ private struct PlaybackSessionView: View {
     private var qualityPicker: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
-                ForEach(PlaybackQuality.allCases.filter { $0 == .automatic || authorizedSource?.availableHeights.contains($0.height) == true }) { quality in
+                ForEach(PlaybackQuality.allCases.filter {
+                    $0 == .automatic || $0 == .upscaled4K || authorizedSource?.availableHeights.contains($0.height) == true
+                }) { quality in
                     Button {
                         playbackQuality = quality
                         activePanel = nil
@@ -763,7 +767,13 @@ private struct PlaybackSessionView: View {
 
     private func switchQuality(_ quality: PlaybackQuality) {
         guard let player, let currentItem = player.currentItem else { return }
+        let previousMax = currentItem.preferredMaximumResolution
         applyQuality(quality, to: currentItem)
+        // Switching between Auto and 4K Upscaled keeps the same unconstrained
+        // rendition ceiling, so toggle the Metal upscaler live without reloading.
+        if previousMax == currentItem.preferredMaximumResolution {
+            return
+        }
         // Discard buffered renditions so a manual change takes effect at the
         // current position, rather than waiting for the old buffer to drain.
         // An in-flight replacement will apply the latest binding itself.
@@ -2377,6 +2387,7 @@ private struct PlaybackEpisodesSheet: View {
 
 private struct VideoSurface: UIViewControllerRepresentable {
     let player: AVPlayer
+    let upscaled: Bool
     let gestureSettings: PlayerGestureSettings
     let timing: PlaybackTiming?
     var onReadyForDisplay: (() -> Void)? = nil
@@ -2385,9 +2396,11 @@ private struct VideoSurface: UIViewControllerRepresentable {
         Coordinator(onReadyForDisplay: onReadyForDisplay)
     }
 
+    @MainActor
     final class Coordinator {
         var onReadyForDisplay: (() -> Void)?
         var observation: NSKeyValueObservation?
+        let upscalerView = MetalVideoUpscalerView()
 
         init(onReadyForDisplay: (() -> Void)?) {
             self.onReadyForDisplay = onReadyForDisplay
@@ -2401,6 +2414,17 @@ private struct VideoSurface: UIViewControllerRepresentable {
         controller.showsPlaybackControls = false
         controller.videoGravity = .resizeAspect
         controller.view.backgroundColor = .black
+        let upscaler = context.coordinator.upscalerView
+        upscaler.translatesAutoresizingMaskIntoConstraints = false
+        let container = controller.contentOverlayView ?? controller.view!
+        container.addSubview(upscaler)
+        NSLayoutConstraint.activate([
+            upscaler.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            upscaler.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            upscaler.topAnchor.constraint(equalTo: container.topAnchor),
+            upscaler.bottomAnchor.constraint(equalTo: container.bottomAnchor)
+        ])
+        upscaler.configure(player: player, enabled: upscaled)
         gestureSettings.attach(to: controller.view)
         let coordinator = context.coordinator
         let trace = timing
@@ -2421,6 +2445,419 @@ private struct VideoSurface: UIViewControllerRepresentable {
         if uiViewController.player !== player {
             uiViewController.player = player
         }
+        context.coordinator.upscalerView.configure(player: player, enabled: upscaled)
+    }
+}
+
+private let iosUpscaleMetalSource = """
+#include <metal_stdlib>
+using namespace metal;
+
+float luma(float3 c) {
+    return dot(c, float3(0.2126, 0.7152, 0.0722));
+}
+
+float3 rgbToYCbCr(float3 rgb) {
+    float y  = dot(rgb, float3(0.2126, 0.7152, 0.0722));
+    float cb = (rgb.b - y) / 1.8556;
+    float cr = (rgb.r - y) / 1.5748;
+    return float3(y, cb, cr);
+}
+
+float3 yCbCrToRgb(float3 ycc) {
+    float r = ycc.x + 1.5748 * ycc.z;
+    float b = ycc.x + 1.8556 * ycc.y;
+    float g = (ycc.x - 0.2126 * r - 0.0722 * b) / 0.7152;
+    return clamp(float3(r, g, b), 0.0, 1.0);
+}
+
+float2 hash22(float2 p) {
+    float3 p3 = fract(float3(p.xyx) * float3(0.1031, 0.1030, 0.0973));
+    p3 += dot(p3, p3.yzx + 33.33);
+    return fract((p3.xx + p3.yz) * p3.zy);
+}
+
+float ign(float2 p) {
+    return fract(52.9829189 * fract(dot(p, float2(0.06711056, 0.00583715))));
+}
+
+kernel void restore_frame(
+    texture2d<float, access::sample> inTex [[texture(0)]],
+    texture2d<half, access::write> outTex [[texture(1)]],
+    uint2 gid [[thread_position_in_grid]]
+) {
+    uint w = inTex.get_width();
+    uint h = inTex.get_height();
+    if (gid.x >= w || gid.y >= h) return;
+
+    constexpr sampler linSampler(coord::normalized, address::clamp_to_edge, filter::linear);
+    float2 texel = 1.0 / float2(w, h);
+    float2 uv = (float2(gid) + 0.5) * texel;
+
+    float3 center = rgbToYCbCr(inTex.read(gid).rgb);
+    float centerY = center.x;
+
+    float darkFactor = smoothstep(0.32, 0.02, centerY);
+    float sigmaY = mix(0.020, 0.042, darkFactor);
+    float sigmaC = mix(0.038, 0.075, darkFactor);
+    float inv2SigmaY2 = 1.0 / (2.0 * sigmaY * sigmaY);
+    float inv2SigmaC2 = 1.0 / (2.0 * sigmaC * sigmaC);
+
+    const int2 offsets[12] = {
+        int2(-2,  0), int2( 2,  0), int2( 0, -2), int2( 0,  2),
+        int2(-2, -2), int2( 2, -2), int2(-2,  2), int2( 2,  2),
+        int2(-5,  0), int2( 5,  0), int2( 0, -5), int2( 0,  5)
+    };
+    const float weights[12] = {
+        0.85, 0.85, 0.85, 0.85,
+        0.70, 0.70, 0.70, 0.70,
+        0.45, 0.45, 0.45, 0.45
+    };
+
+    float sumY = center.x;
+    float wSumY = 1.0;
+    float2 sumC = center.yz;
+    float wSumC = 1.0;
+    int2 p = int2(gid);
+
+    for (int i = 0; i < 12; i++) {
+        int2 q = clamp(p + offsets[i], int2(0), int2(w - 1, h - 1));
+        float3 s = rgbToYCbCr(inTex.read(uint2(q)).rgb);
+        float dy = s.x - center.x;
+        float2 dc = s.yz - center.yz;
+        float wy = exp(-(dy * dy) * inv2SigmaY2) * weights[i];
+        float wc = exp(-(dy * dy) * inv2SigmaY2 * 0.7 - dot(dc, dc) * inv2SigmaC2) * weights[i];
+        sumY += s.x * wy;
+        wSumY += wy;
+        sumC += s.yz * wc;
+        wSumC += wc;
+    }
+
+    float3 res = float3(sumY / wSumY, sumC / wSumC);
+
+    // libplacebo / f3kdb 2-iteration randomized compass debanding
+    float2 pixelCoord = float2(gid);
+    float3 baseBound = float3(mix(0.016, 0.028, darkFactor), 0.022, 0.022);
+
+    for (int iter = 1; iter <= 2; iter++) {
+        float fi = float(iter);
+        float2 rnd = hash22(pixelCoord + float2(fi * 19.37, fi * 47.13));
+        float radius = (0.25 + 0.75 * rnd.x) * (12.0 * fi);
+        float angle = rnd.y * 6.2831853;
+        float2 d = float2(cos(angle), sin(angle)) * radius * texel;
+        float2 dOrtho = float2(-d.y, d.x);
+
+        float3 p1 = rgbToYCbCr(inTex.sample(linSampler, clamp(uv + d,      0.0, 1.0)).rgb);
+        float3 p2 = rgbToYCbCr(inTex.sample(linSampler, clamp(uv - d,      0.0, 1.0)).rgb);
+        float3 p3 = rgbToYCbCr(inTex.sample(linSampler, clamp(uv + dOrtho, 0.0, 1.0)).rgb);
+        float3 p4 = rgbToYCbCr(inTex.sample(linSampler, clamp(uv - dOrtho, 0.0, 1.0)).rgb);
+
+        float3 avg = 0.25 * (p1 + p2 + p3 + p4);
+        float3 maxDiff = max(
+            max(abs(p1 - avg), abs(p2 - avg)),
+            max(abs(p3 - avg), abs(p4 - avg))
+        );
+        float3 diff = abs(res - avg);
+        float3 bound = baseBound / fi;
+
+        float3 factor = (1.0 - smoothstep(bound * 0.5, bound, diff)) *
+                        (1.0 - smoothstep(bound * 0.8, bound * 1.6, maxDiff));
+        res = mix(res, avg, factor * 0.85);
+    }
+
+    outTex.write(half4(half3(yCbCrToRgb(res)), 1.0h), gid);
+}
+
+struct VertexOut {
+    float4 position [[position]];
+    float2 uv;
+};
+
+vertex VertexOut upscale_vertex(uint vid [[vertex_id]]) {
+    float2 pos = float2((vid << 1) & 2, vid & 2);
+    VertexOut out;
+    out.position = float4(pos * 2.0 - 1.0, 0.0, 1.0);
+    out.uv = float2(pos.x, 1.0 - pos.y);
+    return out;
+}
+
+float3 sampleCatmullRom5(texture2d<float> tex, sampler s, float2 uv, float2 texSize, float2 texel) {
+    float2 samplePos = uv * texSize;
+    float2 texPos1 = floor(samplePos - 0.5) + 0.5;
+    float2 f = samplePos - texPos1;
+
+    float2 w0 = f * (-0.5 + f * (1.0 - 0.5 * f));
+    float2 w1 = 1.0 + f * f * (-2.5 + 1.5 * f);
+    float2 w2 = f * (0.5 + f * (2.0 - 1.5 * f));
+    float2 w3 = f * f * (-0.5 + 0.5 * f);
+
+    float2 w12 = w1 + w2;
+    float2 offset12 = w2 / max(w12, float2(0.0001));
+
+    float2 tc12 = (texPos1 + offset12) * texel;
+    float2 tc0  = (texPos1 - 1.0) * texel;
+    float2 tc3  = (texPos1 + 2.0) * texel;
+
+    float wc = w12.x * w12.y;
+    float wl = w0.x  * w12.y;
+    float wr = w3.x  * w12.y;
+    float wt = w12.x * w0.y;
+    float wb = w12.x * w3.y;
+
+    float3 color =
+        tex.sample(s, tc12).rgb * wc +
+        tex.sample(s, float2(tc0.x, tc12.y)).rgb * wl +
+        tex.sample(s, float2(tc3.x, tc12.y)).rgb * wr +
+        tex.sample(s, float2(tc12.x, tc0.y)).rgb * wt +
+        tex.sample(s, float2(tc12.x, tc3.y)).rgb * wb;
+
+    return color / max(wc + wl + wr + wt + wb, 0.0001);
+}
+
+fragment float4 upscale_fragment(
+    VertexOut in [[stage_in]],
+    texture2d<float> restoredTex [[texture(0)]]
+) {
+    constexpr sampler linSampler(coord::normalized, address::clamp_to_edge, filter::linear);
+    float2 texSize = float2(restoredTex.get_width(), restoredTex.get_height());
+    float2 texel = 1.0 / texSize;
+    float2 uv = in.uv;
+
+    float3 bicubic = sampleCatmullRom5(restoredTex, linSampler, uv, texSize, texel);
+
+    float3 c  = restoredTex.sample(linSampler, uv).rgb;
+    float3 n  = restoredTex.sample(linSampler, uv + float2( 0.0, -1.0) * texel).rgb;
+    float3 s  = restoredTex.sample(linSampler, uv + float2( 0.0,  1.0) * texel).rgb;
+    float3 e  = restoredTex.sample(linSampler, uv + float2( 1.0,  0.0) * texel).rgb;
+    float3 w  = restoredTex.sample(linSampler, uv + float2(-1.0,  0.0) * texel).rgb;
+    float3 nw = restoredTex.sample(linSampler, uv + float2(-1.0, -1.0) * texel).rgb;
+    float3 ne = restoredTex.sample(linSampler, uv + float2( 1.0, -1.0) * texel).rgb;
+    float3 sw = restoredTex.sample(linSampler, uv + float2(-1.0,  1.0) * texel).rgb;
+    float3 se = restoredTex.sample(linSampler, uv + float2( 1.0,  1.0) * texel).rgb;
+
+    float3 minCross = min(c, min(min(n, s), min(e, w)));
+    float3 maxCross = max(c, max(max(n, s), max(e, w)));
+    float3 minBox = min(minCross, min(min(nw, ne), min(sw, se)));
+    float3 maxBox = max(maxCross, max(max(nw, ne), max(sw, se)));
+
+    float3 base = clamp(bicubic, minBox, maxBox);
+
+    float bY = luma(base);
+    float nY = luma(n);
+    float sY = luma(s);
+    float eY = luma(e);
+    float wY = luma(w);
+
+    float minY = min(bY, min(min(nY, sY), min(eY, wY)));
+    float maxY = max(bY, max(max(nY, sY), max(eY, wY)));
+    float contrast = maxY - minY;
+
+    float edgeMask = smoothstep(0.018, 0.085, contrast) * smoothstep(0.015, 0.12, bY);
+    float amp = clamp(min(minY, 1.0 - maxY) / max(maxY, 0.0001), 0.0, 1.0);
+    amp = sqrt(amp) * edgeMask;
+
+    float wght = -amp * 0.18;
+    float sharpY = clamp(((nY + sY + eY + wY) * wght + bY) / (1.0 + 4.0 * wght), minY, maxY);
+    float3 sharpened = clamp(base + (sharpY - bY), minBox, maxBox);
+
+    float ditherMask = smoothstep(0.004, 0.025, sharpY);
+    float triNoise = ign(in.position.xy) - ign(in.position.xy + float2(17.0, 31.0));
+    float dither = triNoise * (1.1 / 255.0) * ditherMask;
+
+    return float4(clamp(sharpened + dither, 0.0, 1.0), 1.0);
+}
+"""
+
+@MainActor
+private final class MetalVideoUpscalerView: UIView {
+    override class var layerClass: AnyClass { CAMetalLayer.self }
+    private var metalLayer: CAMetalLayer { layer as! CAMetalLayer }
+
+    private let device: MTLDevice? = MTLCreateSystemDefaultDevice()
+    private var commandQueue: MTLCommandQueue?
+    private var restorePSO: MTLComputePipelineState?
+    private var upscalePSO: MTLRenderPipelineState?
+    private var textureCache: CVMetalTextureCache?
+    private var intermediateTexture: MTLTexture?
+
+    private weak var player: AVPlayer?
+    private weak var attachedItem: AVPlayerItem?
+    private var itemObservation: NSKeyValueObservation?
+    private var videoOutput: AVPlayerItemVideoOutput?
+    private var displayLink: CADisplayLink?
+    private var isEnabled = false
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        isUserInteractionEnabled = false
+        isHidden = true
+        backgroundColor = .clear
+        setupMetal()
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    private func setupMetal() {
+        guard let device else { return }
+        metalLayer.device = device
+        metalLayer.pixelFormat = .bgra8Unorm
+        metalLayer.framebufferOnly = true
+        metalLayer.contentsScale = UIScreen.main.nativeScale
+        commandQueue = device.makeCommandQueue()
+        CVMetalTextureCacheCreate(kCFAllocatorDefault, nil, device, nil, &textureCache)
+        guard let library = try? device.makeLibrary(source: iosUpscaleMetalSource, options: nil),
+              let restoreFn = library.makeFunction(name: "restore_frame"),
+              let vertFn = library.makeFunction(name: "upscale_vertex"),
+              let fragFn = library.makeFunction(name: "upscale_fragment") else { return }
+        restorePSO = try? device.makeComputePipelineState(function: restoreFn)
+        let rDesc = MTLRenderPipelineDescriptor()
+        rDesc.vertexFunction = vertFn
+        rDesc.fragmentFunction = fragFn
+        rDesc.colorAttachments[0].pixelFormat = .bgra8Unorm
+        upscalePSO = try? device.makeRenderPipelineState(descriptor: rDesc)
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        let scale = window?.screen.nativeScale ?? UIScreen.main.nativeScale
+        metalLayer.contentsScale = scale
+        metalLayer.drawableSize = CGSize(width: max(1, bounds.width * scale), height: max(1, bounds.height * scale))
+    }
+
+    func configure(player: AVPlayer, enabled: Bool) {
+        let playerChanged = self.player !== player
+        self.player = player
+        if playerChanged {
+            itemObservation = player.observe(\.currentItem, options: [.initial, .new]) { [weak self] _, _ in
+                Task { @MainActor in self?.syncItemAttachment() }
+            }
+        }
+        if isEnabled != enabled {
+            isEnabled = enabled
+            syncItemAttachment()
+        } else if enabled {
+            syncItemAttachment()
+        }
+    }
+
+    private func syncItemAttachment() {
+        guard isEnabled, let currentItem = player?.currentItem else {
+            detachOutput()
+            isHidden = true
+            displayLink?.isPaused = true
+            return
+        }
+        if attachedItem !== currentItem {
+            detachOutput()
+            let attrs: [String: Any] = [
+                kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
+                kCVPixelBufferMetalCompatibilityKey as String: true
+            ]
+            let output = AVPlayerItemVideoOutput(pixelBufferAttributes: attrs)
+            currentItem.add(output)
+            videoOutput = output
+            attachedItem = currentItem
+        }
+        if displayLink == nil {
+            let link = CADisplayLink(target: DisplayTarget(owner: self), selector: #selector(DisplayTarget.step))
+            link.add(to: .main, forMode: .common)
+            displayLink = link
+        }
+        displayLink?.isPaused = false
+    }
+
+    private func detachOutput() {
+        if let attachedItem, let videoOutput {
+            attachedItem.remove(videoOutput)
+        }
+        videoOutput = nil
+        attachedItem = nil
+    }
+
+    @MainActor
+    private final class DisplayTarget: NSObject {
+        weak var owner: MetalVideoUpscalerView?
+        init(owner: MetalVideoUpscalerView) { self.owner = owner }
+        @objc func step() { owner?.renderTick() }
+    }
+
+    private func renderTick() {
+        guard isEnabled,
+              let device,
+              let commandQueue,
+              let restorePSO,
+              let upscalePSO,
+              let textureCache,
+              let videoOutput,
+              let item = attachedItem,
+              bounds.width > 0, bounds.height > 0 else { return }
+
+        let itemTime = item.currentTime()
+        guard itemTime.isValid,
+              videoOutput.hasNewPixelBuffer(forItemTime: itemTime) || isHidden,
+              let pb = videoOutput.copyPixelBuffer(forItemTime: itemTime, itemTimeForDisplay: nil) else { return }
+
+        let inW = CVPixelBufferGetWidth(pb)
+        let inH = CVPixelBufferGetHeight(pb)
+        guard inW > 0, inH > 0 else { return }
+
+        if intermediateTexture == nil || intermediateTexture?.width != inW || intermediateTexture?.height != inH {
+            let desc = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .rgba16Float, width: inW, height: inH, mipmapped: false)
+            desc.usage = [.shaderRead, .shaderWrite]
+            desc.storageMode = .private
+            intermediateTexture = device.makeTexture(descriptor: desc)
+        }
+        guard let interTex = intermediateTexture else { return }
+
+        var cvTex: CVMetalTexture?
+        guard CVMetalTextureCacheCreateTextureFromImage(kCFAllocatorDefault, textureCache, pb, nil, .bgra8Unorm, inW, inH, 0, &cvTex) == kCVReturnSuccess,
+              let cvTex,
+              let inTex = CVMetalTextureGetTexture(cvTex),
+              let drawable = metalLayer.nextDrawable(),
+              let cmdBuf = commandQueue.makeCommandBuffer() else { return }
+
+        // Pass 1: Deblock + CAS at source resolution
+        if let comp = cmdBuf.makeComputeCommandEncoder() {
+            comp.setComputePipelineState(restorePSO)
+            comp.setTexture(inTex, index: 0)
+            comp.setTexture(interTex, index: 1)
+            let tgSize = MTLSize(width: 16, height: 16, depth: 1)
+            let tgCount = MTLSize(width: (inW + 15) / 16, height: (inH + 15) / 16, depth: 1)
+            comp.dispatchThreadgroups(tgCount, threadsPerThreadgroup: tgSize)
+            comp.endEncoding()
+        }
+
+        // Pass 2: Aspect-ratio-preserving 4K/Super Retina XDR upscale + dark-scene deband
+        let dw = Double(drawable.texture.width)
+        let dh = Double(drawable.texture.height)
+        let videoAspect = Double(inW) / Double(inH)
+        let viewAspect = dw / dh
+        var vpW = dw, vpH = dh, vpX = 0.0, vpY = 0.0
+        if viewAspect > videoAspect {
+            vpW = dh * videoAspect
+            vpX = (dw - vpW) * 0.5
+        } else {
+            vpH = dw / videoAspect
+            vpY = (dh - vpH) * 0.5
+        }
+
+        let rpd = MTLRenderPassDescriptor()
+        rpd.colorAttachments[0].texture = drawable.texture
+        rpd.colorAttachments[0].loadAction = .clear
+        rpd.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
+        rpd.colorAttachments[0].storeAction = .store
+
+        if let enc = cmdBuf.makeRenderCommandEncoder(descriptor: rpd) {
+            enc.setViewport(MTLViewport(originX: vpX, originY: vpY, width: vpW, height: vpH, znear: 0, zfar: 1))
+            enc.setRenderPipelineState(upscalePSO)
+            enc.setFragmentTexture(interTex, index: 0)
+            enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
+            enc.endEncoding()
+        }
+
+        cmdBuf.present(drawable)
+        cmdBuf.commit()
+        if isHidden { isHidden = false }
     }
 }
 

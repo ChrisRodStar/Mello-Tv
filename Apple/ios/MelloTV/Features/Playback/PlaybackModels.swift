@@ -353,16 +353,22 @@ enum PlaybackRecoveryProgress {
 }
 
 enum PlaybackQuality: Int, CaseIterable, Identifiable {
-    case automatic = 0, fullHD = 1080, hd = 720, sd = 480, low = 360
+    case automatic = 0, upscaled4K = 2160, fullHD = 1080, hd = 720, sd = 480, low = 360
 
     var id: Int { rawValue }
     var height: Int { rawValue }
-    var label: String { self == .automatic ? "Auto" : "\(rawValue)p" }
+    var label: String {
+        switch self {
+        case .automatic: "Auto"
+        case .upscaled4K: "4K Upscaled"
+        default: "\(rawValue)p"
+        }
+    }
 
-    // Auto leaves HLS rendition choice with AVPlayer. Explicit choices remain
-    // ceilings and must be reapplied whenever the authorized item is replaced.
+    // Auto and 4K Upscaled leave HLS rendition choice unconstrained so AVPlayer
+    // uses the highest available rendition; explicit choices remain ceilings.
     func apply(to item: AVPlayerItem) {
-        item.preferredMaximumResolution = height == 0
+        item.preferredMaximumResolution = (self == .automatic || self == .upscaled4K)
             ? .zero
             : CGSize(width: height * 16 / 9, height: height)
         item.preferredPeakBitRate = 0

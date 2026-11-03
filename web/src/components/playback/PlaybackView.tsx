@@ -7,6 +7,7 @@ import { usePlayerVisibility } from '../../hooks/usePlayerVisibility';
 import { useWatchProgress } from '../../hooks/useWatchProgress';
 import type { WatchProgress, Episode } from '../../model';
 import { PlayerEpisodes } from './PlayerEpisodes';
+import { VideoUpscalerCanvas } from './VideoUpscalerCanvas';
 import type { PlaybackRequest, PlaybackResolver } from '../../lib/playback';
 import { Icon } from '../common/Icon';
 import { PLAYBACK_SPEEDS, PlayerControls, type PlayerPanel } from './PlayerControls';
@@ -380,6 +381,7 @@ export function PlaybackView({
           }}
         />
       )}
+      <VideoUpscalerCanvas video={video} enabled={ready && media.upscaled} />
       <div className="player-scrim player-chrome" aria-hidden="true" />
       {preparing ? (
         <div className="playback-status player-preparing" role="status">
