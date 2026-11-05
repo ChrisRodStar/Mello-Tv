@@ -43,6 +43,7 @@ pub enum ProtocolVersion {
     Legacy,
     Current,
     V3,
+    V4,
 }
 
 /// Dimensions are fixed by the known translated protocol. Prefixes may differ

@@ -15,13 +15,7 @@ use std::{
 
 use async_trait::async_trait;
 use semver::Version;
-use stream_core::{
-    domain::MediaType,
-    providers::{
-        AdapterResult, DeviceCapabilities, ErrorCategory, Lookup, ProviderId, ProviderTitle,
-        QualityPreference, StreamFormat, TmdbId,
-    },
-};
+use stream_core::providers::{AdapterResult, ErrorCategory, Lookup, ProviderId};
 use stream_provider_sdk::http::{Header, HostError, ProviderHost, Request, Response};
 use tokio_util::sync::CancellationToken;
 
@@ -230,7 +224,6 @@ impl NativeProviders {
     pub fn spawn_prewarm(&self, cancel: CancellationToken) {
         let client = self.client.clone();
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
-            let handle_clone = handle.clone();
             handle.spawn(async move {
                 let urls = [
                     "https://api.wecollege.net",
@@ -245,45 +238,11 @@ impl NativeProviders {
                         let _ = c.head(*url).timeout(Duration::from_secs(3)).send().await;
                     }
                 });
+                // Warm connections without consuming the upstream media request quota.
                 tokio::select! {
                     biased;
-                    _ = cancel.cancelled() => return,
+                    _ = cancel.cancelled() => {},
                     _ = futures_util::future::join_all(futures) => {}
-                }
-
-                if let Ok(tmdb_id) = TmdbId::try_from(27205) {
-                    let warmup_lookup = Lookup {
-                        title: ProviderTitle {
-                            media_type: MediaType::Movie,
-                            tmdb_id,
-                            imdb_id: "tt1375666".into(),
-                            my_anime_list_id: None,
-                            season: None,
-                            episode: None,
-                        },
-                        preferences: QualityPreference::default(),
-                        device: DeviceCapabilities {
-                            formats: vec![StreamFormat::Hls, StreamFormat::Mp4],
-                            codecs: vec!["h264".into(), "aac".into()],
-                            max_height: 1080,
-                            allow_unknown_codecs: true,
-                            allow_unknown_resolution: true,
-                            supports_encrypted_hls: true,
-                        },
-                        context_key: String::new(),
-                        startup_height: 1080,
-                        wait_for_complete: false,
-                        refresh: false,
-                    };
-                    let _ = tokio::task::spawn_blocking(move || {
-                        let host = BlockingProviderHost {
-                            handle: handle_clone,
-                            client,
-                            cancel,
-                        };
-                        let _ = stream_provider_adapters::resolve("vidcore", &warmup_lookup, &host);
-                    })
-                    .await;
                 }
             });
         }

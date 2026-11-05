@@ -390,7 +390,10 @@ pub fn string_constant(code: &[u8], offset: usize) -> Result<&str, ProtocolError
     let header = code
         .get(offset..end)
         .ok_or(ProtocolError::Invalid("constant header"))?;
-    if !matches!((header[0], header[1]), (103, 188) | (89, 4) | (72, 105)) {
+    if !matches!(
+        (header[0], header[1]),
+        (103, 188) | (89, 4) | (72, 105) | (121, 225)
+    ) {
         return Err(ProtocolError::Invalid("constant opcode"));
     }
     let length = usize::from(u16::from_be_bytes([header[2], header[3]]));
@@ -410,6 +413,7 @@ struct Layout {
     list: &'static str,
     unlock: &'static str,
     list_parts: usize,
+    unlock_parts: usize,
     bases: [usize; 2],
     actions: [usize; 2],
     key: usize,
@@ -422,13 +426,33 @@ struct Layout {
     rc4_keys: [usize; 5],
 }
 
-const LAYOUTS: [Layout; 3] = [
+const LAYOUTS: [Layout; 4] = [
+    Layout {
+        version: ProtocolVersion::V4,
+        material: "81a955a872aa8f666562dcbae9d421402910cb0447b21f0fba8fcdd48cd56e8e",
+        list: "5c76251f3ebebe1d2bf18e82c8c4f7bd6ff5055bd8ccc87da2fda734410a7bd3",
+        unlock: "79273e89fc9ee8a349fa93cb212c95f09ece17af45619ef39cbcfa1f2fd05b57",
+        list_parts: 6,
+        unlock_parts: 6,
+        bases: [45442, 51045],
+        actions: [45487, 51090],
+        key: 36767,
+        iv: 36893,
+        seed: 36987,
+        response_seed: 47724,
+        response_numbers: [48130, 48231],
+        stage_keys: [29808, 31110, 32477, 33914, 35352],
+        prefixes: [29891, 31193, 32560, 33997, 35435],
+        // Indexed by stage. The program runs stages 0, 4, 1, 2, 3.
+        rc4_keys: [46427, 46943, 47201, 47459, 46685],
+    },
     Layout {
         version: ProtocolVersion::V3,
         material: "503e3df6cc9ffc6d239ce5dc92d99bc7720b85d8dfb83658733a74e98fbd6def",
         list: "178831c68e6a878d155f092ed2eab62d1309291be032e6f046196bf96857f801",
         unlock: "8f85b5136be7712309d6fb8dd8e157066c82a8bea454c224d9b07f297478b419",
         list_parts: 5,
+        unlock_parts: 5,
         bases: [45603, 51421],
         actions: [45862, 51680],
         key: 36901,
@@ -446,6 +470,7 @@ const LAYOUTS: [Layout; 3] = [
         list: "a39fcc5958024e588c963ebd34ece56b49f59e37539edab7df082288b28a23e3",
         unlock: "ac9a1f7e7b5b4d2b28a32c2e73f6dc494f2596ed8dfedac3e6ed86b5f6545086",
         list_parts: 6,
+        unlock_parts: 5,
         bases: [45623, 51230],
         actions: [45706, 51313],
         key: 36912,
@@ -463,6 +488,7 @@ const LAYOUTS: [Layout; 3] = [
         list: "e5872b95b115bc1ab52e148454837d0354cbd96c73c8fbf28fa75c6808c749d1",
         unlock: "18948e99225f9d2fd88a05e0615a64b5d34e80ed3a9597a75da6beb560e560e4",
         list_parts: 6,
+        unlock_parts: 5,
         bases: [45636, 51272],
         actions: [45754, 51390],
         key: 36941,
@@ -503,7 +529,7 @@ pub(super) fn compile(source: &str) -> Result<Protocol, ProtocolError> {
         .find(|layout| crate::ct_eq(layout.material.as_bytes(), material_hash.as_bytes()))
         .ok_or(ProtocolError::UnknownMaterial)?;
     let list = decode_program(fragments.prefix, fragments.list, layout.list_parts)?;
-    let unlock = decode_program(fragments.prefix, fragments.unlock, 5)?;
+    let unlock = decode_program(fragments.prefix, fragments.unlock, layout.unlock_parts)?;
     let list_fp = fingerprint(&[&list]);
     let unlock_fp = fingerprint(&[&unlock]);
     if !crate::ct_eq(list_fp.as_bytes(), layout.list.as_bytes())

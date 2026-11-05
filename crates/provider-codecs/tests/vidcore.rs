@@ -179,7 +179,7 @@ fn missing_duplicate_and_out_of_range_bytecode_parts_fail_closed() -> TestResult
 
 #[test]
 fn mapped_string_constants_check_known_opcodes_lengths_and_offsets() -> TestResult {
-    for opcode in [[103, 188], [89, 4], [72, 105]] {
+    for opcode in [[103, 188], [89, 4], [72, 105], [121, 225]] {
         let mut bytes = vec![0, 0];
         bytes.extend_from_slice(&opcode);
         bytes.extend_from_slice(&3u16.to_be_bytes());
