@@ -55,6 +55,8 @@ struct PlayerConfig {
     stream_base: String,
     #[serde(rename = "apiToken")]
     api_token: String,
+    #[serde(default)]
+    turnstile: bool,
 }
 #[derive(Deserialize)]
 struct SourceEnvelope {
@@ -96,9 +98,9 @@ pub fn resolve(lookup: &Lookup, host: &dyn ProviderHost) -> Result<AdapterResult
     let player_url = player_endpoint(&config.player_url, &format!("/embed/player{path}"))?;
     let player = fetch(host, get(&player_url, &format!("{PLAYER}/"), 256 * 1024))?;
     let config: PlayerConfig = parse_config(&player.body, "CONFIG")?;
-    let source_url = source_endpoint(config, &lookup.title)?;
+    let source_url = source_endpoint(&config, &lookup.title)?;
     let response = fetch(host, get(source_url, &format!("{PLAYER}/"), 256 * 1024))?;
-    sources(&response.body, &lookup.title, host)
+    sources(&response.body, &lookup.title, &config.api_token, host)
 }
 
 fn embed_path(title: &ProviderTitle) -> Result<String, AdapterError> {
@@ -296,7 +298,7 @@ fn player_endpoint(raw: &str, path: &str) -> Result<String, AdapterError> {
     Ok(url.into())
 }
 
-fn source_endpoint(config: PlayerConfig, title: &ProviderTitle) -> Result<String, AdapterError> {
+fn source_endpoint(config: &PlayerConfig, title: &ProviderTitle) -> Result<String, AdapterError> {
     if config.media_type
         != if title.media_type == MediaType::Movie {
             "movie"
@@ -358,13 +360,18 @@ fn source_endpoint(config: PlayerConfig, title: &ProviderTitle) -> Result<String
     {
         return Err(AdapterError::Protocol("stream API coordinates"));
     }
+    if config.api_token.is_empty() && config.turnstile {
+        return Err(AdapterError::Unavailable(
+            "VidSrc requires upstream verification",
+        ));
+    }
     if config.api_token.is_empty()
         || config.api_token.len() > 4096
         || config.api_token.bytes().any(|byte| byte.is_ascii_control())
     {
         return Err(AdapterError::Protocol("API token"));
     }
-    values.insert("api_token".into(), vec![config.api_token]);
+    values.insert("api_token".into(), vec![config.api_token.clone()]);
     {
         let mut pairs = url.query_pairs_mut();
         pairs.clear();
@@ -437,6 +444,7 @@ fn val_to_str(v: &Value) -> String {
 pub fn sources(
     body: &[u8],
     title: &ProviderTitle,
+    api_token: &str,
     host: &dyn ProviderHost,
 ) -> Result<AdapterResult, AdapterError> {
     let envelope: SourceEnvelope = common::json(body, 256 * 1024, "VidSrc stream envelope")?;
@@ -484,6 +492,9 @@ pub fn sources(
         }
     }
     let mut token_results = BTreeMap::new();
+    // VidSrc binds the media token to the API token used for the stream list.
+    let encoded_api_token: String =
+        url::form_urlencoded::byte_serialize(api_token.as_bytes()).collect();
     let start = host.now_unix_ms()?;
     let origins: Vec<_> = origins.into_iter().collect();
     for group in origins.chunks(3) {
@@ -493,11 +504,12 @@ pub fn sources(
         let requests = group
             .iter()
             .map(|origin| {
-                let mut request = get(
-                    format!("{origin}/generate.php"),
-                    &format!("{PLAYER}/"),
-                    8 * 1024,
-                );
+                let token_url = if encoded_api_token.is_empty() {
+                    format!("{origin}/generate.php")
+                } else {
+                    format!("{origin}/generate.php?api_token={encoded_api_token}")
+                };
+                let mut request = get(token_url, &format!("{PLAYER}/"), 8 * 1024);
                 request.timeout_ms = 1000;
                 request
             })
@@ -645,4 +657,37 @@ pub fn parse_token(body: &[u8]) -> Result<String, AdapterError> {
         return Err(AdapterError::Protocol("invalid media token"));
     }
     Ok(token)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use stream_core::providers::TmdbId;
+
+    #[test]
+    fn gated_player_requires_upstream_verification_until_a_token_is_issued()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let title = ProviderTitle {
+            media_type: MediaType::Tv,
+            tmdb_id: TmdbId::try_from(60625)?,
+            imdb_id: String::new(),
+            my_anime_list_id: None,
+            season: Some(1),
+            episode: Some(1),
+        };
+        let mut config: PlayerConfig = parse_config(
+            include_bytes!("../../provider-codecs/testdata/providers/vidsrc/tv-player.html"),
+            "CONFIG",
+        )?;
+        assert!(source_endpoint(&config, &title).is_ok());
+
+        config.api_token.clear();
+        assert!(matches!(
+            source_endpoint(&config, &title),
+            Err(AdapterError::Unavailable(
+                "VidSrc requires upstream verification"
+            ))
+        ));
+        Ok(())
+    }
 }
