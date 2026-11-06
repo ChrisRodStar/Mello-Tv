@@ -67,7 +67,7 @@ async fn main() -> CheckResult<()> {
         preferences: QualityPreference::default(),
         device: DeviceCapabilities {
             formats: vec![StreamFormat::Hls, StreamFormat::Mp4],
-            codecs: vec!["h264".into(), "aac".into()],
+            codecs: vec!["avc1".into(), "mp4a".into(), "h264".into(), "aac".into()],
             max_height: 1080,
             allow_unknown_codecs: true,
             allow_unknown_resolution: true,
@@ -141,6 +141,12 @@ async fn main() -> CheckResult<()> {
         report["streams"] = json!(streams.iter().map(|s| json!({"server":s.source.server,"accessible":s.observation.accessible,"format":s.observation.format,"width":s.observation.variant.as_ref().and_then(|v|v.width),"height":s.observation.variant.as_ref().and_then(|v|v.height),"sample_bytes":s.observation.sample_bytes,"samples_completed":s.observation.samples_completed,"failure":s.observation.failure})).collect::<Vec<_>>());
         let selection = selection::select(&lookup, streams, SystemTime::now().into())?;
         report["selected"] = json!(selection.selected.is_some());
+        report["rejected"] = json!(
+            selection
+                .rejected
+                .as_ref()
+                .map(|items| items.values().collect::<Vec<_>>())
+        );
         if args.iter().any(|a| a == "--relay") && selection.selected.is_some() {
             let directory = PathBuf::from("Local/reports/provider-acceptance")
                 .join(provider.id().as_str())
@@ -209,33 +215,59 @@ async fn verify_relay(selection: Selection, directory: PathBuf) -> CheckResult<V
             _ => return Err("rendition was not a playlist".into()),
         };
     }
-    // Decode encrypted/init-map streams using a player; don't save misleading
-    // standalone segments that require a separate key or initialization map.
-    if manifest.contains("#EXT-X-KEY:") || manifest.contains("#EXT-X-MAP:") {
-        return Ok(
-            json!({"manifest_delivered":true,"standalone_decode":"requires_key_or_initialization"}),
-        );
-    }
     let mut samples = Vec::new();
-    for (index, uri) in manifest
-        .lines()
-        .filter(|l| l.starts_with("/stream/"))
-        .take(3)
-        .enumerate()
-    {
-        let resource = resource_id(uri)?;
-        let response = relay
-            .fetch_resource("acceptance", resource, "local-only", None)
-            .await
-            .map_err(|_| "segment delivery failed")?;
-        let path = directory.join(format!("segment-{index}.ts"));
-        let bytes = save_binary(response, path.clone()).await?;
-        samples.push(json!({"bytes":bytes,"path":path}));
+    let mut local_manifest = String::new();
+    let mut auxiliaries = std::collections::BTreeSet::new();
+    for line in manifest.lines() {
+        if line.starts_with("/stream/") {
+            let resource = resource_id(line)?;
+            let response = relay
+                .fetch_resource("acceptance", resource, "local-only", None)
+                .await
+                .map_err(|_| "segment delivery failed")?;
+            let name = format!("segment-{}.ts", samples.len());
+            let path = directory.join(&name);
+            let bytes = save_binary(response, path.clone()).await?;
+            samples.push(json!({"bytes":bytes,"path":path}));
+            local_manifest.push_str(&name);
+            local_manifest.push('\n');
+            if samples.len() == 3 {
+                break;
+            }
+        } else if (line.starts_with("#EXT-X-KEY:") || line.starts_with("#EXT-X-MAP:"))
+            && line.contains("URI=\"")
+        {
+            let (_, rest) = line.split_once("URI=\"").ok_or("missing auxiliary URI")?;
+            let (uri, _) = rest.split_once('"').ok_or("invalid auxiliary URI")?;
+            let resource = resource_id(uri)?;
+            let is_key = line.starts_with("#EXT-X-KEY:");
+            let name = format!("{}-{resource}.bin", if is_key { "key" } else { "init" });
+            if auxiliaries.insert(name.clone()) {
+                let response = relay
+                    .fetch_resource("acceptance", resource, "local-only", None)
+                    .await
+                    .map_err(|_| "auxiliary delivery failed")?;
+                let bytes = save_binary(response, directory.join(&name)).await?;
+                if is_key && bytes != 16 {
+                    return Err("invalid AES-128 key length".into());
+                }
+            }
+            local_manifest.push_str(&line.replace(uri, &name));
+            local_manifest.push('\n');
+        } else {
+            local_manifest.push_str(line);
+            local_manifest.push('\n');
+        }
     }
     if samples.is_empty() {
         return Err("no media segments delivered".into());
     }
-    Ok(json!({"segments":samples}))
+    if !local_manifest.lines().any(|line| line == "#EXT-X-ENDLIST") {
+        local_manifest.push_str("#EXT-X-ENDLIST\n");
+    }
+    let playlist = directory.join("playlist.m3u8");
+    std::fs::write(&playlist, local_manifest)?;
+    Ok(json!({"segments":samples,"playlist":playlist}))
 }
 fn resource_id(uri: &str) -> CheckResult<&str> {
     uri.split_once("/r/")
@@ -273,6 +305,14 @@ async fn save_binary(response: RelayResponse, path: PathBuf) -> CheckResult<usiz
     if bytes.is_empty() {
         return Err("empty media".into());
     }
-    std::fs::write(path, &bytes)?;
+    use std::io::Write;
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    options.open(path)?.write_all(&bytes)?;
     Ok(bytes.len())
 }
