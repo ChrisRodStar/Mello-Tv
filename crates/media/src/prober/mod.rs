@@ -64,7 +64,9 @@ impl Default for ProbeLimits {
             sample_bytes: 128 * 1024,
             total_sample_bytes: 4 * 1024 * 1024,
             total_playlist_bytes: 4 * 1024 * 1024,
-            source_timeout: Duration::from_secs(6),
+            // Includes the master, rendition playlist, and media samples. Cold CDN
+            // playlist requests can consume six seconds before sampling begins.
+            source_timeout: Duration::from_secs(10),
             max_variants: 6,
         }
     }
@@ -173,7 +175,7 @@ impl StreamProber {
             || !(1..=16 * 1024 * 1024).contains(&limits.total_sample_bytes)
             || !(1..=4 * 1024 * 1024).contains(&limits.total_playlist_bytes)
             || limits.source_timeout.is_zero()
-            || limits.source_timeout > Duration::from_secs(6)
+            || limits.source_timeout > Duration::from_secs(10)
             || !(1..=6).contains(&limits.max_variants)
         {
             return Err(ProbeConfigError);

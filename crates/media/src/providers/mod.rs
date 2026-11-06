@@ -263,7 +263,6 @@ impl DiscoveryCoordinator {
         let transport = HttpClient::new().map_err(|_| DiscoveryError::Closed)?;
         let probe_limits = ProbeLimits {
             total_sample_bytes: 16 * 1024 * 1024,
-            source_timeout: Duration::from_secs(6),
             max_variants: 3,
             ..ProbeLimits::default()
         };
