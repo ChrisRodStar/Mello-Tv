@@ -44,7 +44,7 @@ cbc = { version = "0.2.1", features = ["alloc", "zeroize"] }
 rc4 = { version = "0.2.0", features = ["zeroize"] }
 chacha20 = { version = "0.10.2", features = ["zeroize"] }
 http = "1.5.0"
-wasmtime = { version = "50.0.0", default-features = false, features = ["async", "component-model", "cranelift", "runtime", "std"] }
+wasmtime = { version = "50.0.1", default-features = false, features = ["async", "component-model", "cranelift", "runtime", "std"] }
 wat = "1.262.0"
 regex = "1.13.1"
 tough = { version = "0.24.0", default-features = false }
