@@ -31,6 +31,14 @@ fn material_cache() -> &'static RwLock<BTreeMap<String, (codec::ProtocolMaterial
 }
 
 #[derive(Deserialize)]
+struct SourceTrack {
+    #[serde(default)]
+    file: String,
+    #[serde(default)]
+    label: String,
+}
+
+#[derive(Deserialize)]
 struct SourceRecord {
     url: String,
     #[serde(default, rename = "tmdbId")]
@@ -43,13 +51,15 @@ struct SourceRecord {
     season: Option<Value>,
     #[serde(default)]
     episode: Option<Value>,
+    #[serde(default)]
+    tracks: Option<Vec<SourceTrack>>,
 }
 
 pub fn resolve(lookup: &Lookup, host: &dyn ProviderHost) -> Result<AdapterResult, AdapterError> {
     let path = embed_path(&lookup.title)?;
     let embed_url = format!("{ORIGIN}{path}");
     let mut embed_req = get(&embed_url, &format!("{ORIGIN}/"), 512 * 1024);
-    embed_req.timeout_ms = 2_000;
+    embed_req.timeout_ms = 3_000;
     let embed = fetch(host, embed_req)?;
     let (token, player_script) = parse_bootstrap(&embed.body, &lookup.title)?;
 
@@ -64,7 +74,7 @@ pub fn resolve(lookup: &Lookup, host: &dyn ProviderHost) -> Result<AdapterResult
 
     if material_opt.is_none() {
         let mut player_req = get(&player_url, &embed_url, 3 * 1024 * 1024);
-        player_req.timeout_ms = 2_000;
+        player_req.timeout_ms = 3_000;
         let player = fetch(host, player_req)?;
         let mat = codec::recognize_player(&player.body)
             .map_err(|_| AdapterError::Protocol("VidFast player version"))?;
@@ -84,7 +94,7 @@ pub fn resolve(lookup: &Lookup, host: &dyn ProviderHost) -> Result<AdapterResult
         .map_err(|_| AdapterError::Protocol("VidFast pack request"))?;
 
     let challenge_url = format!("{ORIGIN}{}/JgQXcWPNH7s/{packed}", material.root());
-    let mut req = post(challenge_url, &format!("{ORIGIN}/"), 4096);
+    let mut req = post(challenge_url, &embed_url, 4096);
     req.headers.push(header("Origin", ORIGIN));
     if !material.csrf_token().is_empty() {
         req.headers
@@ -96,7 +106,7 @@ pub fn resolve(lookup: &Lookup, host: &dyn ProviderHost) -> Result<AdapterResult
         .map_err(|_| AdapterError::Protocol("VidFast challenge token"))?;
 
     let list_url = format!("{ORIGIN}{}/dBWKuO8aW6U/{ticket}", material.root());
-    let mut req = post(list_url, &format!("{ORIGIN}/"), 256 * 1024);
+    let mut req = post(list_url, &embed_url, 256 * 1024);
     req.headers.push(header("Origin", ORIGIN));
     if !material.csrf_token().is_empty() {
         req.headers
@@ -123,8 +133,8 @@ pub fn resolve(lookup: &Lookup, host: &dyn ProviderHost) -> Result<AdapterResult
         }
         seen_servers.insert(server.name.clone());
         let unlock_url = format!("{ORIGIN}{}/M6SyMXJBpeg/{}", material.root(), server.data);
-        let mut req = post(unlock_url, &format!("{ORIGIN}/"), 256 * 1024);
-        req.timeout_ms = 1_000;
+        let mut req = post(unlock_url, &embed_url, 256 * 1024);
+        req.timeout_ms = 3_000;
         req.headers.push(header("Origin", ORIGIN));
         if !material.csrf_token().is_empty() {
             req.headers
@@ -264,6 +274,28 @@ pub fn resolve(lookup: &Lookup, host: &dyn ProviderHost) -> Result<AdapterResult
             public_resources,
         };
 
+        let mut tracks = Vec::new();
+        if let Some(source_tracks) = record.tracks {
+            for track in source_tracks {
+                if track.file.is_empty() || public_url(&track.file).is_err() {
+                    continue;
+                }
+                tracks.push(stream_core::providers::Track {
+                    kind: "subtitles".into(),
+                    language: track.label.clone(),
+                    name: track.label,
+                    url: track.file,
+                    ..Default::default()
+                });
+            }
+        }
+        let tracks_known = !tracks.is_empty();
+        let metadata = Metadata {
+            tracks,
+            tracks_known,
+            ..Default::default()
+        };
+
         let id = hash_id(&[server_name.as_bytes(), b"\x00", record.url.as_bytes()]);
         candidates.push(CandidateStream {
             expires_at: None,
@@ -275,7 +307,7 @@ pub fn resolve(lookup: &Lookup, host: &dyn ProviderHost) -> Result<AdapterResult
             format,
             title: lookup.title.clone(),
             fetch_context: context,
-            resolver_metadata: Metadata::default(),
+            resolver_metadata: metadata,
             content_verified: false,
         });
     }
@@ -419,5 +451,28 @@ mod tests {
             Some(&serde_json::json!(null)),
             expected_episode
         ));
+    }
+
+    #[test]
+    fn parses_source_record_with_tracks() -> Result<(), Box<dyn std::error::Error>> {
+        let json_payload = serde_json::json!({
+            "url": "https://moon.goldenkite.top/vd/master.m3u8",
+            "tmdbId": 1622,
+            "noReferrer": false,
+            "tracks": [
+                {
+                    "file": "https://sub.vidfast.vc/en.srt",
+                    "label": "English"
+                }
+            ]
+        });
+        let record: SourceRecord = serde_json::from_value(json_payload)?;
+        assert_eq!(record.url, "https://moon.goldenkite.top/vd/master.m3u8");
+        assert_eq!(record.no_referrer, Some(false));
+        let tracks = record.tracks.as_ref().ok_or("missing tracks")?;
+        assert_eq!(tracks.len(), 1);
+        assert_eq!(tracks[0].file, "https://sub.vidfast.vc/en.srt");
+        assert_eq!(tracks[0].label, "English");
+        Ok(())
     }
 }
