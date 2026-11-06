@@ -2,11 +2,6 @@
 //! Bounded implementations of legacy provider protocol primitives. These are
 //! interoperability codecs; application state uses authenticated encryption.
 
-pub mod fmovies4u;
-pub mod moviedownloader02;
-pub mod peachify;
-pub mod streammafia;
-pub mod tulnex;
 pub mod vidcore;
 pub mod videasy;
 pub mod vidfast;

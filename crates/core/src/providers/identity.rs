@@ -39,27 +39,9 @@ impl From<TmdbId> for i64 {
 pub struct ProviderId(String);
 
 impl ProviderId {
-    pub const BUILT_IN: [&'static str; 20] = [
-        "vidcore",
-        "vidlink",
-        "vidsrc",
-        "vidfast",
-        "videasy",
-        "vidrock",
-        "anyembed",
-        "cinesu",
-        "fmovies4u",
-        "fshare",
-        "icefy",
-        "moviedownloader02",
-        "peachify",
-        "popr",
-        "streammafia",
-        "tulnex",
-        "vidapi",
-        "vidnest",
-        "vidzee",
-        "vixsrc",
+    pub const BUILT_IN: [&'static str; 11] = [
+        "vidcore", "vidlink", "vidsrc", "vidfast", "videasy", "vidrock", "fshare", "vidapi",
+        "vidnest", "vidzee", "vixsrc",
     ];
     pub fn new(value: impl Into<String>) -> Result<Self, ValidationError> {
         value.into().try_into()
