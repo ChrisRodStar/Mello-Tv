@@ -6,6 +6,7 @@ pub mod vidcore;
 pub mod videasy;
 pub mod vidfast;
 pub mod vidlink;
+pub mod vidrock;
 pub mod vidsrc;
 
 use aes::cipher::{

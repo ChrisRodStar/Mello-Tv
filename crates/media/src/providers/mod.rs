@@ -231,6 +231,7 @@ impl NativeProviders {
                     "https://vidcore.io",
                     "https://vidsrc.sh",
                     "https://vidfast.vc",
+                    "https://vidrock.net",
                 ];
                 let futures = urls.iter().map(|url| {
                     let c = client.clone();

@@ -39,7 +39,9 @@ impl From<TmdbId> for i64 {
 pub struct ProviderId(String);
 
 impl ProviderId {
-    pub const BUILT_IN: [&'static str; 5] = ["vidcore", "vidlink", "vidsrc", "vidfast", "videasy"];
+    pub const BUILT_IN: [&'static str; 6] = [
+        "vidcore", "vidlink", "vidsrc", "vidfast", "videasy", "vidrock",
+    ];
     pub fn new(value: impl Into<String>) -> Result<Self, ValidationError> {
         value.into().try_into()
     }

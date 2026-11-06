@@ -70,7 +70,7 @@ public struct ServerSnapshot: Codable, Sendable {
 
         public var name: String {
             ["vidcore": "VidCore", "vidlink": "VidLink", "vidsrc": "VidSrc",
-             "vidfast": "VidFast", "videasy": "VidEasy"][id] ?? id.capitalized
+             "vidfast": "VidFast", "videasy": "VidEasy", "vidrock": "VidRock"][id] ?? id.capitalized
         }
 
         public var observedAt: Date? {

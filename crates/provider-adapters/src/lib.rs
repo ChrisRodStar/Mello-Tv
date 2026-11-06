@@ -7,13 +7,16 @@ pub mod vidcore;
 pub mod videasy;
 pub mod vidfast;
 pub mod vidlink;
+pub mod vidrock;
 pub mod vidsrc;
 
 pub use common::{AdapterError, ProviderHost};
 
 use stream_core::providers::{AdapterResult, Lookup};
 
-pub const PROVIDERS: [&str; 5] = ["vidcore", "vidlink", "vidsrc", "vidfast", "videasy"];
+pub const PROVIDERS: [&str; 6] = [
+    "vidcore", "vidlink", "vidsrc", "vidfast", "videasy", "vidrock",
+];
 
 /// An individual component wrapper chooses its provider at compile time. A
 /// lookup cannot switch the package's provider identity through JSON input.
@@ -30,6 +33,7 @@ pub fn resolve(
         "vidfast" => vidfast::resolve(lookup, host)?,
         "vidlink" => vidlink::resolve(lookup, host)?,
         "vidsrc" => vidsrc::resolve(lookup, host)?,
+        "vidrock" => vidrock::resolve(lookup, host)?,
         _ => return Err(AdapterError::Unsupported),
     };
     let end = host.now_unix_ms()?;
