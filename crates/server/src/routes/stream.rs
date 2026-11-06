@@ -836,7 +836,7 @@ fn relay_result_to_response(result: Result<RelayResponse, RelayError>) -> Respon
             );
             headers.insert(
                 header::CACHE_CONTROL,
-                HeaderValue::from_static("private, no-store"),
+                HeaderValue::from_static("private, no-cache, no-store"),
             );
             headers.insert("referrer-policy", HeaderValue::from_static("no-referrer"));
             headers.insert(
@@ -877,7 +877,7 @@ fn relay_result_to_response(result: Result<RelayResponse, RelayError>) -> Respon
             }
             headers.insert(
                 header::CACHE_CONTROL,
-                HeaderValue::from_static("private, no-store"),
+                HeaderValue::from_static("public, max-age=86400, immutable"),
             );
             headers.insert("referrer-policy", HeaderValue::from_static("no-referrer"));
             headers.insert(
