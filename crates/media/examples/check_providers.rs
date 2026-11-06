@@ -1,166 +1,69 @@
-#![allow(clippy::unwrap_used, clippy::expect_used)]
-
+//! Opt-in live acceptance through the production native provider, prober,
+//! selection and relay. Reports omit signed URLs, headers and credentials.
+//!
+//! cargo run -p stream-media --example check_providers -- vidrock tv 1399 2 5 --relay
+//! `all` checks every registered provider. `--relay` saves three segments under
+//! ignored Local/reports/provider-acceptance for independent audio/video decoding.
+use futures_util::StreamExt;
+use serde_json::{Value, json};
 use std::{
+    error::Error,
+    path::PathBuf,
     sync::Arc,
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant, SystemTime},
 };
-
 use stream_core::{
     domain::MediaType,
     providers::{
-        DeviceCapabilities, Lookup, ProviderTitle, QualityPreference, StreamFormat, TmdbId,
+        DeviceCapabilities, Lookup, ProviderTitle, QualityPreference, Selection, StreamFormat,
+        TmdbId,
     },
 };
-use stream_provider_adapters::resolve;
-use stream_provider_sdk::http::{Header, HostError, ProviderHost, Request, Response};
+use stream_media::{
+    discovery::ProviderCatalog,
+    network::HttpClient,
+    prober::{ProbeLimits, StreamProber},
+    providers::NativeProviders,
+    relay::{MediaRelay, RelayResponse},
+    selection,
+};
+use tokio_util::sync::CancellationToken;
 
-struct LiveHost {
-    rt: Arc<tokio::runtime::Runtime>,
-    client: reqwest::Client,
-}
+type CheckResult<T> = Result<T, Box<dyn Error>>;
 
-impl LiveHost {
-    fn new() -> Self {
-        let rt = Arc::new(
-            tokio::runtime::Builder::new_multi_thread()
-                .worker_threads(4)
-                .enable_all()
-                .build()
-                .expect("failed to build tokio runtime"),
-        );
-
-        let client = reqwest::Client::builder()
-            .redirect(reqwest::redirect::Policy::limited(5))
-            .tcp_nodelay(true)
-            .tcp_keepalive(Duration::from_secs(60))
-            .pool_max_idle_per_host(32)
-            .pool_idle_timeout(Duration::from_secs(90))
-            .timeout(Duration::from_secs(5))
-            .build()
-            .expect("failed to build reqwest client");
-
-        Self { rt, client }
+#[tokio::main]
+async fn main() -> CheckResult<()> {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.len() < 3 {
+        return Err("usage: check_providers <all|provider,provider> <movie|tv> <tmdb_id> [season episode] [--relay]".into());
     }
-
-    fn prewarm(&self) {
-        let client = self.client.clone();
-        self.rt.block_on(async move {
-            let urls = [
-                "https://api.wecollege.net",
-                "https://vidlink.pro",
-                "https://vidcore.io",
-                "https://vidsrc.sh",
-                "https://vidfast.vc",
-            ];
-            let futures = urls.iter().map(|url| {
-                let client = client.clone();
-                async move {
-                    let _ = client
-                        .head(*url)
-                        .timeout(Duration::from_secs(2))
-                        .send()
-                        .await;
-                }
-            });
-            futures_util::future::join_all(futures).await;
-        });
-
-        // Pre-discover and prime the VidCore protocol so all subsequent lookups hit memory cache
-        let warmup_lookup = make_lookup(ProviderTitle {
-            media_type: MediaType::Movie,
-            tmdb_id: TmdbId::try_from(27205).unwrap(),
-            imdb_id: "tt1375666".into(),
-            my_anime_list_id: None,
-            season: None,
-            episode: None,
-        });
-        let _ = stream_provider_adapters::resolve("vidcore", &warmup_lookup, self);
-    }
-}
-
-async fn execute_request(client: &reqwest::Client, req: Request) -> Result<Response, HostError> {
-    let method = match req.method.as_str() {
-        "POST" => reqwest::Method::POST,
-        _ => reqwest::Method::GET,
+    let media_type = match args[1].as_str() {
+        "movie" => MediaType::Movie,
+        "tv" => MediaType::Tv,
+        _ => return Err("content type must be movie or tv".into()),
     };
-    let mut builder = client.request(method, &req.url);
-    if req.timeout_ms > 0 {
-        builder = builder.timeout(Duration::from_millis(req.timeout_ms as u64));
-    }
-    for h in req.headers {
-        builder = builder.header(&h.name, &h.value);
-    }
-    if !req.body.is_empty() {
-        builder = builder.body(req.body);
-    }
-    let res = builder.send().await.map_err(|e| {
-        if e.is_timeout() {
-            HostError::Timeout
-        } else {
-            HostError::UpstreamFailure
-        }
-    })?;
-
-    let status = res.status().as_u16();
-    let mut headers = Vec::new();
-    for (k, v) in res.headers() {
-        if let Ok(v_str) = v.to_str() {
-            headers.push(Header {
-                name: k.as_str().to_string(),
-                value: v_str.to_string(),
-            });
-        }
-    }
-    let bytes = res.bytes().await.map_err(|_| HostError::UpstreamFailure)?;
-    if bytes.len() > req.max_response_bytes as usize {
-        return Err(HostError::LimitExceeded);
-    }
-    Ok(Response {
-        url: req.url,
-        status,
-        headers,
-        body: bytes.to_vec(),
-    })
-}
-
-impl ProviderHost for LiveHost {
-    fn fetch(&self, request: Request) -> Result<Response, HostError> {
-        let client = self.client.clone();
-        self.rt
-            .block_on(async move { execute_request(&client, request).await })
-    }
-
-    fn fetch_batch(
-        &self,
-        requests: Vec<Request>,
-    ) -> Result<Vec<Result<Response, HostError>>, HostError> {
-        let client = self.client.clone();
-        Ok(self.rt.block_on(async move {
-            let futures = requests.into_iter().map(|req| {
-                let client = client.clone();
-                async move { execute_request(&client, req).await }
-            });
-            futures_util::future::join_all(futures).await
-        }))
-    }
-
-    fn now_unix_ms(&self) -> Result<i64, HostError> {
-        Ok(SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_err(|_| HostError::Cancelled)?
-            .as_millis() as i64)
-    }
-
-    fn random_bytes(&self, length: u32) -> Result<Vec<u8>, HostError> {
-        let mut buf = vec![0u8; length as usize];
-        getrandom::fill(&mut buf).map_err(|_| HostError::Cancelled)?;
-        Ok(buf)
-    }
-}
-
-fn make_lookup(title: ProviderTitle) -> Lookup {
-    Lookup {
-        title,
+    let (season, episode) = if media_type == MediaType::Tv {
+        (
+            Some(args.get(3).ok_or("missing season")?.parse()?),
+            Some(args.get(4).ok_or("missing episode")?.parse()?),
+        )
+    } else {
+        (None, None)
+    };
+    let imdb_id = if let Some(index) = args.iter().position(|arg| arg == "--imdb") {
+        args.get(index + 1).ok_or("missing IMDb ID")?.clone()
+    } else {
+        String::new()
+    };
+    let lookup = Lookup {
+        title: ProviderTitle {
+            media_type,
+            tmdb_id: TmdbId::try_from(args[2].parse::<i64>()?)?,
+            imdb_id,
+            my_anime_list_id: None,
+            season,
+            episode,
+        },
         preferences: QualityPreference::default(),
         device: DeviceCapabilities {
             formats: vec![StreamFormat::Hls, StreamFormat::Mp4],
@@ -173,144 +76,203 @@ fn make_lookup(title: ProviderTitle) -> Lookup {
         context_key: String::new(),
         startup_height: 1080,
         wait_for_complete: false,
-        refresh: false,
-    }
-}
-
-struct TestTarget {
-    label: &'static str,
-    title: ProviderTitle,
-}
-
-fn main() {
-    println!("============================================================");
-    println!("     LIVE PROVIDER VERIFICATION SUITE ACROSS SHOW TYPES     ");
-    println!("============================================================");
-
-    let host = LiveHost::new();
-    print!("Pre-warming provider connections and TLS pools... ");
-    std::io::Write::flush(&mut std::io::stdout()).unwrap();
-    let prewarm_t0 = std::time::Instant::now();
-    host.prewarm();
-    println!("ready in {} ms.", prewarm_t0.elapsed().as_millis());
-
-    let targets = [
-        TestTarget {
-            label: "Movie (Modern Sci-Fi): Inception (2010)",
-            title: ProviderTitle {
-                media_type: MediaType::Movie,
-                tmdb_id: TmdbId::try_from(27205).unwrap(),
-                imdb_id: "tt1375666".into(),
-                my_anime_list_id: None,
-                season: None,
-                episode: None,
-            },
-        },
-        TestTarget {
-            label: "Movie (Cult Classic Drama): Fight Club (1999)",
-            title: ProviderTitle {
-                media_type: MediaType::Movie,
-                tmdb_id: TmdbId::try_from(550).unwrap(),
-                imdb_id: "tt0137523".into(),
-                my_anime_list_id: None,
-                season: None,
-                episode: None,
-            },
-        },
-        TestTarget {
-            label: "TV Show (Prestige Drama): Breaking Bad S01E01",
-            title: ProviderTitle {
-                media_type: MediaType::Tv,
-                tmdb_id: TmdbId::try_from(1396).unwrap(),
-                imdb_id: "tt0903747".into(),
-                my_anime_list_id: None,
-                season: Some(1),
-                episode: Some(1),
-            },
-        },
-        TestTarget {
-            label: "TV Show (Dark Fantasy): Supernatural S01E10",
-            title: ProviderTitle {
-                media_type: MediaType::Tv,
-                tmdb_id: TmdbId::try_from(1622).unwrap(),
-                imdb_id: "tt0460681".into(),
-                my_anime_list_id: None,
-                season: Some(1),
-                episode: Some(10),
-            },
-        },
-        TestTarget {
-            label: "Anime / Animated: Attack on Titan S01E01",
-            title: ProviderTitle {
-                media_type: MediaType::Tv,
-                tmdb_id: TmdbId::try_from(1429).unwrap(),
-                imdb_id: "tt2560140".into(),
-                my_anime_list_id: Some(16498),
-                season: Some(1),
-                episode: Some(1),
-            },
-        },
-    ];
-
-    let providers = ["vidsrc"];
-
-    for target in &targets[..1] {
-        println!("\n>>> Testing Target: {} <<<", target.label);
-        println!("------------------------------------------------------------");
-
-        let lookup = make_lookup(target.title.clone());
-
-        for provider in &providers {
-            print!("  [{:^8}] resolving... ", provider);
-            std::io::Write::flush(&mut std::io::stdout()).unwrap();
-
-            let t0 = std::time::Instant::now();
-            match resolve(provider, &lookup, &host) {
-                Ok(result) => {
-                    let elapsed = t0.elapsed();
-                    let candidates = result.candidates.unwrap_or_default();
-                    let stream_count = candidates.len();
-                    println!(
-                        "SUCCESS ({} ms) -> {} streams found",
-                        elapsed.as_millis(),
-                        stream_count
-                    );
-
-                    for (idx, stream) in candidates.iter().take(3).enumerate() {
-                        println!(
-                            "     #{} [{:?}] Server: '{}' (variants: {}, tracks: {}) -> {}\n        FetchContext: {:?}",
-                            idx + 1,
-                            stream.format,
-                            stream.server,
-                            stream.resolver_metadata.variants.len(),
-                            stream.resolver_metadata.tracks.len(),
-                            stream.url,
-                            stream.fetch_context,
-                        );
-                    }
-                }
-                Err(err) => {
-                    let elapsed = t0.elapsed();
-                    println!("FAILED ({} ms) -> {:?}", elapsed.as_millis(), err);
-                }
-            }
+        refresh: true,
+    };
+    lookup.validate()?;
+    let requested: Vec<&str> = args[0].split(',').collect();
+    let catalog = NativeProviders::new()?;
+    let providers = catalog.snapshot()?;
+    for id in &requested {
+        if *id != "all" && !providers.iter().any(|p| p.id().as_str() == *id) {
+            return Err(format!("unknown provider {id}").into());
         }
     }
+    let prober = StreamProber::new(
+        Arc::new(HttpClient::new()?),
+        ProbeLimits {
+            total_sample_bytes: 16 * 1024 * 1024,
+            max_variants: 3,
+            ..ProbeLimits::default()
+        },
+    )?;
+    for provider in providers
+        .into_iter()
+        .filter(|p| requested.contains(&"all") || requested.contains(&p.id().as_str()))
+    {
+        let started = Instant::now();
+        let cancel = CancellationToken::new();
+        let mut report = json!({"provider":provider.id().as_str(),"title":{"tmdb_id":lookup.title.tmdb_id.get(),"season":season,"episode":episode}});
+        let resolved = tokio::time::timeout(
+            Duration::from_secs(18),
+            provider.resolve(&lookup, cancel.clone()),
+        )
+        .await;
+        report["lookup_ms"] = json!(started.elapsed().as_millis());
+        let result = match resolved {
+            Ok(Ok(result)) => result,
+            Ok(Err(category)) => {
+                report["lookup_failure"] = json!(category);
+                println!("{report}");
+                continue;
+            }
+            Err(_) => {
+                cancel.cancel();
+                report["lookup_failure"] = json!("timeout");
+                println!("{report}");
+                continue;
+            }
+        };
+        if let Err(error) = result.validate_for(provider.id(), &lookup.title, 32) {
+            report["lookup_failure"] = json!("invalid_provider_contract");
+            report["validation"] = json!({"field":error.field,"reason":error.reason});
+            println!("{report}");
+            continue;
+        }
+        let candidates = result.candidates.unwrap_or_default();
+        report["candidates"] = json!(candidates.len());
+        report["issues"] = json!(
+            result
+                .issues
+                .iter()
+                .map(|i| json!({"stage":i.stage,"category":i.category}))
+                .collect::<Vec<_>>()
+        );
+        let streams = prober.probe_all(candidates, &cancel).await?;
+        report["streams"] = json!(streams.iter().map(|s| json!({"server":s.source.server,"accessible":s.observation.accessible,"format":s.observation.format,"width":s.observation.variant.as_ref().and_then(|v|v.width),"height":s.observation.variant.as_ref().and_then(|v|v.height),"sample_bytes":s.observation.sample_bytes,"samples_completed":s.observation.samples_completed,"failure":s.observation.failure})).collect::<Vec<_>>());
+        let selection = selection::select(&lookup, streams, SystemTime::now().into())?;
+        report["selected"] = json!(selection.selected.is_some());
+        if args.iter().any(|a| a == "--relay") && selection.selected.is_some() {
+            let directory = PathBuf::from("Local/reports/provider-acceptance")
+                .join(provider.id().as_str())
+                .join(format!(
+                    "{}_{}_{}",
+                    lookup.title.tmdb_id.get(),
+                    season.unwrap_or(0),
+                    episode.unwrap_or(0)
+                ));
+            report["relay"] = match tokio::time::timeout(
+                Duration::from_secs(90),
+                verify_relay(selection, directory),
+            )
+            .await
+            {
+                Ok(Ok(result)) => result,
+                Ok(Err(_)) => json!({"failure":"relay_delivery_failed"}),
+                Err(_) => json!({"failure":"relay_delivery_timeout"}),
+            };
+        }
+        report["total_ms"] = json!(started.elapsed().as_millis());
+        println!("{report}");
+    }
+    Ok(())
+}
 
-    println!("\n============================================================");
-    println!("                 ALL LIVE CHECKS COMPLETE                   ");
-    println!("============================================================");
-
-    println!("\n>>> Running coordinator health checks... <<<");
-    let shutdown = tokio_util::sync::CancellationToken::new();
-    let coordinator = stream_media::DiscoveryCoordinator::default_live(shutdown).unwrap();
-    let host_rt = tokio::runtime::Runtime::new().unwrap();
-    use stream_core::ports::MediaEngine;
-    let health = host_rt.block_on(async { coordinator.check_provider_health().await.unwrap() });
-    for h in health {
-        println!(
-            "HEALTH [{}]: working={}, detail={}",
-            h.id, h.working, h.detail
+async fn verify_relay(selection: Selection, directory: PathBuf) -> CheckResult<Value> {
+    let selected = selection
+        .selected
+        .as_ref()
+        .ok_or("missing selected stream")?;
+    let binary = selected.candidate.source.format == StreamFormat::Mp4;
+    let variant = selected.candidate.source.selected_variant_url.clone();
+    let relay = MediaRelay::new();
+    if !relay.register_session("acceptance".into(), "local-only".into(), selection) {
+        return Err("session registration failed".into());
+    }
+    let response = relay
+        .fetch_entry(
+            "acceptance",
+            "local-only",
+            binary.then_some("bytes=0-2097151"),
+        )
+        .await
+        .map_err(|_| "entry delivery failed")?;
+    std::fs::create_dir_all(&directory)?;
+    let mut manifest = match response {
+        RelayResponse::Manifest(manifest) => manifest,
+        response @ RelayResponse::Binary { .. } => {
+            let bytes = save_binary(response, directory.join("source.mp4")).await?;
+            return Ok(json!({"binary_bytes":bytes,"path":directory.join("source.mp4")}));
+        }
+    };
+    if manifest.contains("#EXT-X-STREAM-INF") {
+        let resource = if !variant.is_empty() {
+            MediaRelay::resource_id(&variant)
+        } else {
+            manifest_resource(&manifest)?
+        };
+        manifest = match relay
+            .fetch_resource("acceptance", &resource, "local-only", None)
+            .await
+            .map_err(|_| "rendition delivery failed")?
+        {
+            RelayResponse::Manifest(manifest) => manifest,
+            _ => return Err("rendition was not a playlist".into()),
+        };
+    }
+    // Decode encrypted/init-map streams using a player; don't save misleading
+    // standalone segments that require a separate key or initialization map.
+    if manifest.contains("#EXT-X-KEY:") || manifest.contains("#EXT-X-MAP:") {
+        return Ok(
+            json!({"manifest_delivered":true,"standalone_decode":"requires_key_or_initialization"}),
         );
     }
+    let mut samples = Vec::new();
+    for (index, uri) in manifest
+        .lines()
+        .filter(|l| l.starts_with("/stream/"))
+        .take(3)
+        .enumerate()
+    {
+        let resource = resource_id(uri)?;
+        let response = relay
+            .fetch_resource("acceptance", resource, "local-only", None)
+            .await
+            .map_err(|_| "segment delivery failed")?;
+        let path = directory.join(format!("segment-{index}.ts"));
+        let bytes = save_binary(response, path.clone()).await?;
+        samples.push(json!({"bytes":bytes,"path":path}));
+    }
+    if samples.is_empty() {
+        return Err("no media segments delivered".into());
+    }
+    Ok(json!({"segments":samples}))
+}
+fn resource_id(uri: &str) -> CheckResult<&str> {
+    uri.split_once("/r/")
+        .and_then(|(_, rest)| rest.split('?').next())
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| "invalid relay resource".into())
+}
+fn manifest_resource(manifest: &str) -> CheckResult<String> {
+    Ok(resource_id(
+        manifest
+            .lines()
+            .find(|l| l.starts_with("/stream/"))
+            .ok_or("no rendition resource")?,
+    )?
+    .to_owned())
+}
+async fn save_binary(response: RelayResponse, path: PathBuf) -> CheckResult<usize> {
+    let RelayResponse::Binary {
+        status, mut stream, ..
+    } = response
+    else {
+        return Err("expected binary media".into());
+    };
+    if !(200..300).contains(&status) {
+        return Err("media delivery status failed".into());
+    }
+    let mut bytes = Vec::new();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|_| "media body failed")?;
+        if bytes.len() + chunk.len() > 32 * 1024 * 1024 {
+            return Err("media exceeds acceptance limit".into());
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    if bytes.is_empty() {
+        return Err("empty media".into());
+    }
+    std::fs::write(path, &bytes)?;
+    Ok(bytes.len())
 }
