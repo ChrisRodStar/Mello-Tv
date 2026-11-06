@@ -45,11 +45,36 @@ struct Subtitle {
 
 pub fn resolve(lookup: &Lookup, host: &dyn ProviderHost) -> Result<AdapterResult, AdapterError> {
     lookup.title.validate().map_err(|_| AdapterError::Input)?;
+    match try_resolve(lookup, host, false) {
+        Ok(result) => Ok(result),
+        Err(AdapterError::Unavailable(_)) if is_valid_imdb(&lookup.title.imdb_id) => {
+            try_resolve(lookup, host, true)
+        }
+        Err(err) => Err(err),
+    }
+}
+
+fn is_valid_imdb(imdb: &str) -> bool {
+    imdb.len() >= 4
+        && imdb.len() <= 16
+        && imdb.starts_with("tt")
+        && imdb[2..].bytes().all(|b| b.is_ascii_digit())
+}
+
+fn endpoint(lookup: &Lookup, use_imdb: bool) -> Result<Url, AdapterError> {
     let mut endpoint = Url::parse(API).map_err(|_| AdapterError::Protocol("VidAPI endpoint"))?;
-    endpoint
-        .query_pairs_mut()
-        .append_pair("tmdb", &lookup.title.tmdb_id.get().to_string())
-        .append_pair(
+    {
+        let mut query = endpoint.query_pairs_mut();
+        if use_imdb {
+            let imdb = &lookup.title.imdb_id;
+            if !is_valid_imdb(imdb) {
+                return Err(AdapterError::Input);
+            }
+            query.append_pair("imdb", imdb);
+        } else {
+            query.append_pair("tmdb", &lookup.title.tmdb_id.get().to_string());
+        }
+        query.append_pair(
             "type",
             if lookup.title.media_type == MediaType::Movie {
                 "movie"
@@ -57,19 +82,28 @@ pub fn resolve(lookup: &Lookup, host: &dyn ProviderHost) -> Result<AdapterResult
                 "tv"
             },
         );
-    if lookup.title.media_type == MediaType::Tv {
-        endpoint
-            .query_pairs_mut()
-            .append_pair(
-                "season",
-                &lookup.title.season.ok_or(AdapterError::Input)?.to_string(),
-            )
-            .append_pair(
-                "episode",
-                &lookup.title.episode.ok_or(AdapterError::Input)?.to_string(),
-            );
+        if lookup.title.media_type == MediaType::Tv {
+            query
+                .append_pair(
+                    "season",
+                    &lookup.title.season.ok_or(AdapterError::Input)?.to_string(),
+                )
+                .append_pair(
+                    "episode",
+                    &lookup.title.episode.ok_or(AdapterError::Input)?.to_string(),
+                );
+        }
     }
-    let response = fetch(host, get(endpoint.as_str(), &format!("{ORIGIN}/"), LIMIT))?;
+    Ok(endpoint)
+}
+
+fn try_resolve(
+    lookup: &Lookup,
+    host: &dyn ProviderHost,
+    use_imdb: bool,
+) -> Result<AdapterResult, AdapterError> {
+    let url = endpoint(lookup, use_imdb)?;
+    let response = fetch(host, get(url.as_str(), &format!("{ORIGIN}/"), LIMIT))?;
     let envelope: Envelope = common::json(&response.body, LIMIT as usize, "VidAPI response")?;
     if envelope.status_code != "200" {
         return Err(AdapterError::Unavailable("VidAPI status"));
@@ -374,6 +408,71 @@ mod tests {
                 .provider_data
                 .contains_key("file_name_claim")
         );
+        Ok(())
+    }
+
+    struct MultiHost {
+        responses: std::collections::BTreeMap<String, (u16, Vec<u8>)>,
+    }
+    impl ProviderHost for MultiHost {
+        fn fetch(&self, request: Request) -> Result<Response, HostError> {
+            let (status, body) = self
+                .responses
+                .get(&request.url)
+                .cloned()
+                .ok_or(HostError::InvalidRequest)?;
+            Ok(Response {
+                url: request.url,
+                status,
+                headers: Vec::new(),
+                body,
+            })
+        }
+        fn fetch_batch(
+            &self,
+            _: Vec<Request>,
+        ) -> Result<Vec<Result<Response, HostError>>, HostError> {
+            Err(HostError::Denied)
+        }
+        fn now_unix_ms(&self) -> Result<i64, HostError> {
+            Ok(0)
+        }
+        fn random_bytes(&self, _: u32) -> Result<Vec<u8>, HostError> {
+            Err(HostError::Denied)
+        }
+    }
+
+    #[test]
+    fn resolve_falls_back_to_imdb_when_tmdb_is_unavailable()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let lookup: Lookup = serde_json::from_value(
+            serde_json::json!({"title":{"type":"tv","tmdb_id":1622,"imdb_id":"tt0460681","season":4,"episode":13}}),
+        )?;
+        let tmdb_url =
+            "https://streamdata.vaplayer.ru/api.php?tmdb=1622&type=tv&season=4&episode=13";
+        let imdb_url =
+            "https://streamdata.vaplayer.ru/api.php?imdb=tt0460681&type=tv&season=4&episode=13";
+        let mut responses = std::collections::BTreeMap::new();
+        responses.insert(tmdb_url.to_string(), (404, Vec::new()));
+        responses.insert(
+            imdb_url.to_string(),
+            (
+                200,
+                serde_json::to_vec(&serde_json::json!({
+                    "status_code":"200",
+                    "data":{
+                        "file_name":"Supernatural.S04E13.1080p.mkv",
+                        "stream_urls":["https://media.example/fallback.m3u8"]
+                    },
+                    "default_subs":[]
+                }))?,
+            ),
+        );
+        let host = MultiHost { responses };
+        let result = resolve(&lookup, &host)?;
+        let candidates = result.candidates.ok_or("candidate list missing")?;
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].url, "https://media.example/fallback.m3u8");
         Ok(())
     }
 }
