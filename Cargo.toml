@@ -39,6 +39,7 @@ futures-util = { version = "0.3.34", default-features = false, features = ["std"
 tokio-util = { version = "0.7.20", features = ["rt"] }
 base64 = "0.23.1"
 sha2 = "0.11.1"
+md-5 = "0.11.0"
 aes = { version = "0.9.3", features = ["zeroize"] }
 cbc = { version = "0.2.1", features = ["alloc", "zeroize"] }
 rc4 = { version = "0.2.0", features = ["zeroize"] }

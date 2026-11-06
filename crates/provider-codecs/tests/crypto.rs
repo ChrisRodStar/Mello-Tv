@@ -56,6 +56,25 @@ fn cbc256_matches_nist_first_blocks_and_pkcs7_boundaries() -> Result<(), Box<dyn
 }
 
 #[test]
+fn hmac_sha256_matches_rfc4231_test_vectors() -> Result<(), Box<dyn Error>> {
+    // RFC 4231 Test Case 1
+    let key1 = [0x0bu8; 20];
+    let data1 = b"Hi There";
+    let expected1 = hex("b0344c61d8db38535ca8afceaf0bf12b881dc200c9833da726e9376c2e32cff7")?;
+    let actual1 = crypto::hmac_sha256(&key1, data1)?;
+    assert_eq!(actual1.as_slice(), expected1.as_slice());
+
+    // RFC 4231 Test Case 2
+    let key2 = b"Jefe";
+    let data2 = b"what do ya want for nothing?";
+    let expected2 = hex("5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843")?;
+    let actual2 = crypto::hmac_sha256(key2, data2)?;
+    assert_eq!(actual2.as_slice(), expected2.as_slice());
+
+    Ok(())
+}
+
+#[test]
 fn rc4_known_vector_and_invalid_key_sizes() -> Result<(), Box<dyn Error>> {
     let mut bytes = b"Plaintext".to_vec();
     crypto::rc4_xor(b"Key", &mut bytes)?;
@@ -165,4 +184,30 @@ fn constant_time_equality_checks() {
     assert!(!crypto::ct_eq(b"hello", b"hell"));
     assert!(!crypto::ct_eq(b"", b"a"));
     assert!(crypto::ct_eq(b"", b""));
+}
+
+#[test]
+fn cbc_media_prefix_matches_nist_without_requiring_final_padding() -> Result<(), Box<dyn Error>> {
+    let key = [
+        0x2b, 0x7e, 0x15, 0x16, 0x28, 0xae, 0xd2, 0xa6, 0xab, 0xf7, 0x15, 0x88, 0x09, 0xcf, 0x4f,
+        0x3c,
+    ];
+    let iv = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
+    let ciphertext = [
+        0x76, 0x49, 0xab, 0xac, 0x81, 0x19, 0xb2, 0x46, 0xce, 0xe9, 0x8e, 0x9b, 0x12, 0xe9, 0x19,
+        0x7d, 0x50, 0x86, 0xcb, 0x9b, 0x50, 0x72, 0x19, 0xee, 0x95, 0xdb, 0x11, 0x3a, 0x91, 0x76,
+        0x78, 0xb2,
+    ];
+    let plaintext = [
+        0x6b, 0xc1, 0xbe, 0xe2, 0x2e, 0x40, 0x9f, 0x96, 0xe9, 0x3d, 0x7e, 0x11, 0x73, 0x93, 0x17,
+        0x2a, 0xae, 0x2d, 0x8a, 0x57, 0x1e, 0x03, 0xac, 0x9c, 0x9e, 0xb7, 0x6f, 0xac, 0x45, 0xaf,
+        0x8e, 0x51,
+    ];
+    assert_eq!(
+        crypto::aes_cbc_decrypt_prefix(&key, &iv, &ciphertext)?.as_slice(),
+        plaintext
+    );
+    assert!(crypto::aes_cbc_decrypt_prefix(&key, &iv, &ciphertext[..31]).is_err());
+    assert!(crypto::aes_cbc_decrypt_prefix(&key, &iv[..15], &ciphertext).is_err());
+    Ok(())
 }

@@ -70,7 +70,12 @@ public struct ServerSnapshot: Codable, Sendable {
 
         public var name: String {
             ["vidcore": "VidCore", "vidlink": "VidLink", "vidsrc": "VidSrc",
-             "vidfast": "VidFast", "videasy": "VidEasy", "vidrock": "VidRock"][id] ?? id.capitalized
+             "vidfast": "VidFast", "videasy": "VidEasy", "vidrock": "VidRock",
+             "anyembed": "AnyEmbed", "cinesu": "CineSU", "fmovies4u": "FMovies4U",
+             "fshare": "FShare", "icefy": "Icefy", "moviedownloader02": "02MovieDownloader",
+             "peachify": "Peachify", "popr": "Popr", "streammafia": "StreamMafia",
+             "tulnex": "Tulnex", "vidapi": "VidAPI", "vidnest": "VidNest",
+             "vidzee": "VidZee", "vixsrc": "VixSrc"][id] ?? id.capitalized
         }
 
         public var observedAt: Date? {

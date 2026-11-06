@@ -1557,6 +1557,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "47e1ffaa40ddd1f3ed91f717a33c8c0ee23fff369e3aa8772b9605cc1d22f4c3"
 
 [[package]]
+name = "md-5"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "69b6441f590336821bb897fb28fc622898ccceb1d6cea3fde5ea86b090c4de98"
+dependencies = [
+ "cfg-if",
+ "digest 0.11.3",
+]
+
+[[package]]
 name = "memchr"
 version = "2.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2458,6 +2468,7 @@ name = "stream-provider-adapters"
 version = "0.2.0"
 dependencies = [
  "base64 0.23.1",
+ "chrono",
  "cookie",
  "html-escape",
  "regex",
@@ -2480,6 +2491,7 @@ dependencies = [
  "cbc",
  "chacha20",
  "crypto_secretbox",
+ "md-5",
  "rc4",
  "regex",
  "serde",
