@@ -1159,7 +1159,7 @@ fn initialize(connection: &mut Connection, key: &[u8; 32]) -> Result<(), Storage
     transaction.commit()?;
     // Persistent configuration is applied only after schema and key acceptance.
     connection.pragma_update(None, "journal_mode", "WAL")?;
-    connection.pragma_update(None, "synchronous", "FULL")?;
+    connection.pragma_update(None, "synchronous", "NORMAL")?;
     Ok(())
 }
 

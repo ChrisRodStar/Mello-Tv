@@ -457,7 +457,7 @@ fn migrate(connection: &mut Connection) -> Result<(), StorageError> {
     if journal_mode != "wal" && journal_mode != "memory" {
         return Err(StorageError::Corrupt("catalog requires WAL journaling"));
     }
-    connection.execute_batch("PRAGMA busy_timeout=5000; PRAGMA foreign_keys=ON; PRAGMA synchronous=FULL; PRAGMA journal_size_limit=16777216; PRAGMA mmap_size=268435456; PRAGMA cache_size=-64000;")?;
+    connection.execute_batch("PRAGMA busy_timeout=5000; PRAGMA foreign_keys=ON; PRAGMA synchronous=NORMAL; PRAGMA journal_size_limit=16777216; PRAGMA mmap_size=268435456; PRAGMA cache_size=-64000;")?;
     Ok(())
 }
 
