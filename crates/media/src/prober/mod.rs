@@ -379,6 +379,28 @@ impl StreamProber {
         })
     }
 
+    async fn fetch_encryption_key(
+        &self,
+        candidate: &CandidateStream,
+        url: &str,
+        round: &Round,
+        cancel: &CancellationToken,
+    ) -> ProbeResult<bytes::Bytes> {
+        let reservation = round.playlists.reserve(16, true, cancel).await?;
+        let mut request = FetchRequest::get(url);
+        request.context = candidate.fetch_context.clone();
+        request.max_response_bytes = 16;
+        let response = self.transport.fetch(request, cancel).await?;
+        reservation.finish(response.body.len())?;
+        if !response.status.is_success() {
+            return Err(ProbeFailure::Upstream);
+        }
+        if response.body.len() != 16 {
+            return Err(ProbeFailure::Protocol);
+        }
+        Ok(response.body)
+    }
+
     async fn probe_hls(
         &self,
         candidate: CandidateStream,
@@ -584,8 +606,24 @@ impl StreamProber {
             if samples.is_empty() {
                 return Err(ProbeFailure::Protocol);
             }
+            let key_urls = samples
+                .iter()
+                .filter_map(|sample| sample.encryption.as_ref())
+                .map(|encryption| encryption.key_url.clone())
+                .collect::<std::collections::BTreeSet<_>>();
+            let key_results = futures_util::future::join_all(
+                key_urls
+                    .iter()
+                    .map(|url| self.fetch_encryption_key(&result.source, url, round, cancel)),
+            )
+            .await;
+            let keys = key_urls
+                .into_iter()
+                .zip(key_results)
+                .map(|(url, key)| key.map(|key| (url, key)))
+                .collect::<ProbeResult<BTreeMap<_, _>>>()?;
             let mut all_speeds = true;
-            let sample_futs = samples.into_iter().map(|sample| {
+            let sample_futs = samples.iter().map(|sample| {
                 self.fetch_sample(
                     &result.source,
                     sample,
@@ -596,8 +634,31 @@ impl StreamProber {
                 )
             });
             let responses = futures_util::future::join_all(sample_futs).await;
-            for response in responses {
+            for (sample, response) in samples.iter().zip(responses) {
                 let response = response?;
+                let decrypted = if let Some(encryption) = &sample.encryption {
+                    if sample.byte_range.is_some_and(|range| range.start != 0) {
+                        return Err(ProbeFailure::Unsupported);
+                    }
+                    let key = keys
+                        .get(&encryption.key_url)
+                        .ok_or(ProbeFailure::Protocol)?;
+                    let block_bytes = response.body.len() / 16 * 16;
+                    Some(
+                        stream_provider_codecs::aes_cbc_decrypt_prefix(
+                            key,
+                            &encryption.iv,
+                            &response.body[..block_bytes],
+                        )
+                        .map_err(|_| ProbeFailure::Protocol)?,
+                    )
+                } else {
+                    None
+                };
+                let body = decrypted
+                    .as_ref()
+                    .map(|bytes| bytes.as_slice())
+                    .unwrap_or(response.body.as_ref());
                 let textual = response
                     .headers
                     .get("content-type")
@@ -610,8 +671,8 @@ impl StreamProber {
                             || kind.contains("xml")
                             || kind.contains("mpegurl")
                     });
-                let is_ts = bmff::transport_stream(&response.body);
-                let is_fragment = bmff::fragment(&response.body);
+                let is_ts = bmff::transport_stream(body);
+                let is_fragment = bmff::fragment(body);
                 if response
                     .headers
                     .get_all("content-encoding")
@@ -620,10 +681,10 @@ impl StreamProber {
                 {
                     return Err(ProbeFailure::Unsupported);
                 }
-                if response.body.is_empty()
+                if body.is_empty()
                     || (textual && !is_ts && !is_fragment)
-                    || masquerades_as_text(&response.body)
-                    || (!playlist.encrypted && !is_ts && !is_fragment)
+                    || masquerades_as_text(body)
+                    || (!is_ts && !is_fragment)
                 {
                     return Err(ProbeFailure::Protocol);
                 }
@@ -815,6 +876,12 @@ fn measure(
                 .unwrap_or(delay),
         );
     }
+    // A short final segment still proves accessibility, but is too small for
+    // a delivery-rate estimate. Keep evidence from the other measured samples.
+    // If every sample is short, delivery_bps remains None and selection rejects it.
+    if response.body.len() < 16 * 1024 {
+        return Ok(());
+    }
     let measurable_bytes = response
         .body
         .len()
@@ -963,6 +1030,26 @@ mod measurement_tests {
 
         assert!(!all_speeds);
         assert_eq!(observation.delivery_bps, None);
+        Ok(())
+    }
+    #[test]
+    fn short_tail_does_not_erase_larger_samples_delivery_evidence() -> ProbeResult<()> {
+        let mut evidence = observation(StreamFormat::Hls);
+        let mut all_speeds = true;
+        measure(
+            &mut evidence,
+            &response(128 * 1024, 128 * 1024)?,
+            &mut all_speeds,
+        )?;
+        let speed = evidence.delivery_bps;
+        measure(&mut evidence, &response(3952, 3952)?, &mut all_speeds)?;
+        assert!(all_speeds);
+        assert!(speed.is_some());
+        assert_eq!(evidence.delivery_bps, speed);
+        assert_eq!(evidence.samples_completed, 2);
+        let mut only_short = observation(StreamFormat::Hls);
+        measure(&mut only_short, &response(3952, 3952)?, &mut all_speeds)?;
+        assert_eq!(only_short.delivery_bps, None);
         Ok(())
     }
 }
