@@ -14,8 +14,8 @@ use stream_provider_codecs::{
     CryptoError, MAX_PROTOCOL_BYTES, sha256,
     vidcore::{
         MAX_CHALLENGE_RESPONSE_BYTES, MAX_PLAYER_BYTES, MAX_SESSION_BYTES, Protocol, ProtocolError,
-        ProtocolParameters, URL_ALPHABET, decode_program, extract_csrf_token, parse_material,
-        permutation, string_constant,
+        ProtocolParameters, ProtocolVersion, URL_ALPHABET, decode_program, extract_csrf_token,
+        parse_material, permutation, string_constant,
     },
 };
 
@@ -179,7 +179,7 @@ fn missing_duplicate_and_out_of_range_bytecode_parts_fail_closed() -> TestResult
 
 #[test]
 fn mapped_string_constants_check_known_opcodes_lengths_and_offsets() -> TestResult {
-    for opcode in [[103, 188], [89, 4], [72, 105], [121, 225]] {
+    for opcode in [[103, 188], [89, 4], [72, 105], [121, 225], [109, 176]] {
         let mut bytes = vec![0, 0];
         bytes.extend_from_slice(&opcode);
         bytes.extend_from_slice(&3u16.to_be_bytes());
@@ -371,4 +371,9 @@ fn low_level_material_rejects_bad_dimensions_and_redacts_credentials() -> TestRe
     assert!(protocol.version().is_none());
     assert!(!format!("{protocol:?}").contains("private-csrf-token"));
     Ok(())
+}
+
+#[test]
+fn vidcore_version_v5_is_distinct_and_defined() {
+    assert_ne!(ProtocolVersion::V4, ProtocolVersion::V5);
 }

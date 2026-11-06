@@ -473,3 +473,55 @@ fn parse_embed(body: &[u8]) -> Result<(String, Vec<String>), AdapterError> {
 
     Ok((token, chunks))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use stream_core::providers::TmdbId;
+
+    #[test]
+    fn parse_embed_extracts_token_and_deduplicates_chunks() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let sample = include_bytes!("../../provider-codecs/testdata/providers/vidcore/embed.html");
+        let (token, chunks) = parse_embed(sample)?;
+        assert_eq!(token, "synthetic-session");
+        assert_eq!(chunks, vec!["/_next/static/chunks/fixture.js"]);
+        Ok(())
+    }
+
+    #[test]
+    fn embed_path_formats_movie_and_tv_routes() -> Result<(), Box<dyn std::error::Error>> {
+        let movie = ProviderTitle {
+            media_type: MediaType::Movie,
+            tmdb_id: TmdbId::try_from(550)?,
+            imdb_id: String::new(),
+            my_anime_list_id: None,
+            season: None,
+            episode: None,
+        };
+        assert_eq!(embed_path(&movie)?, "/movie/550");
+
+        let tv = ProviderTitle {
+            media_type: MediaType::Tv,
+            tmdb_id: TmdbId::try_from(1622)?,
+            imdb_id: String::new(),
+            my_anime_list_id: None,
+            season: Some(4),
+            episode: Some(11),
+        };
+        assert_eq!(embed_path(&tv)?, "/tv/1622/4/11");
+        Ok(())
+    }
+
+    #[test]
+    fn candidate_chunks_prioritizes_non_framework_chunks() {
+        let chunks = vec![
+            "/_next/static/chunks/webpack-123.js".into(),
+            "/_next/static/chunks/main-app-456.js".into(),
+            "/_next/static/chunks/281-789.js".into(),
+            "/_next/static/chunks/app/layout-abc.js".into(),
+        ];
+        let ordered = candidate_chunks(&chunks);
+        assert_eq!(ordered[0], "/_next/static/chunks/281-789.js");
+    }
+}
