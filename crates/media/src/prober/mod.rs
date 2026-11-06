@@ -362,7 +362,7 @@ impl StreamProber {
         round: &Round,
         cancel: &CancellationToken,
     ) -> ProbeResult<Playlist> {
-        let reservation = round.playlists.reserve(1024 * 1024, false, cancel).await?;
+        let reservation = round.playlists.reserve(512 * 1024, false, cancel).await?;
         let mut request = FetchRequest::get(url);
         request.context = candidate.fetch_context.clone();
         request.max_response_bytes = reservation.bytes;
@@ -455,64 +455,89 @@ impl StreamProber {
             (priority, std::cmp::Reverse(height))
         });
         let mut results = Vec::new();
-        for (index, variant) in variants
+        let selected_variants: Vec<_> = variants
             .into_iter()
             .take(self.limits.max_variants)
             .enumerate()
-        {
+            .collect();
+
+        let mut unordered = selected_variants
+            .into_iter()
+            .map(|(index, variant)| {
+                let candidate = candidate.clone();
+                let round = round.clone();
+                let cancel = cancel.clone();
+                let playlist = playlist.clone();
+                async move {
+                    if cancel.is_cancelled() {
+                        return None;
+                    }
+                    if Instant::now() >= deadline {
+                        return None;
+                    }
+                    let mut source = candidate.clone();
+                    source.id = format!("{}:variant:{index}", source.id);
+                    if source.id.len() > 256 {
+                        return Some(failure(source, ProbeFailure::Protocol));
+                    }
+                    source.selected_variant_url = variant.url.clone();
+                    source.format = StreamFormat::Hls;
+                    let fetched = tokio::time::timeout_at(
+                        deadline,
+                        self.fetch_playlist(&candidate, &variant.url, &round, &cancel),
+                    )
+                    .await
+                    .unwrap_or(Err(ProbeFailure::Timeout));
+                    let mut media = match fetched {
+                        Ok(media) if media.kind == PlaylistKind::Media => media,
+                        Ok(_) => {
+                            let mut item = failure(source, ProbeFailure::Unsupported);
+                            item.observation.variant = Some(variant);
+                            return Some(item);
+                        }
+                        Err(error) => {
+                            let mut item = failure(source, error);
+                            item.observation.variant = Some(variant);
+                            return Some(item);
+                        }
+                    };
+                    media
+                        .metadata
+                        .tracks
+                        .extend(playlist.metadata.tracks.iter().cloned());
+                    media.metadata.tracks_known = playlist.metadata.tracks_known;
+                    media.encrypted |= playlist.encrypted;
+                    media.unsupported_protection |= playlist.unsupported_protection;
+                    let mut item = tokio::time::timeout_at(
+                        deadline,
+                        self.sample_playlist(
+                            source.clone(),
+                            media,
+                            Some(variant.clone()),
+                            &round,
+                            &cancel,
+                        ),
+                    )
+                    .await
+                    .unwrap_or_else(|_| {
+                        let mut failed = failure(source, ProbeFailure::Timeout);
+                        failed.observation.variant = Some(variant);
+                        failed
+                    });
+                    item.observation.playlist_metadata.variants =
+                        playlist.metadata.variants.clone();
+                    Some(item)
+                }
+            })
+            .collect::<FuturesUnordered<_>>();
+
+        while let Some(maybe_item) = unordered.next().await {
             if cancel.is_cancelled() {
                 return Err(ProbeFailure::Cancelled);
             }
-            if Instant::now() >= deadline {
-                break;
+            if let Some(item) = maybe_item {
+                record_rendition(progress.as_ref(), &mut results, item, cancel);
             }
-            let mut source = candidate.clone();
-            source.id = format!("{}:variant:{index}", source.id);
-            if source.id.len() > 256 {
-                return Err(ProbeFailure::Protocol);
-            }
-            source.selected_variant_url = variant.url.clone();
-            source.format = StreamFormat::Hls;
-            let fetched = tokio::time::timeout_at(
-                deadline,
-                self.fetch_playlist(&candidate, &variant.url, round, cancel),
-            )
-            .await
-            .unwrap_or(Err(ProbeFailure::Timeout));
-            let mut media = match fetched {
-                Ok(media) if media.kind == PlaylistKind::Media => media,
-                Ok(_) => {
-                    let mut item = failure(source, ProbeFailure::Unsupported);
-                    item.observation.variant = Some(variant);
-                    record_rendition(progress.as_ref(), &mut results, item, cancel);
-                    continue;
-                }
-                Err(error) => {
-                    let mut item = failure(source, error);
-                    item.observation.variant = Some(variant);
-                    record_rendition(progress.as_ref(), &mut results, item, cancel);
-                    continue;
-                }
-            };
-            media
-                .metadata
-                .tracks
-                .extend(playlist.metadata.tracks.iter().cloned());
-            media.metadata.tracks_known = playlist.metadata.tracks_known;
-            media.encrypted |= playlist.encrypted;
-            media.unsupported_protection |= playlist.unsupported_protection;
-            let mut item = tokio::time::timeout_at(
-                deadline,
-                self.sample_playlist(source.clone(), media, Some(variant.clone()), round, cancel),
-            )
-            .await
-            .unwrap_or_else(|_| {
-                let mut failed = failure(source, ProbeFailure::Timeout);
-                failed.observation.variant = Some(variant);
-                failed
-            });
-            item.observation.playlist_metadata.variants = playlist.metadata.variants.clone();
-            record_rendition(progress.as_ref(), &mut results, item, cancel);
         }
         if results.is_empty() {
             return Err(if Instant::now() >= deadline {

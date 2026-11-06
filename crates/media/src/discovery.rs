@@ -207,6 +207,7 @@ struct Inner {
     slots: Semaphore,
     closed: AtomicBool,
     cache: ByteBoundCache<CachedKey, AdapterResult>,
+    selections: ByteBoundCache<CachedKey, Selection>,
 }
 #[derive(Clone)]
 pub struct DiscoveryCoordinator {
@@ -255,6 +256,8 @@ impl DiscoveryCoordinator {
         }
         let cache = ByteBoundCache::new(256, 8 * 1024 * 1024, Duration::from_secs(1800))
             .map_err(|_| DiscoveryError::Capacity)?;
+        let selections = ByteBoundCache::new(128, 4 * 1024 * 1024, Duration::from_secs(900))
+            .map_err(|_| DiscoveryError::Capacity)?;
         Ok(Self {
             inner: Arc::new(Inner {
                 observations: Mutex::new(BTreeMap::new()),
@@ -267,6 +270,7 @@ impl DiscoveryCoordinator {
                 tasks: tokio::sync::Mutex::new(JoinSet::new()),
                 closed: AtomicBool::new(false),
                 cache,
+                selections,
             }),
         })
     }
@@ -286,6 +290,17 @@ impl DiscoveryCoordinator {
         }
         if cancel.is_cancelled() {
             return Err(DiscoveryError::Cancelled);
+        }
+        if !lookup.refresh
+            && let Ok(sel_key) = Inner::selection_cache_key(&lookup)
+            && let Ok(Some(cached)) = self.inner.selections.get(&sel_key)
+        {
+            let now: DateTime<Utc> = SystemTime::now().into();
+            if let Some(selected) = &cached.selected
+                && selection::eligible(&lookup, &selected.candidate, now).is_ok()
+            {
+                return Ok(cached);
+            }
         }
         let providers = self.inner.providers.snapshot()?;
         if providers.is_empty() {
@@ -361,6 +376,31 @@ impl DiscoveryCoordinator {
                             let result = if owner.flight.cancellation.is_cancelled() {
                                 Err(DiscoveryError::Cancelled)
                             } else {
+                                if let Ok(ref selection) = result
+                                    && selection.selected.is_some()
+                                    && let Ok(sel_key) = Inner::selection_cache_key(&lookup)
+                                {
+                                    let now: DateTime<Utc> = SystemTime::now().into();
+                                    let expiries = [selection
+                                        .selected
+                                        .as_ref()
+                                        .and_then(|s| s.candidate.source.expires_at)];
+                                    if let Ok(Some(deadline)) = source_cache_deadline(
+                                        std::time::Instant::now(),
+                                        now,
+                                        Duration::from_secs(900),
+                                        expiries,
+                                    ) && let Ok(encoded) = serde_json::to_vec(selection.as_ref())
+                                    {
+                                        let weight = encoded.len().saturating_add(4096);
+                                        let _ = owner.inner.selections.insert(
+                                            sel_key,
+                                            selection.clone(),
+                                            weight,
+                                            Some(deadline),
+                                        );
+                                    }
+                                }
                                 result
                             };
                             owner.flight.finished.send_replace(Some(result));
@@ -449,6 +489,11 @@ impl DiscoveryCoordinator {
                 .invalidate_namespace(&namespace)
                 .map_err(|_| DiscoveryError::Closed)?;
         }
+        if let Ok(sel_id) = ProviderId::new("mello-selection")
+            && let Ok(namespace) = CacheNamespace::new(sel_id, Version::new(1, 0, 0), context)
+        {
+            let _ = self.inner.selections.invalidate_namespace(&namespace);
+        }
         Ok(())
     }
 
@@ -473,11 +518,31 @@ impl DiscoveryCoordinator {
             .cache
             .clear()
             .map_err(|_| DiscoveryError::Closed)?;
+        self.inner
+            .selections
+            .clear()
+            .map_err(|_| DiscoveryError::Closed)?;
         Ok(())
     }
 }
 
 impl Inner {
+    fn selection_cache_key(lookup: &Lookup) -> Result<CachedKey, DiscoveryError> {
+        let provider_id =
+            ProviderId::new("mello-selection").map_err(|_| DiscoveryError::InvalidLookup)?;
+        let namespace = CacheNamespace::new(
+            provider_id,
+            Version::new(1, 0, 0),
+            lookup.context_key.clone(),
+        )
+        .map_err(|_| DiscoveryError::InvalidLookup)?;
+        let mut lookup = lookup.clone();
+        lookup.wait_for_complete = false;
+        lookup.refresh = false;
+        let payload = serde_json::to_string(&lookup).map_err(|_| DiscoveryError::InvalidLookup)?;
+        Ok(NamespacedKey::new(namespace, payload))
+    }
+
     fn cache_key(
         provider: &dyn DiscoveryProvider,
         lookup: &Lookup,

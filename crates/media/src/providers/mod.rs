@@ -238,12 +238,17 @@ impl NativeProviders {
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
             handle.spawn(async move {
                 let urls = [
-                    "https://api.wecollege.net",
+                    "https://core.vidzee.wtf",
+                    "https://streamdata.vaplayer.ru",
+                    "https://vixsrc.to",
+                    "https://fsharetv.cc",
                     "https://vidlink.pro",
-                    "https://vidcore.io",
-                    "https://vidsrc.sh",
-                    "https://vidfast.vc",
                     "https://vidrock.net",
+                    "https://vidcore.io",
+                    "https://vidfast.vc",
+                    "https://api.wecollege.net",
+                    "https://vidsrc.sh",
+                    "https://new.vidnest.fun",
                 ];
                 let futures = urls.iter().map(|url| {
                     let c = client.clone();
