@@ -57,7 +57,7 @@ async fn execute_request(
     }
 
     let send_fut = builder.send();
-    let res = tokio::select! {
+    let mut res = tokio::select! {
         biased;
         _ = cancel.cancelled() => return Err(HostError::Cancelled),
         r = send_fut => r.map_err(|e| {
@@ -80,22 +80,34 @@ async fn execute_request(
         }
     }
 
-    let bytes_fut = res.bytes();
-    let bytes = tokio::select! {
-        biased;
-        _ = cancel.cancelled() => return Err(HostError::Cancelled),
-        b = bytes_fut => b.map_err(|_| HostError::UpstreamFailure)?,
+    // Enforce the declared cap while reading, rather than allocating the entire
+    // upstream body before rejecting it. Zero inherits the native host cap.
+    let limit = if req.max_response_bytes == 0 {
+        4 * 1024 * 1024
+    } else {
+        req.max_response_bytes as usize
     };
-
-    if req.max_response_bytes > 0 && bytes.len() > req.max_response_bytes as usize {
-        return Err(HostError::LimitExceeded);
+    let mut bytes = Vec::new();
+    loop {
+        let chunk = tokio::select! {
+            biased;
+            _ = cancel.cancelled() => return Err(HostError::Cancelled),
+            chunk = res.chunk() => chunk.map_err(|error| {
+                if error.is_timeout() { HostError::Timeout } else { HostError::UpstreamFailure }
+            })?,
+        };
+        let Some(chunk) = chunk else { break };
+        if chunk.len() > limit.saturating_sub(bytes.len()) {
+            return Err(HostError::LimitExceeded);
+        }
+        bytes.extend_from_slice(&chunk);
     }
 
     Ok(Response {
         url: req.url,
         status,
         headers,
-        body: bytes.to_vec(),
+        body: bytes,
     })
 }
 
@@ -269,5 +281,47 @@ impl DiscoveryCoordinator {
         let prober = StreamProber::new(Arc::new(transport), probe_limits)
             .map_err(|_| DiscoveryError::Closed)?;
         Self::new(Arc::new(catalog), prober, DiscoveryLimits::default())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    #[tokio::test]
+    async fn native_host_enforces_body_cap_before_waiting_for_eof()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let address = listener.local_addr()?;
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await?;
+            let mut request = [0u8; 2048];
+            socket.read(&mut request).await?;
+            socket
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n8\r\n12345678\r\n",
+                )
+                .await?;
+            // Keep the body open: a cap violation must finish independently of EOF.
+            tokio::time::sleep(Duration::from_secs(30)).await;
+            Ok::<(), std::io::Error>(())
+        });
+        let request = Request {
+            url: format!("http://{address}/"),
+            method: "GET".into(),
+            headers: vec![],
+            body: vec![],
+            max_response_bytes: 4,
+            timeout_ms: 5000,
+        };
+        let result = tokio::time::timeout(
+            Duration::from_secs(2),
+            execute_request(&reqwest::Client::new(), request, &CancellationToken::new()),
+        )
+        .await;
+        server.abort();
+        assert_eq!(result?, Err(HostError::LimitExceeded));
+        Ok(())
     }
 }
