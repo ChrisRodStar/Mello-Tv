@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::{collections::BTreeSet, sync::Arc};
 
 use stream_core::providers::{Metadata, Track, Variant};
 use url::Url;
@@ -7,7 +7,7 @@ use crate::network::{parse_destination_url, validate_destination_url};
 
 use super::{
     ByteRange, HlsError, MAX_LINE_BYTES, MAX_PLAYLIST_BYTES, MAX_RESOLVED_URI_BYTES, MAX_SEGMENTS,
-    MAX_TRACKS, MAX_VARIANTS, MediaSample, Playlist, PlaylistKind,
+    MAX_TRACKS, MAX_VARIANTS, MediaSample, Playlist, PlaylistKind, SegmentEncryption,
     attributes::{self, Attributes},
 };
 
@@ -49,6 +49,8 @@ pub fn parse_playlist(body: &[u8], base: &Url) -> Result<Playlist, HlsError> {
         singleton_tags: BTreeSet::new(),
         current_aes_key: false,
         current_key_iv: false,
+        current_encryption: None,
+        media_sequence: 0,
         vod: false,
     };
     for raw in lines {
@@ -129,7 +131,13 @@ pub fn parse_playlist(body: &[u8], base: &Url) -> Result<Playlist, HlsError> {
             "#EXT-X-MEDIA-SEQUENCE" | "#EXT-X-DISCONTINUITY-SEQUENCE" => {
                 state.mark(PlaylistKind::Media)?;
                 state.singleton(tag)?;
-                unsigned(value.ok_or(HlsError::Malformed("sequence"))?, "sequence")?;
+                let sequence = unsigned(value.ok_or(HlsError::Malformed("sequence"))?, "sequence")?;
+                if tag == "#EXT-X-MEDIA-SEQUENCE" {
+                    if !state.samples.is_empty() {
+                        return Err(HlsError::Malformed("late media sequence"));
+                    }
+                    state.media_sequence = sequence as u64;
+                }
             }
             "#EXT-X-PLAYLIST-TYPE" => {
                 state.mark(PlaylistKind::Media)?;
@@ -209,6 +217,8 @@ struct Parser<'a> {
     singleton_tags: BTreeSet<&'a str>,
     current_aes_key: bool,
     current_key_iv: bool,
+    current_encryption: Option<(Arc<str>, Option<[u8; 16]>)>,
+    media_sequence: u64,
     vod: bool,
 }
 
@@ -332,6 +342,7 @@ impl<'a> Parser<'a> {
             }
             self.current_aes_key = false;
             self.current_key_iv = false;
+            self.current_encryption = None;
             return Ok(());
         }
         self.encrypted = true;
@@ -339,11 +350,12 @@ impl<'a> Parser<'a> {
         let versions = attributes::get(&attrs, "KEYFORMATVERSIONS").unwrap_or("1");
         let supported = method == "AES-128" && format == "identity" && versions == "1";
         let uri = attributes::required(&attrs, "URI")?;
-        if supported {
-            self.uri(uri)?;
+        let key_url = if supported {
+            Some(Arc::<str>::from(self.uri(uri)?))
         } else {
             self.unsupported_protection = true;
-        }
+            None
+        };
         let iv = attributes::get(&attrs, "IV");
         if let Some(iv) = iv {
             let digits = iv.strip_prefix("0x").ok_or(HlsError::Malformed("key IV"))?;
@@ -355,6 +367,14 @@ impl<'a> Parser<'a> {
             }
         }
         if !session {
+            let explicit_iv = iv
+                .map(|raw| {
+                    u128::from_str_radix(raw.strip_prefix("0x").unwrap_or_default(), 16)
+                        .map(u128::to_be_bytes)
+                        .map_err(|_| HlsError::Malformed("key IV"))
+                })
+                .transpose()?;
+            self.current_encryption = key_url.map(|url| (url, explicit_iv));
             self.current_aes_key = supported;
             self.current_key_iv = iv.is_some();
         }
@@ -371,7 +391,17 @@ impl<'a> Parser<'a> {
         let byte_range = attributes::get(&attrs, "BYTERANGE")
             .map(|raw| resolve_range(raw, None, &url))
             .transpose()?;
-        let map = MediaSample { url, byte_range };
+        let encryption = self.current_encryption.as_ref().and_then(|(key_url, iv)| {
+            iv.map(|iv| SegmentEncryption {
+                key_url: key_url.clone(),
+                iv,
+            })
+        });
+        let map = MediaSample {
+            url,
+            byte_range,
+            encryption,
+        };
         if self
             .initialization
             .as_ref()
@@ -441,7 +471,22 @@ impl<'a> Parser<'a> {
                 .take()
                 .map(|raw| resolve_range(raw, self.samples.last(), &url))
                 .transpose()?;
-            self.samples.push(MediaSample { url, byte_range });
+            let sequence = self
+                .media_sequence
+                .checked_add(self.samples.len() as u64)
+                .ok_or(HlsError::RangeOverflow)?;
+            let encryption =
+                self.current_encryption
+                    .as_ref()
+                    .map(|(key_url, iv)| SegmentEncryption {
+                        key_url: key_url.clone(),
+                        iv: iv.unwrap_or(u128::from(sequence).to_be_bytes()),
+                    });
+            self.samples.push(MediaSample {
+                url,
+                byte_range,
+                encryption,
+            });
             self.pending_segment = false;
         } else {
             return Err(HlsError::Malformed(

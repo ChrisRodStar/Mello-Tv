@@ -2,10 +2,16 @@
 //! Bounded implementations of legacy provider protocol primitives. These are
 //! interoperability codecs; application state uses authenticated encryption.
 
+pub mod fmovies4u;
+pub mod moviedownloader02;
+pub mod peachify;
+pub mod streammafia;
+pub mod tulnex;
 pub mod vidcore;
 pub mod videasy;
 pub mod vidfast;
 pub mod vidlink;
+pub mod vidnest;
 pub mod vidrock;
 pub mod vidsrc;
 
@@ -54,6 +60,27 @@ pub fn sha256(parts: &[&[u8]]) -> [u8; 32] {
     digest.finalize().into()
 }
 
+/// HMAC-SHA256 (RFC 2104 / FIPS 198) with bounded input.
+pub fn hmac_sha256(key: &[u8], message: &[u8]) -> Result<[u8; 32], CryptoError> {
+    bounded_input(key)?;
+    bounded_input(message)?;
+    let mut key_block = [0u8; 64];
+    if key.len() > 64 {
+        let hash = sha256(&[key]);
+        key_block[..32].copy_from_slice(&hash);
+    } else {
+        key_block[..key.len()].copy_from_slice(key);
+    }
+    let mut o_key_pad = [0x5cu8; 64];
+    let mut i_key_pad = [0x36u8; 64];
+    for i in 0..64 {
+        o_key_pad[i] ^= key_block[i];
+        i_key_pad[i] ^= key_block[i];
+    }
+    let inner = sha256(&[&i_key_pad, message]);
+    Ok(sha256(&[&o_key_pad, &inner]))
+}
+
 /// Constant-time comparison between byte slices to prevent timing side-channels.
 pub fn ct_eq(a: &[u8], b: &[u8]) -> bool {
     a.ct_eq(b).into()
@@ -70,6 +97,28 @@ pub fn aes_cbc_encrypt(key: &[u8], iv: &[u8], plaintext: &[u8]) -> Result<Vec<u8
             .encrypt_padded_vec::<Pkcs7>(plaintext)),
         _ => Err(CryptoError::InvalidMaterial),
     }
+}
+
+/// Decrypt complete CBC blocks from an HLS media prefix. A ranged sample does
+/// not contain the final PKCS#7 padding, so no padding is removed here.
+pub fn aes_cbc_decrypt_prefix(
+    key: &[u8],
+    iv: &[u8],
+    ciphertext: &[u8],
+) -> Result<Zeroizing<Vec<u8>>, CryptoError> {
+    if key.len() != 16
+        || ciphertext.is_empty()
+        || ciphertext.len() > MAX_PROTOCOL_BYTES
+        || !ciphertext.len().is_multiple_of(16)
+    {
+        return Err(CryptoError::InvalidEnvelope);
+    }
+    let mut plaintext = Zeroizing::new(ciphertext.to_vec());
+    cbc::Decryptor::<aes::Aes128>::new_from_slices(key, iv)
+        .map_err(|_| CryptoError::InvalidMaterial)?
+        .decrypt_padded::<aes::cipher::block_padding::NoPadding>(&mut plaintext)
+        .map_err(|_| CryptoError::InvalidEnvelope)?;
+    Ok(plaintext)
 }
 
 pub fn aes_cbc_decrypt(

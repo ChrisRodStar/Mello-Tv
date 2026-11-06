@@ -297,7 +297,12 @@ mod tests {
         let server = tokio::spawn(async move {
             let (mut socket, _) = listener.accept().await?;
             let mut request = [0u8; 2048];
-            socket.read(&mut request).await?;
+            if socket.read(&mut request).await? == 0 {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::UnexpectedEof,
+                    "missing request",
+                ));
+            }
             socket
                 .write_all(
                     b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n8\r\n12345678\r\n",

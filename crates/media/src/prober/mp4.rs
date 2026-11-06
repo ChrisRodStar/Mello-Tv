@@ -26,6 +26,7 @@ impl StreamProber {
     ) -> ProbeResult<(FetchResponse, i64)> {
         let length = i64::try_from(length).map_err(|_| ProbeFailure::Protocol)?;
         let sample = MediaSample {
+            encryption: None,
             url: candidate.url.clone(),
             byte_range: Some(ByteRange::new(start, length).map_err(|_| ProbeFailure::Protocol)?),
         };

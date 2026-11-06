@@ -90,10 +90,19 @@ impl ByteRange {
     }
 }
 
+/// Per-segment AES-128 association, including the media-sequence-derived IV.
+/// Sharing the key URI avoids copying long signed URLs for every segment.
+#[derive(Clone, Eq, PartialEq)]
+pub struct SegmentEncryption {
+    pub key_url: std::sync::Arc<str>,
+    pub iv: [u8; 16],
+}
+
 /// A segment or initialization resource, with its exact optional byte range.
 /// Debug is deliberately redacted because URLs commonly contain signed tokens.
 #[derive(Clone, Eq, PartialEq)]
 pub struct MediaSample {
+    pub encryption: Option<SegmentEncryption>,
     pub url: String,
     pub byte_range: Option<ByteRange>,
 }
