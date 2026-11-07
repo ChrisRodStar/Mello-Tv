@@ -2426,7 +2426,7 @@ checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
 
 [[package]]
 name = "stream-core"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -2439,7 +2439,7 @@ dependencies = [
 
 [[package]]
 name = "stream-media"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "async-trait",
  "bytes",
@@ -2465,7 +2465,7 @@ dependencies = [
 
 [[package]]
 name = "stream-provider-adapters"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "base64 0.23.1",
  "chrono",
@@ -2483,7 +2483,7 @@ dependencies = [
 
 [[package]]
 name = "stream-provider-codecs"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "aes",
  "aes-gcm",
@@ -2505,7 +2505,7 @@ dependencies = [
 
 [[package]]
 name = "stream-provider-runtime"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "async-trait",
  "futures-util",
@@ -2528,7 +2528,7 @@ dependencies = [
 
 [[package]]
 name = "stream-provider-sdk"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "serde_json",
  "stream-core",
@@ -2537,7 +2537,7 @@ dependencies = [
 
 [[package]]
 name = "stream-server"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "async-trait",
  "axum",
@@ -2562,7 +2562,7 @@ dependencies = [
 
 [[package]]
 name = "stream-storage"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "aes-gcm",
  "async-trait",
@@ -2581,7 +2581,7 @@ dependencies = [
 
 [[package]]
 name = "stream-update"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "async-trait",
  "futures-util",
