@@ -753,7 +753,7 @@ async fn mutate_session(
     if let Some(selection) = staged_upgrade
         && state
             .relay
-            .replace_selection(&id, selection.clone())
+            .replace_selection(&id, selection)
             .is_none()
     {
         return Err(AppError::Internal(

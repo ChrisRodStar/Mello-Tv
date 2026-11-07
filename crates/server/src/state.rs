@@ -36,7 +36,7 @@ impl AppState {
         household_account_id: String,
     ) -> Self {
         Self {
-            catalog: catalog.clone(),
+            catalog,
             accounts,
             media,
             relay: Arc::new(MediaRelay::new()),
@@ -200,24 +200,23 @@ impl AppState {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         entries.get(profile_id).cloned().unwrap_or_else(|| {
-            if self
+            let (status, reason) = if self
                 .catalog_worker
                 .as_ref()
                 .is_some_and(|worker| worker.available())
             {
-                CatalogGeneration {
-                    status: CatalogGenerationStatus::Pending,
-                    updated_at: None,
-                    reason: None,
-                    stale: false,
-                }
+                (CatalogGenerationStatus::Pending, None)
             } else {
-                CatalogGeneration {
-                    status: CatalogGenerationStatus::Unavailable,
-                    updated_at: None,
-                    reason: Some(CATALOG_CONFIG_GUIDANCE.to_owned()),
-                    stale: false,
-                }
+                (
+                    CatalogGenerationStatus::Unavailable,
+                    Some(CATALOG_CONFIG_GUIDANCE.to_owned()),
+                )
+            };
+            CatalogGeneration {
+                status,
+                updated_at: None,
+                reason,
+                stale: false,
             }
         })
     }

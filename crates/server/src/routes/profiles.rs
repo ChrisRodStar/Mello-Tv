@@ -317,7 +317,7 @@ fn queue_profile_warmup(state: AppState, profile: Profile, preserve_stale: bool)
     if !preserve_stale {
         state.set_catalog_generation(&profile_id, CatalogGenerationStatus::Pending, None);
     }
-    let state_for_job = state.clone();
+    let state_for_job = state;
     tokio::spawn(async move {
         let result = worker.warm_profile(profile.clone()).await;
         let changed_during_run = state_for_job.finish_catalog_job(&key);
@@ -627,7 +627,7 @@ async fn queue_profile_recommendations(
     if !preserve_stale {
         state.set_catalog_generation(&profile_id, CatalogGenerationStatus::Pending, None);
     }
-    let state_for_job = state.clone();
+    let state_for_job = state;
     tokio::spawn(async move {
         let mut current_inputs = inputs;
         loop {

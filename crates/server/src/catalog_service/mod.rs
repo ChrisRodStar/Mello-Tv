@@ -626,9 +626,8 @@ impl CatalogWorker {
             Err(error) => {
                 if let Some(lookup) = stale_search_lookup(cached, existing, now) {
                     return Ok(lookup);
-                } else {
-                    return Err(error);
                 }
+                return Err(error);
             }
         };
         let results = payload
@@ -708,18 +707,15 @@ impl CatalogWorker {
         {
             Ok(raw) => raw,
             Err(error) => {
-                if let Some(record) = stale {
-                    if let Ok(title) = serde_json::from_value(record.data.clone()) {
-                        return Ok(CatalogLookup {
-                            value: Some(typed(record, title)),
-                            availability: Availability::Stale,
-                        });
-                    } else {
-                        return Err(error);
-                    }
-                } else {
-                    return Err(error);
+                if let Some(record) = stale
+                    && let Ok(title) = serde_json::from_value(record.data.clone())
+                {
+                    return Ok(CatalogLookup {
+                        value: Some(typed(record, title)),
+                        availability: Availability::Stale,
+                    });
                 }
+                return Err(error);
             }
         };
         let mut title = normalize_title(&raw).ok_or(CatalogServiceError::InvalidResponse)?;
@@ -795,18 +791,15 @@ impl CatalogWorker {
         {
             Ok(raw) => raw,
             Err(error) => {
-                if let Some(record) = stale {
-                    if let Ok(data) = serde_json::from_value(record.data.clone()) {
-                        return Ok(CatalogLookup {
-                            value: Some(typed(record, data)),
-                            availability: Availability::Stale,
-                        });
-                    } else {
-                        return Err(error);
-                    }
-                } else {
-                    return Err(error);
+                if let Some(record) = stale
+                    && let Ok(data) = serde_json::from_value(record.data.clone())
+                {
+                    return Ok(CatalogLookup {
+                        value: Some(typed(record, data)),
+                        availability: Availability::Stale,
+                    });
                 }
+                return Err(error);
             }
         };
         let name = raw
@@ -1915,7 +1908,7 @@ mod tests {
             format: stream_core::catalog::ContentPreference::Both,
             genres: Vec::new(),
             favorites: Vec::new(),
-            signals: vec![signal.clone()],
+            signals: vec![signal],
             activity_days: vec![updated_at.format("%Y-%m-%d").to_string()],
         };
         let baseline = recommendation_fingerprint("p", &inputs);

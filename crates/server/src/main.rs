@@ -53,11 +53,7 @@ impl ServerConfig {
             .map(PathBuf::from)
             .or_else(|| {
                 let default_web = PathBuf::from("web/dist");
-                if default_web.is_dir() {
-                    Some(default_web)
-                } else {
-                    None
-                }
+                default_web.is_dir().then_some(default_web)
             });
 
         let mut exit_on_stdin_close = false;
@@ -281,17 +277,14 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let catalog_db = config.db_path.join("catalog.db");
     let catalog = CatalogStore::open(catalog_db).await?;
 
-    let key = if let Ok(bytes) = tokio::fs::read(config.db_path.join("api-encryption")).await {
-        if bytes.len() == 32 {
+    let key = match tokio::fs::read(config.db_path.join("api-encryption")).await {
+        Ok(bytes) if bytes.len() == 32 => {
             let mut k = [0u8; 32];
             k.copy_from_slice(&bytes);
             tracing::info!("loaded custom encryption key from api-encryption");
             k
-        } else {
-            [0x5cu8; 32]
         }
-    } else {
-        [0x5cu8; 32]
+        _ => [0x5cu8; 32],
     };
 
     let accounts_db = config.db_path.join("accounts.db");

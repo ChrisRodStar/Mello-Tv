@@ -530,7 +530,7 @@ async fn search_results(
                 {
                     if state.ensure_catalog_job(&key) {
                         let job_state = state.clone();
-                        let lock_key = key.clone();
+                        let lock_key = key;
                         let query = q.to_owned();
                         tokio::spawn(async move {
                             let result = worker.search(&query, 0).await;
@@ -799,17 +799,16 @@ async fn title(
                         .as_ref()
                         .is_some_and(|worker| worker.available())
                 {
-                    let _ = queue_title_refresh(&state, job_key.clone(), identity);
-                    if needs_details {
-                        let mut val = serde_json::to_value(record)
-                            .map_err(|e| AppError::Internal(e.to_string()))?;
-                        val["status"] = json!("pending");
-                        return Ok((StatusCode::ACCEPTED, Json(val)));
-                    }
+                    let _ = queue_title_refresh(&state, job_key, identity);
                     let mut val = serde_json::to_value(record)
                         .map_err(|e| AppError::Internal(e.to_string()))?;
                     val["status"] = json!("pending");
-                    return Ok((StatusCode::OK, Json(val)));
+                    let code = if needs_details {
+                        StatusCode::ACCEPTED
+                    } else {
+                        StatusCode::OK
+                    };
+                    return Ok((code, Json(val)));
                 }
                 let mut val =
                     serde_json::to_value(record).map_err(|e| AppError::Internal(e.to_string()))?;

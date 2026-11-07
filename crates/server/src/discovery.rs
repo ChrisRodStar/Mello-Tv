@@ -85,8 +85,8 @@ pub fn query_tailscale_status() -> Option<serde_json::Value> {
 pub fn extract_tailscale_ips_from_json(status: &serde_json::Value) -> Vec<String> {
     let mut ips = Vec::new();
 
-    let check_array = |arr_opt: Option<&Vec<serde_json::Value>>, ips: &mut Vec<String>| {
-        if let Some(arr) = arr_opt {
+    let mut collect_ips = |value: Option<&serde_json::Value>| {
+        if let Some(arr) = value.and_then(|v| v.as_array()) {
             for v in arr {
                 if let Some(s) = v.as_str() {
                     ips.push(s.to_string());
@@ -95,15 +95,9 @@ pub fn extract_tailscale_ips_from_json(status: &serde_json::Value) -> Vec<String
         }
     };
 
-    check_array(
-        status.get("TailscaleIPs").and_then(|v| v.as_array()),
-        &mut ips,
-    );
+    collect_ips(status.get("TailscaleIPs"));
     if let Some(self_node) = status.get("Self") {
-        check_array(
-            self_node.get("TailscaleIPs").and_then(|v| v.as_array()),
-            &mut ips,
-        );
+        collect_ips(self_node.get("TailscaleIPs"));
     }
 
     ips
