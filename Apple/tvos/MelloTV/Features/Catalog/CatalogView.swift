@@ -21,17 +21,10 @@ public struct CatalogView: View {
     @State private var playingPosition: Double? = nil
 
     @ObservedObject private var serverAddress = ServerAddress.shared
+    @ObservedObject private var profileStore = ProfileStore.shared
 
     public init(category: CatalogCategory = .home) {
         self.category = category
-    }
-
-    private var activeProfileID: String {
-        if let base = ServerAddress.currentBaseURL,
-           let saved = ProfilePersistence.activeProfileID(for: base) {
-            return saved
-        }
-        return "default"
     }
 
     public var body: some View {
@@ -81,6 +74,11 @@ public struct CatalogView: View {
         .task(id: category) {
             await loadContent()
         }
+        .onChange(of: profileStore.activeProfileID) { _, _ in
+            Task {
+                await loadContent()
+            }
+        }
         .onReceive(NotificationCenter.default.publisher(for: Notification.Name("MelloTVActiveProfileChanged"))) { _ in
             Task {
                 await loadContent()
@@ -89,6 +87,7 @@ public struct CatalogView: View {
         .fullScreenCover(item: $selectedTitle) { title in
             TitleDetailView(
                 title: title,
+                profileID: profileStore.activeProfileID,
                 onDismiss: { selectedTitle = nil },
                 onPlay: {
                     selectedTitle = nil
@@ -99,6 +98,7 @@ public struct CatalogView: View {
         .fullScreenCover(item: $playingTitle) { title in
             TVPlayerView(
                 title: title,
+                profileID: profileStore.activeProfileID,
                 season: playingSeason,
                 episode: playingEpisode,
                 initialPosition: playingPosition,
@@ -242,11 +242,17 @@ public struct CatalogView: View {
     // MARK: - Data Loading
 
     private func loadContent() async {
+        if profileStore.activeProfileID == nil {
+            await profileStore.loadProfiles()
+        }
+        guard let pid = profileStore.activeProfileID, !pid.isEmpty else {
+            return
+        }
+
         isLoading = true
         errorMessage = nil
         defer { isLoading = false }
 
-        let pid = activeProfileID
         do {
             let response: CatalogResponse
             if let filter = category.mediaTypeFilter {
@@ -287,12 +293,12 @@ public struct CatalogView: View {
         }
 
         if category == .home {
-            await loadContinueWatching()
+            await loadContinueWatching(profileID: pid)
         }
     }
 
-    private func loadContinueWatching() async {
-        let pid = activeProfileID
+    private func loadContinueWatching(profileID: String? = nil) async {
+        guard let pid = profileID ?? profileStore.activeProfileID, !pid.isEmpty else { return }
         do {
             let inProgress = try await MelloTVAPI.shared.fetchContinueWatching(profileID: pid)
             self.continueWatchingItems = inProgress

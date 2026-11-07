@@ -77,7 +77,12 @@ public final class CatalogStore {
                     case .tv:
                         response = try await api.browse(.tv)
                     }
-                    self.continueWatching = (try? await api.fetchContinueWatching(profileID: "default")) ?? []
+                    let effectivePID = profileID ?? ProfileStore.shared.activeProfileID
+                    if let effectivePID, !effectivePID.isEmpty {
+                        self.continueWatching = (try? await api.fetchContinueWatching(profileID: effectivePID)) ?? []
+                    } else {
+                        self.continueWatching = []
+                    }
                 }
 
                 guard !Task.isCancelled else { return }

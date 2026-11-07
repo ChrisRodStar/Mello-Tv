@@ -5,6 +5,7 @@ import MelloKit
 /// Native tvOS Video Player utilizing AVPlayerViewController with Siri Remote, Resume & Auto-Advance.
 public struct TVPlayerView: View {
     public let title: MediaTitle
+    public let profileID: String?
     @State public var season: Int?
     @State public var episode: Int?
     public var initialPosition: Double? = nil
@@ -17,6 +18,7 @@ public struct TVPlayerView: View {
     @State private var timeObserverToken: Any?
     @State private var duration: Double = 0
     @State private var currentPosition: Double = 0
+    @State private var resolvedProfileID: String = ""
 
     // Auto-advance state for TV Series
     @State private var showNextEpisodePrompt = false
@@ -25,12 +27,14 @@ public struct TVPlayerView: View {
 
     public init(
         title: MediaTitle,
+        profileID: String? = nil,
         season: Int? = nil,
         episode: Int? = nil,
         initialPosition: Double? = nil,
         onDismiss: @escaping () -> Void
     ) {
         self.title = title
+        self.profileID = profileID
         self._season = State(initialValue: season)
         self._episode = State(initialValue: episode)
         self.initialPosition = initialPosition
@@ -142,12 +146,22 @@ public struct TVPlayerView: View {
         countdownTimer?.invalidate()
         countdownTimer = nil
 
+        var pid = profileID ?? ProfileStore.shared.activeProfileID ?? ""
+        if pid.isEmpty {
+            if let loaded = try? await MelloTVAPI.shared.profiles(), let first = loaded.first {
+                ProfileStore.shared.selectProfile(first)
+                pid = first.id
+            }
+        }
+        self.resolvedProfileID = pid
+
         do {
             let streamURL = try await MelloTVAPI.shared.resolveStreamURL(
                 type: title.type,
                 id: title.tmdbID,
                 season: season,
-                episode: episode
+                episode: episode,
+                profileID: pid
             )
 
             let playerItem = AVPlayerItem(url: streamURL)
@@ -175,10 +189,11 @@ public struct TVPlayerView: View {
                 }
 
                 // Heartbeat to Mello TV server
+                let currentPID = pid
                 Task {
                     await MelloTVAPI.shared.updatePlaybackActivity(
                         sessionId: sessionId,
-                        profileId: "default",
+                        profileId: currentPID,
                         title: title.title,
                         season: season,
                         episode: episode,

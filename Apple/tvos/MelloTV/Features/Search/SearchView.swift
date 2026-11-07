@@ -72,6 +72,7 @@ public struct SearchView: View {
             .fullScreenCover(item: $selectedTitle) { title in
                 TitleDetailView(
                     title: title,
+                    profileID: ProfileStore.shared.activeProfileID,
                     onDismiss: { selectedTitle = nil },
                     onPlay: {
                         selectedTitle = nil
@@ -80,7 +81,11 @@ public struct SearchView: View {
                 )
             }
             .fullScreenCover(item: $playingTitle) { title in
-                TVPlayerView(title: title, onDismiss: { playingTitle = nil })
+                TVPlayerView(
+                    title: title,
+                    profileID: ProfileStore.shared.activeProfileID,
+                    onDismiss: { playingTitle = nil }
+                )
             }
         }
     }
@@ -222,7 +227,8 @@ public struct SearchView: View {
     private func loadDiscoveryTitles() async {
         guard discoveryTitles.isEmpty else { return }
         do {
-            let catResponse = try await MelloTVAPI.shared.home()
+            let pid = ProfileStore.shared.activeProfileID
+            let catResponse = try await MelloTVAPI.shared.home(profileID: pid)
             var seen = Set<String>()
             let titles = catResponse.titles.filter { seen.insert($0.id).inserted }
             self.discoveryTitles = Array(titles.prefix(24))

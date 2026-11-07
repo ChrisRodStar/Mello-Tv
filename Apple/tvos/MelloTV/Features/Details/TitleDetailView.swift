@@ -4,6 +4,7 @@ import MelloKit
 /// 10-foot Title Details screen with synopsis, metadata, watchlist toggle, resume playback, and episode browsing.
 public struct TitleDetailView: View {
     public let title: MediaTitle
+    public let profileID: String?
     public let onDismiss: () -> Void
     public let onPlay: () -> Void
 
@@ -17,8 +18,14 @@ public struct TitleDetailView: View {
     @State private var isInWatchlist = false
     @State private var savedProgress: WatchProgress?
 
-    public init(title: MediaTitle, onDismiss: @escaping () -> Void, onPlay: @escaping () -> Void) {
+    public init(
+        title: MediaTitle,
+        profileID: String? = nil,
+        onDismiss: @escaping () -> Void,
+        onPlay: @escaping () -> Void
+    ) {
         self.title = title
+        self.profileID = profileID
         self.onDismiss = onDismiss
         self.onPlay = onPlay
     }
@@ -212,8 +219,10 @@ public struct TitleDetailView: View {
             }
         }
         .fullScreenCover(item: $playingEpisode) { ep in
+            let pid = profileID ?? ProfileStore.shared.activeProfileID ?? ""
             TVPlayerView(
                 title: title,
+                profileID: pid,
                 season: selectedSeason,
                 episode: ep.number,
                 initialPosition: playingInitialPosition,
@@ -269,8 +278,10 @@ public struct TitleDetailView: View {
     }
 
     private func loadLibraryStatus() async {
+        let pid = profileID ?? ProfileStore.shared.activeProfileID ?? ""
+        guard !pid.isEmpty else { return }
         do {
-            let lib = try await MelloTVAPI.shared.fetchLibrary(profileId: "default")
+            let lib = try await MelloTVAPI.shared.fetchLibrary(profileId: pid)
             self.isInWatchlist = lib.list.contains { $0.id == title.id }
             self.savedProgress = lib.progress.first { $0.title.id == title.id }
         } catch {
@@ -279,12 +290,14 @@ public struct TitleDetailView: View {
     }
 
     private func toggleWatchlist() async {
+        let pid = profileID ?? ProfileStore.shared.activeProfileID ?? ""
+        guard !pid.isEmpty else { return }
         do {
             if isInWatchlist {
-                try await MelloTVAPI.shared.removeFromWatchlist(type: title.type, id: title.tmdbID)
+                try await MelloTVAPI.shared.removeFromWatchlist(profileId: pid, type: title.type, id: title.tmdbID)
                 isInWatchlist = false
             } else {
-                try await MelloTVAPI.shared.addToWatchlist(type: title.type, id: title.tmdbID)
+                try await MelloTVAPI.shared.addToWatchlist(profileId: pid, type: title.type, id: title.tmdbID)
                 isInWatchlist = true
             }
         } catch {

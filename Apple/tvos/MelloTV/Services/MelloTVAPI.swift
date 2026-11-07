@@ -129,17 +129,40 @@ public struct MelloTVAPI: Sendable {
         try await request("status")
     }
 
+    // MARK: - Active Profile Resolution
+    public func resolveProfileID(_ provided: String? = nil) async -> String? {
+        if let provided, !provided.isEmpty, provided != "default" {
+            return provided
+        }
+        if let active = await ProfileStore.shared.activeProfileID, !active.isEmpty, active != "default" {
+            return active
+        }
+        await ProfileStore.shared.loadProfiles()
+        if let active = await ProfileStore.shared.activeProfileID, !active.isEmpty, active != "default" {
+            return active
+        }
+        if let first = (try? await profiles())?.first?.id, !first.isEmpty, first != "default" {
+            return first
+        }
+        return nil
+    }
+
     // MARK: - Catalog & Media
     public func home(profileID: String? = nil) async throws -> CatalogResponse {
-        try await catalog(category: nil, profileID: profileID)
+        let pid = await resolveProfileID(profileID)
+        return try await catalog(category: nil, profileID: pid)
     }
 
     public func browse(_ type: MediaType, profileID: String? = nil) async throws -> CatalogResponse {
-        try await catalog(category: type, profileID: profileID)
+        let pid = await resolveProfileID(profileID)
+        return try await catalog(category: type, profileID: pid)
     }
 
-    public func recommendationPage(category: MediaType?, profileID: String, topic: String = "all") async throws -> CatalogResponse {
-        let reply: HomePageWireReply = try await request("profiles/\(profileID)/home", query: [
+    public func recommendationPage(category: MediaType?, profileID: String? = nil, topic: String = "all") async throws -> CatalogResponse {
+        guard let resolvedID = await resolveProfileID(profileID), !resolvedID.isEmpty else {
+            return try await catalog(category: category, profileID: nil)
+        }
+        let reply: HomePageWireReply = try await request("profiles/\(resolvedID)/home", query: [
             URLQueryItem(name: "type", value: category?.rawValue ?? "all"),
             URLQueryItem(name: "topic", value: topic),
         ])
@@ -151,7 +174,9 @@ public struct MelloTVAPI: Sendable {
     }
 
     private func catalog(category: MediaType?, profileID: String?) async throws -> CatalogResponse {
-        if let profileID { return try await recommendationPage(category: category, profileID: profileID) }
+        if let profileID, !profileID.isEmpty, profileID != "default" {
+            return try await recommendationPage(category: category, profileID: profileID)
+        }
         let browse = try await browseReply()
         let sections = browse.records.map(\.data).filter {
             !$0.id.hasPrefix("onboarding-") && !$0.id.hasPrefix("favorites-")
@@ -185,33 +210,39 @@ public struct MelloTVAPI: Sendable {
         return response.titles
     }
 
-    public func recommendationCategory(id: String, category: MediaType?, profileID: String) async throws -> CatalogSection? {
-        let reply: HomePageWireReply = try await request("profiles/\(profileID)/home", query: [
+    public func recommendationCategory(id: String, category: MediaType?, profileID: String? = nil) async throws -> CatalogSection? {
+        guard let resolvedID = await resolveProfileID(profileID), !resolvedID.isEmpty else { return nil }
+        let reply: HomePageWireReply = try await request("profiles/\(resolvedID)/home", query: [
             URLQueryItem(name: "type", value: category?.rawValue ?? "all"), URLQueryItem(name: "shelf", value: id),
         ])
         return reply.sections.first(where: { $0.id == id }).map { CatalogSection(id: $0.id, heading: $0.heading, titles: $0.titles.map(\.view), reason: $0.reason) }
     }
 
-    public func recommendationChoices(profileID: String) async throws -> RecommendationChoices {
-        let reply: FeedbackReply = try await request("profiles/\(profileID)/recommendation-feedback")
+    public func recommendationChoices(profileID: String? = nil) async throws -> RecommendationChoices {
+        guard let resolvedID = await resolveProfileID(profileID), !resolvedID.isEmpty else {
+            return RecommendationChoices(hidden: [], watched: [], ignored: [], favorites: [], topics: [])
+        }
+        let reply: FeedbackReply = try await request("profiles/\(resolvedID)/recommendation-feedback")
         return RecommendationChoices(hidden: reply.hidden.map(\.view), watched: reply.watched.map(\.view),
             ignored: reply.ignored.map(\.view), favorites: reply.favorites.map(\.view), topics: reply.topics)
     }
 
-    public func setRecommendationChoice(profileID: String, title: MediaTitle, choice: RecommendationChoice, enabled: Bool) async throws {
-        let _: EmptyReply = try await request("profiles/\(profileID)/\(choice.path)/\(title.type.rawValue)/\(title.tmdbID)", method: enabled ? "PUT" : "DELETE")
+    public func setRecommendationChoice(profileID: String? = nil, title: MediaTitle, choice: RecommendationChoice, enabled: Bool) async throws {
+        guard let resolvedID = await resolveProfileID(profileID), !resolvedID.isEmpty else { return }
+        let _: EmptyReply = try await request("profiles/\(resolvedID)/\(choice.path)/\(title.type.rawValue)/\(title.tmdbID)", method: enabled ? "PUT" : "DELETE")
     }
 
-    public func setRecommendationTopicHidden(profileID: String, topicID: String, hidden: Bool) async throws {
-        let _: EmptyReply = try await request("profiles/\(profileID)/recommendation-topics/\(topicID)", method: hidden ? "PUT" : "DELETE")
+    public func setRecommendationTopicHidden(profileID: String? = nil, topicID: String, hidden: Bool) async throws {
+        guard let resolvedID = await resolveProfileID(profileID), !resolvedID.isEmpty else { return }
+        let _: EmptyReply = try await request("profiles/\(resolvedID)/recommendation-topics/\(topicID)", method: hidden ? "PUT" : "DELETE")
     }
 
-    public func relatedTitles(to title: MediaTitle, genres: [String], profileID: String) async throws -> CatalogSection {
-        guard !profileID.isEmpty else {
+    public func relatedTitles(to title: MediaTitle, genres: [String], profileID: String? = nil) async throws -> CatalogSection {
+        guard let resolvedID = await resolveProfileID(profileID), !resolvedID.isEmpty else {
             return CatalogSection(id: "related-" + title.id, heading: "More Like This", titles: [])
         }
-        async let page: HomePageWireReply = request("profiles/\(profileID)/home", query: [URLQueryItem(name: "type", value: title.type.rawValue)])
-        async let personalized = recommendationShelves(profileID: profileID, type: title.type)
+        async let page: HomePageWireReply = request("profiles/\(resolvedID)/home", query: [URLQueryItem(name: "type", value: title.type.rawValue)])
+        async let personalized = recommendationShelves(profileID: resolvedID, type: title.type)
         let (general, personal) = try await (page, personalized)
         try Task.checkCancellation()
         let shelves = personal + general.sections
@@ -364,6 +395,7 @@ public struct MelloTVAPI: Sendable {
 
     // MARK: - Stream Resolution
     public func resolveStreamURL(type: MediaType, id: Int, season: Int? = nil, episode: Int? = nil, profileID: String = "default") async throws -> URL {
+        let resolvedPID = (await resolveProfileID(profileID)) ?? ""
         let key = UUID().uuidString
         let codecs = Self.playbackCodecs(overriding: codecSupportOverride)
         var body: [String: Any] = [
@@ -382,7 +414,7 @@ public struct MelloTVAPI: Sendable {
             if let season { body["season"] = season }
             if let episode { body["episode"] = episode }
         }
-        let reply: WirePlayback = try await playbackRequest("profiles/\(profileID)/playback", method: "POST", body: body, key: key)
+        let reply: WirePlayback = try await playbackRequest("profiles/\(resolvedPID)/playback", method: "POST", body: body, key: key)
         let origin = reply.responseOrigin ?? effectiveBaseURL
         guard reply.url.hasPrefix("/stream/"), !reply.url.hasPrefix("//"),
               let url = URL(string: reply.url, relativeTo: origin)?.absoluteURL,
@@ -393,7 +425,8 @@ public struct MelloTVAPI: Sendable {
     }
 
     public func resolvePlayback(request playback: PlaybackRequest, key: String) async throws -> AuthorizedPlayback {
-        let settings = (try? await playbackSettings(profileID: playback.profileID)) ?? ProfilePlaybackSettings()
+        let resolvedPID = (await resolveProfileID(playback.profileID)) ?? ""
+        let settings = (try? await playbackSettings(profileID: resolvedPID)) ?? ProfilePlaybackSettings()
         try Task.checkCancellation()
         let ceiling = settings.maxHeight == 0 ? 1080 : settings.maxHeight
         let codecs = Self.playbackCodecs(overriding: codecSupportOverride)
@@ -416,7 +449,7 @@ public struct MelloTVAPI: Sendable {
         if let value = playback.catalogTitle.imdbID { body["imdb_id"] = value }
         if let value = playback.catalogTitle.malID { body["mal_id"] = value }
 
-        let reply: WirePlayback = try await playbackRequest("profiles/\(playback.profileID)/playback", method: "POST", body: body, key: key)
+        let reply: WirePlayback = try await playbackRequest("profiles/\(resolvedPID)/playback", method: "POST", body: body, key: key)
         return try authorized(reply, for: playback, qualityLimit: settings.maxHeight)
     }
 
@@ -436,7 +469,8 @@ public struct MelloTVAPI: Sendable {
     public func changePlayback(_ source: AuthorizedPlayback, request playback: PlaybackRequest,
                                kind: String, key: String) async throws -> AuthorizedPlayback {
         guard ["renew", "backup", "refresh", "upgrade"].contains(kind) else { throw APIError.invalidData }
-        let reply: WirePlayback = try await playbackRequest("profiles/\(playback.profileID)/playback/\(source.id)/\(kind)",
+        let resolvedPID = (await resolveProfileID(playback.profileID)) ?? ""
+        let reply: WirePlayback = try await playbackRequest("profiles/\(resolvedPID)/playback/\(source.id)/\(kind)",
             method: "POST", body: ["expected_revision": source.revision], key: key)
         return try authorized(reply, for: playback, qualityLimit: source.qualityLimit)
     }
@@ -456,11 +490,13 @@ public struct MelloTVAPI: Sendable {
     }
 
     public func revokePlayback(_ source: AuthorizedPlayback, request playback: PlaybackRequest) async throws {
-        try await revokePlayback(id: source.id, profileID: playback.profileID)
+        let resolvedPID = (await resolveProfileID(playback.profileID)) ?? ""
+        try await revokePlayback(id: source.id, profileID: resolvedPID)
     }
 
-    public func revokePlayback(id: String, profileID: String) async throws {
-        let _: EmptyReply = try await request("profiles/\(profileID)/playback/\(id)", method: "DELETE")
+    public func revokePlayback(id: String, profileID: String? = nil) async throws {
+        let resolvedPID = (await resolveProfileID(profileID)) ?? ""
+        let _: EmptyReply = try await request("profiles/\(resolvedPID)/playback/\(id)", method: "DELETE")
     }
 
     private func authorized(_ reply: WirePlayback, for playback: PlaybackRequest, qualityLimit: Int) throws -> AuthorizedPlayback {
@@ -491,7 +527,7 @@ public struct MelloTVAPI: Sendable {
 
     public func updatePlaybackActivity(
         sessionId: String,
-        profileId: String,
+        profileId: String? = nil,
         title: String,
         season: Int? = nil,
         episode: Int? = nil,
@@ -499,9 +535,10 @@ public struct MelloTVAPI: Sendable {
         positionSeconds: Double,
         durationSeconds: Double? = nil
     ) async {
+        let resolvedPID = (await resolveProfileID(profileId)) ?? (profileId ?? "")
         var body: [String: Any] = [
             "session_id": sessionId,
-            "profile_id": profileId,
+            "profile_id": resolvedPID,
             "title": title,
             "device": "Apple TV",
             "state": state,
@@ -518,8 +555,9 @@ public struct MelloTVAPI: Sendable {
         try? await deletePlaybackActivity(sessionID: sessionId)
     }
 
-    public func touchActivity(profileID: String) async {
-        let _: EmptyReply? = try? await request("profiles/\(profileID)/activity", method: "POST")
+    public func touchActivity(profileID: String? = nil) async {
+        guard let resolvedPID = await resolveProfileID(profileID), !resolvedPID.isEmpty else { return }
+        let _: EmptyReply? = try? await request("profiles/\(resolvedPID)/activity", method: "POST")
     }
 
     // MARK: - Profiles
@@ -578,28 +616,36 @@ public struct MelloTVAPI: Sendable {
         return try await profiles()
     }
 
-    public func playbackSettings(profileID: String) async throws -> ProfilePlaybackSettings {
-        try await request("profiles/\(profileID)/playback-settings")
+    public func playbackSettings(profileID: String? = nil) async throws -> ProfilePlaybackSettings {
+        guard let resolvedPID = await resolveProfileID(profileID), !resolvedPID.isEmpty else {
+            return ProfilePlaybackSettings()
+        }
+        return try await request("profiles/\(resolvedPID)/playback-settings")
     }
 
-    public func savePlaybackSettings(_ settings: ProfilePlaybackSettings, profileID: String) async throws {
-        let _: ProfilePlaybackSettings = try await request("profiles/\(profileID)/playback-settings", method: "PUT", body: [
+    public func savePlaybackSettings(_ settings: ProfilePlaybackSettings, profileID: String? = nil) async throws {
+        guard let resolvedPID = await resolveProfileID(profileID), !resolvedPID.isEmpty else { return }
+        let _: ProfilePlaybackSettings = try await request("profiles/\(resolvedPID)/playback-settings", method: "PUT", body: [
             "audio_language": settings.audioLanguage, "subtitle_language": settings.subtitleLanguage,
             "subtitles_enabled": settings.subtitlesEnabled, "autoplay_next": settings.autoplayNext,
             "max_height": settings.maxHeight
         ])
     }
 
-    public func catalogStatus(profileID: String) async throws -> CatalogGenerationStatus {
-        try await request("profiles/\(profileID)/catalog-status")
+    public func catalogStatus(profileID: String? = nil) async throws -> CatalogGenerationStatus {
+        guard let resolvedPID = await resolveProfileID(profileID), !resolvedPID.isEmpty else {
+            return CatalogGenerationStatus(status: .ready)
+        }
+        return try await request("profiles/\(resolvedPID)/catalog-status")
     }
 
-    public func waitForCatalogReady(profileID: String) async throws {
+    public func waitForCatalogReady(profileID: String? = nil) async throws {
+        guard let resolvedPID = await resolveProfileID(profileID), !resolvedPID.isEmpty else { return }
         let delays: [Duration] = [.zero, .seconds(2), .seconds(4), .seconds(7), .seconds(10), .seconds(12), .seconds(12)]
         for delay in delays {
             if delay > .zero { try await Task.sleep(for: delay) }
             try Task.checkCancellation()
-            let state = try await catalogStatus(profileID: profileID)
+            let state = try await catalogStatus(profileID: resolvedPID)
             switch state.status {
             case .ready: return
             case .pending: continue
@@ -612,8 +658,9 @@ public struct MelloTVAPI: Sendable {
         throw APIError.serverMessage("Recommendations are still being prepared. Try again shortly.")
     }
 
-    public func onboardingTitles(preferences: ProfilePreferences, profileID: String) async throws -> [MediaTitle] {
-        try await waitForCatalogReady(profileID: profileID)
+    public func onboardingTitles(preferences: ProfilePreferences, profileID: String? = nil) async throws -> [MediaTitle] {
+        guard let resolvedPID = await resolveProfileID(profileID), !resolvedPID.isEmpty else { return [] }
+        try await waitForCatalogReady(profileID: resolvedPID)
         let reply = try await browseReply()
         let shelves = reply.records.map(\.data)
         var buckets: [[WireTitle]] = []
@@ -668,8 +715,9 @@ public struct MelloTVAPI: Sendable {
     }
 
     // MARK: - Library & Continue Watching
-    public func fetchContinueWatching(profileID: String) async throws -> [WatchProgress] {
-        let lib = try await library(for: profileID)
+    public func fetchContinueWatching(profileID: String? = nil) async throws -> [WatchProgress] {
+        guard let resolvedPID = await resolveProfileID(profileID), !resolvedPID.isEmpty else { return [] }
+        let lib = try await library(for: resolvedPID)
         var seen = Set<String>()
         return lib.progress.filter { item in
             let key = "\(item.title.type.rawValue):\(item.title.tmdbID)"
@@ -679,9 +727,10 @@ public struct MelloTVAPI: Sendable {
         }
     }
 
-    public func episodeProgress(profileID: String, titleID: Int, season: Int, episode: Int) async throws -> Double? {
+    public func episodeProgress(profileID: String? = nil, titleID: Int, season: Int, episode: Int) async throws -> Double? {
+        guard let resolvedPID = await resolveProfileID(profileID), !resolvedPID.isEmpty else { return nil }
         do {
-            let saved: WireProgress = try await request("profiles/\(profileID)/resume", query: [
+            let saved: WireProgress = try await request("profiles/\(resolvedPID)/resume", query: [
                 URLQueryItem(name: "type", value: "tv"),
                 URLQueryItem(name: "id", value: String(titleID)),
                 URLQueryItem(name: "season", value: String(season)),
@@ -696,12 +745,13 @@ public struct MelloTVAPI: Sendable {
         }
     }
 
-    public func library(for profileID: String) async throws -> ProfileLibrary {
-        async let saved: TitlesReply = request("profiles/\(profileID)/library")
+    public func library(for profileID: String? = nil) async throws -> ProfileLibrary {
+        guard let resolvedPID = await resolveProfileID(profileID), !resolvedPID.isEmpty else { return .empty }
+        async let saved: TitlesReply = request("profiles/\(resolvedPID)/library")
         var history: [WireProgress] = []
         var offset = 0
         while offset < 20000 {
-            let page: HistoryReply = try await request("profiles/\(profileID)/history", query: [URLQueryItem(name: "offset", value: String(offset))])
+            let page: HistoryReply = try await request("profiles/\(resolvedPID)/history", query: [URLQueryItem(name: "offset", value: String(offset))])
             history += page.records
             if page.records.isEmpty || page.records.count < page.limit { break }
             offset += page.records.count
@@ -743,30 +793,35 @@ public struct MelloTVAPI: Sendable {
         return ProfileLibrary(list: titles, progress: progress)
     }
 
-    public func fetchLibrary(profileId: String) async throws -> ProfileLibrary {
+    public func fetchLibrary(profileId: String? = nil) async throws -> ProfileLibrary {
         try await library(for: profileId)
     }
 
-    public func addToMyList(profileID: String, title: MediaTitle) async throws -> ProfileLibrary {
-        let _: EmptyReply = try await request("profiles/\(profileID)/library/\(title.type.rawValue)/\(title.tmdbID)", method: "PUT")
-        return try await library(for: profileID)
+    public func addToMyList(profileID: String? = nil, title: MediaTitle) async throws -> ProfileLibrary {
+        guard let resolvedPID = await resolveProfileID(profileID), !resolvedPID.isEmpty else { return .empty }
+        let _: EmptyReply = try await request("profiles/\(resolvedPID)/library/\(title.type.rawValue)/\(title.tmdbID)", method: "PUT")
+        return try await library(for: resolvedPID)
     }
 
-    public func removeFromMyList(profileID: String, type: MediaType, titleID: Int) async throws -> ProfileLibrary {
-        let _: EmptyReply = try await request("profiles/\(profileID)/library/\(type.rawValue)/\(titleID)", method: "DELETE")
-        return try await library(for: profileID)
+    public func removeFromMyList(profileID: String? = nil, type: MediaType, titleID: Int) async throws -> ProfileLibrary {
+        guard let resolvedPID = await resolveProfileID(profileID), !resolvedPID.isEmpty else { return .empty }
+        let _: EmptyReply = try await request("profiles/\(resolvedPID)/library/\(type.rawValue)/\(titleID)", method: "DELETE")
+        return try await library(for: resolvedPID)
     }
 
-    public func addToWatchlist(profileId: String = "default", type: MediaType, id: Int) async throws {
-        let _: EmptyReply = try await request("profiles/\(profileId)/library/\(type.rawValue)/\(id)", method: "PUT")
+    public func addToWatchlist(profileId: String? = nil, type: MediaType, id: Int) async throws {
+        guard let resolvedPID = await resolveProfileID(profileId), !resolvedPID.isEmpty else { return }
+        let _: EmptyReply = try await request("profiles/\(resolvedPID)/library/\(type.rawValue)/\(id)", method: "PUT")
     }
 
-    public func removeFromWatchlist(profileId: String = "default", type: MediaType, id: Int) async throws {
-        let _: EmptyReply = try await request("profiles/\(profileId)/library/\(type.rawValue)/\(id)", method: "DELETE")
+    public func removeFromWatchlist(profileId: String? = nil, type: MediaType, id: Int) async throws {
+        guard let resolvedPID = await resolveProfileID(profileId), !resolvedPID.isEmpty else { return }
+        let _: EmptyReply = try await request("profiles/\(resolvedPID)/library/\(type.rawValue)/\(id)", method: "DELETE")
     }
 
-    public func updateProgress(profileID: String, update: WatchProgressUpdate) async throws -> Bool {
-        let _: WireProgress = try await request("profiles/\(profileID)/progress", method: "PUT", body: [
+    public func updateProgress(profileID: String? = nil, update: WatchProgressUpdate) async throws -> Bool {
+        guard let resolvedPID = await resolveProfileID(profileID), !resolvedPID.isEmpty else { return false }
+        let _: WireProgress = try await request("profiles/\(resolvedPID)/progress", method: "PUT", body: [
             "playback_id": update.sessionId, "sequence": update.sequence,
             "position_seconds": update.position, "duration_seconds": update.duration,
             "watched_seconds": update.watchedSeconds,

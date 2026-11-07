@@ -79,8 +79,10 @@ public final class LibraryStore {
         self.api = api ?? MelloTVAPI.shared
     }
 
-    public func loadLibrary(for profileID: String = "default", forceReload: Bool = false) async {
-        if activeProfileID == profileID {
+    public func loadLibrary(for profileID: String? = nil, forceReload: Bool = false) async {
+        let resolvedID = profileID ?? ProfileStore.shared.activeProfileID ?? ""
+        guard !resolvedID.isEmpty else { return }
+        if activeProfileID == resolvedID {
             if let loadTask { _ = try? await loadTask.value; return }
             if !forceReload, !library.list.isEmpty || !library.progress.isEmpty { return }
         } else {
@@ -88,20 +90,20 @@ public final class LibraryStore {
             library = .empty
             continueWatching = []
         }
-        activeProfileID = profileID
+        activeProfileID = resolvedID
         let generation = UUID()
         loadGeneration = generation
         isLoading = true
         errorMessage = nil
         let api = api
-        let task = Task { try await api.library(for: profileID) }
+        let task = Task { try await api.library(for: resolvedID) }
         loadTask = task
         defer {
             if loadGeneration == generation { isLoading = false; loadTask = nil }
         }
         do {
             let data = try await task.value
-            guard !task.isCancelled, loadGeneration == generation, activeProfileID == profileID else { return }
+            guard !task.isCancelled, loadGeneration == generation, activeProfileID == resolvedID else { return }
             self.library = data
             self.continueWatching = self.computeContinueWatching()
         } catch {
@@ -110,12 +112,15 @@ public final class LibraryStore {
         }
     }
 
-    public func refresh(for profileID: String = "default") async {
-        await loadLibrary(for: profileID, forceReload: true)
+    public func refresh(for profileID: String? = nil) async {
+        let resolvedID = profileID ?? ProfileStore.shared.activeProfileID ?? ""
+        await loadLibrary(for: resolvedID, forceReload: true)
     }
 
-    public func toggleMyList(profileID: String = "default", title: MediaTitle) async {
+    public func toggleMyList(profileID: String? = nil, title: MediaTitle) async {
         guard !isSaving else { return }
+        let resolvedID = profileID ?? ProfileStore.shared.activeProfileID ?? ""
+        guard !resolvedID.isEmpty else { return }
         isSaving = true
 
         let inList = isInMyList(title)
@@ -123,9 +128,9 @@ public final class LibraryStore {
         do {
             let updated: ProfileLibrary
             if inList {
-                updated = try await api.removeFromMyList(profileID: profileID, type: title.type, titleID: title.tmdbID)
+                updated = try await api.removeFromMyList(profileID: resolvedID, type: title.type, titleID: title.tmdbID)
             } else {
-                updated = try await api.addToMyList(profileID: profileID, title: title)
+                updated = try await api.addToMyList(profileID: resolvedID, title: title)
             }
             self.library = updated
             self.continueWatching = self.computeContinueWatching()

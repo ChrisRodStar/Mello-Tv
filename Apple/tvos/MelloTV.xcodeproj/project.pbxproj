@@ -28,6 +28,7 @@
 		TVB0000001400000001 /* CatalogView.swift in Sources */ = {isa = PBXBuildFile; fileRef = TVF0000001400000001 /* CatalogView.swift */; };
 		TVB0000001500000001 /* CatalogStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = TVF0000001500000001 /* CatalogStore.swift */; };
 		TVB0000001600000001 /* LibraryStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = TVF0000001600000001 /* LibraryStore.swift */; };
+		TVB0000001700000001 /* ProfileStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = TVF0000001700000001 /* ProfileStore.swift */; };
 		TVB0000009900000001 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = TVF0000009900000001 /* Assets.xcassets */; };
 		TVB0000009800000001 /* MelloKit in Frameworks */ = {isa = PBXBuildFile; productRef = TVP0000009800000001 /* MelloKit */; };
 /* End PBXBuildFile section */
@@ -54,6 +55,7 @@
 		TVF0000001400000001 /* CatalogView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Features/Catalog/CatalogView.swift"; sourceTree = "<group>"; };
 		TVF0000001500000001 /* CatalogStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Features/Catalog/CatalogStore.swift"; sourceTree = "<group>"; };
 		TVF0000001600000001 /* LibraryStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Features/PersonalLibrary/LibraryStore.swift"; sourceTree = "<group>"; };
+		TVF0000001700000001 /* ProfileStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Features/Profiles/ProfileStore.swift"; sourceTree = "<group>"; };
 		TVF0000009900000001 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Resources/Assets.xcassets; sourceTree = "<group>"; };
 		TV0000000000000000000003 /* MelloTV.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "MelloTV.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -102,6 +104,7 @@
 				TVF0000001400000001 /* CatalogView.swift */,
 				TVF0000001500000001 /* CatalogStore.swift */,
 				TVF0000001600000001 /* LibraryStore.swift */,
+				TVF0000001700000001 /* ProfileStore.swift */,
 				TVF0000009900000001 /* Assets.xcassets */,
 			);
 			path = MelloTV;
@@ -210,6 +213,7 @@
 				TVB0000001400000001 /* CatalogView.swift in Sources */,
 				TVB0000001500000001 /* CatalogStore.swift in Sources */,
 				TVB0000001600000001 /* LibraryStore.swift in Sources */,
+				TVB0000001700000001 /* ProfileStore.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

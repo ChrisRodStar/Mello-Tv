@@ -5,10 +5,7 @@ import MelloKit
 /// appearance preferences, and application version info.
 public struct SettingsView: View {
     @ObservedObject var serverAddress = ServerAddress.shared
-
-    @State private var profiles: [Profile] = []
-    @State private var activeProfileID: String = "default"
-    @State private var isLoadingProfiles = false
+    @ObservedObject var profileStore = ProfileStore.shared
 
     @AppStorage("mello_appearance_mode") private var appearanceModeRaw: String = AppearanceMode.dark.rawValue
 
@@ -52,7 +49,7 @@ public struct SettingsView: View {
         }
         .background(MelloTVTheme.background.ignoresSafeArea())
         .task {
-            await loadProfiles()
+            await profileStore.loadProfiles()
         }
     }
 
@@ -69,13 +66,13 @@ public struct SettingsView: View {
                     .foregroundColor(MelloTVTheme.muted)
             }
 
-            if isLoadingProfiles && profiles.isEmpty {
+            if profileStore.isLoading && profileStore.profiles.isEmpty {
                 ProgressView()
                     .padding(.vertical, 20)
-            } else if !profiles.isEmpty {
+            } else if !profileStore.profiles.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 24) {
-                        ForEach(profiles) { profile in
+                        ForEach(profileStore.profiles) { profile in
                             profileCard(profile)
                         }
                     }
@@ -90,7 +87,7 @@ public struct SettingsView: View {
     }
 
     private func profileCard(_ profile: Profile) -> some View {
-        let isActive = profile.id == activeProfileID
+        let isActive = profile.id == profileStore.activeProfileID
         let color = ProfileColor.color(for: profile.color)
 
         return Button(action: {
@@ -158,11 +155,7 @@ public struct SettingsView: View {
     }
 
     private func selectProfile(_ profile: Profile) {
-        activeProfileID = profile.id
-        if let base = ServerAddress.currentBaseURL {
-            ProfilePersistence.setActiveProfileID(profile.id, for: base)
-        }
-        NotificationCenter.default.post(name: Notification.Name("MelloTVActiveProfileChanged"), object: profile.id)
+        profileStore.selectProfile(profile)
     }
 
     // MARK: - Server Connection Section
@@ -278,28 +271,6 @@ public struct SettingsView: View {
             Text(value)
                 .font(.headline.weight(.semibold))
                 .foregroundColor(.white)
-        }
-    }
-
-    // MARK: - Data Loading
-
-    private func loadProfiles() async {
-        isLoadingProfiles = true
-        defer { isLoadingProfiles = false }
-
-        if let base = ServerAddress.currentBaseURL,
-           let saved = ProfilePersistence.activeProfileID(for: base) {
-            activeProfileID = saved
-        }
-
-        do {
-            let loaded = try await MelloTVAPI.shared.fetchProfiles()
-            self.profiles = loaded
-            if !loaded.contains(where: { $0.id == activeProfileID }), let first = loaded.first {
-                activeProfileID = first.id
-            }
-        } catch {
-            // Keep default
         }
     }
 }
