@@ -65,7 +65,7 @@ public struct CatalogView: View {
 
                     // 3. Curated Shelves: Numbered Top 10, Panoramic 16:9, and Standard 2:3 Shelves
                     curatedShelves
-                        .padding(.bottom, 64)
+                        .padding(.bottom, 140)
                 }
             }
         }
