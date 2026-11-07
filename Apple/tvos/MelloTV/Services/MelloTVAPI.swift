@@ -125,6 +125,27 @@ public final class MelloTVAPI: Sendable {
         return try JSONDecoder().decode(ProfileLibrary.self, from: data)
     }
 
+    // MARK: - Watchlist Management
+    public func addToWatchlist(profileId: String = "default", type: MediaType, id: Int) async throws {
+        let url = try makeURL("api/v1/profiles/\(profileId)/library/\(type.rawValue)/\(id)")
+        var request = URLRequest(url: url)
+        request.httpMethod = "PUT"
+        let (_, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            throw APIError.serverStatus((response as? HTTPURLResponse)?.statusCode ?? -1)
+        }
+    }
+
+    public func removeFromWatchlist(profileId: String = "default", type: MediaType, id: Int) async throws {
+        let url = try makeURL("api/v1/profiles/\(profileId)/library/\(type.rawValue)/\(id)")
+        var request = URLRequest(url: url)
+        request.httpMethod = "DELETE"
+        let (_, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            throw APIError.serverStatus((response as? HTTPURLResponse)?.statusCode ?? -1)
+        }
+    }
+
     // MARK: - Playback Activity Reporting
     public func updatePlaybackActivity(
         sessionId: String,

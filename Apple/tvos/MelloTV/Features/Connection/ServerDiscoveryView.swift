@@ -73,7 +73,7 @@ public struct ServerDiscoveryView: View {
                     }
                 }
             }
-            .frame(maxWidth: 720, alignment: .leading)
+            .frame(maxWidth: 900, alignment: .leading)
 
             // Manual Connection Fallback
             VStack(alignment: .leading, spacing: 16) {
@@ -81,22 +81,26 @@ public struct ServerDiscoveryView: View {
                     .font(.title3.weight(.bold))
                     .foregroundColor(.white)
 
-                HStack(spacing: 16) {
+                HStack(spacing: 24) {
                     TextField("Server IP (e.g. 192.168.1.100)", text: $manualHost)
-                        .frame(width: 400)
+                        .frame(width: 440)
 
                     TextField("Port", text: $manualPort)
-                        .frame(width: 140)
+                        .frame(width: 180)
 
-                    Button("Connect") {
+                    Button {
                         let urlString = "http://\(manualHost.trimmingCharacters(in: .whitespaces)):\(manualPort.trimmingCharacters(in: .whitespaces))"
                         if let url = URL(string: urlString) {
                             Task {
                                 await connect(to: url, name: "Custom Server")
                             }
                         }
+                    } label: {
+                        Text("Connect")
+                            .fontWeight(.semibold)
+                            .frame(minWidth: 140)
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(.borderedProminent)
                 }
 
                 if connectionFailed {
@@ -105,7 +109,7 @@ public struct ServerDiscoveryView: View {
                         .foregroundColor(.red)
                 }
             }
-            .frame(maxWidth: 720, alignment: .leading)
+            .frame(maxWidth: 900, alignment: .leading)
             .padding(.top, 16)
 
             Spacer()

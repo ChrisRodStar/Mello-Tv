@@ -1,7 +1,7 @@
 import SwiftUI
 import MelloKit
 
-/// 10-foot Title Details screen with synopsis, metadata, and episode browsing.
+/// 10-foot Title Details screen with synopsis, metadata, watchlist toggle, resume playback, and episode browsing.
 public struct TitleDetailView: View {
     public let title: MediaTitle
     public let onDismiss: () -> Void
@@ -11,6 +11,11 @@ public struct TitleDetailView: View {
     @State private var episodes: [Episode] = []
     @State private var isLoadingEpisodes = false
     @State private var playingEpisode: Episode?
+    @State private var playingInitialPosition: Double?
+
+    // Library & Watchlist state
+    @State private var isInWatchlist = false
+    @State private var savedProgress: WatchProgress?
 
     public init(title: MediaTitle, onDismiss: @escaping () -> Void, onPlay: @escaping () -> Void) {
         self.title = title
@@ -95,21 +100,71 @@ public struct TitleDetailView: View {
                                 .lineLimit(5)
                                 .padding(.top, 4)
 
-                            HStack(spacing: 24) {
-                                Button(action: onPlay) {
-                                    HStack(spacing: 12) {
-                                        Image(systemName: "play.fill")
-                                        Text(title.type == .movie ? "Play Movie" : "Play S1 E1")
-                                            .fontWeight(.bold)
+                            // Action buttons
+                            HStack(spacing: 20) {
+                                if let progress = savedProgress, progress.position > 30, !progress.completed {
+                                    Button {
+                                        playingInitialPosition = progress.position
+                                        if title.type == .tv {
+                                            selectedSeason = progress.season
+                                            playingEpisode = Episode(number: progress.episode, name: progress.episodeTitle)
+                                        } else {
+                                            onPlay()
+                                        }
+                                    } label: {
+                                        HStack(spacing: 10) {
+                                            Image(systemName: "play.fill")
+                                            Text("Resume (\(formatDuration(progress.position)))")
+                                                .fontWeight(.bold)
+                                        }
+                                        .padding(.horizontal, 24)
+                                        .padding(.vertical, 14)
                                     }
-                                    .padding(.horizontal, 28)
+                                    .buttonStyle(.borderedProminent)
+
+                                    Button {
+                                        playingInitialPosition = 0
+                                        onPlay()
+                                    } label: {
+                                        HStack(spacing: 8) {
+                                            Image(systemName: "arrow.counterclockwise")
+                                            Text("From Start")
+                                        }
+                                        .padding(.horizontal, 20)
+                                        .padding(.vertical, 14)
+                                    }
+                                    .buttonStyle(.bordered)
+                                } else {
+                                    Button(action: onPlay) {
+                                        HStack(spacing: 12) {
+                                            Image(systemName: "play.fill")
+                                            Text(title.type == .movie ? "Play Movie" : "Play S1 E1")
+                                                .fontWeight(.bold)
+                                        }
+                                        .padding(.horizontal, 28)
+                                        .padding(.vertical, 14)
+                                    }
+                                    .buttonStyle(.borderedProminent)
+                                }
+
+                                // Watchlist Toggle Button
+                                Button {
+                                    Task {
+                                        await toggleWatchlist()
+                                    }
+                                } label: {
+                                    HStack(spacing: 8) {
+                                        Image(systemName: isInWatchlist ? "checkmark" : "plus")
+                                        Text(isInWatchlist ? "In Watchlist" : "Watchlist")
+                                    }
+                                    .padding(.horizontal, 20)
                                     .padding(.vertical, 14)
                                 }
-                                .buttonStyle(.borderedProminent)
+                                .buttonStyle(.bordered)
 
                                 Button(action: onDismiss) {
                                     Text("Close")
-                                        .padding(.horizontal, 24)
+                                        .padding(.horizontal, 20)
                                         .padding(.vertical, 14)
                                 }
                                 .buttonStyle(.bordered)
@@ -151,6 +206,7 @@ public struct TitleDetailView: View {
             }
         }
         .task {
+            await loadLibraryStatus()
             if title.type == .tv {
                 await loadEpisodes()
             }
@@ -160,7 +216,11 @@ public struct TitleDetailView: View {
                 title: title,
                 season: selectedSeason,
                 episode: ep.number,
-                onDismiss: { playingEpisode = nil }
+                initialPosition: playingInitialPosition,
+                onDismiss: {
+                    playingEpisode = nil
+                    playingInitialPosition = nil
+                }
             )
         }
     }
@@ -169,6 +229,7 @@ public struct TitleDetailView: View {
     private func episodeCard(_ ep: Episode) -> some View {
         Button {
             playingEpisode = ep
+            playingInitialPosition = nil
         } label: {
             VStack(alignment: .leading, spacing: 10) {
                 AsyncImage(url: ep.stillURL) { phase in
@@ -199,6 +260,36 @@ public struct TitleDetailView: View {
             }
         }
         .buttonStyle(.plain)
+    }
+
+    private func formatDuration(_ seconds: Double) -> String {
+        let mins = Int(seconds) / 60
+        let secs = Int(seconds) % 60
+        return String(format: "%d:%02d", mins, secs)
+    }
+
+    private func loadLibraryStatus() async {
+        do {
+            let lib = try await MelloTVAPI.shared.fetchLibrary(profileId: "default")
+            self.isInWatchlist = lib.list.contains { $0.id == title.id }
+            self.savedProgress = lib.progress.first { $0.title.id == title.id }
+        } catch {
+            print("Failed to load library status: \(error)")
+        }
+    }
+
+    private func toggleWatchlist() async {
+        do {
+            if isInWatchlist {
+                try await MelloTVAPI.shared.removeFromWatchlist(type: title.type, id: title.tmdbID)
+                isInWatchlist = false
+            } else {
+                try await MelloTVAPI.shared.addToWatchlist(type: title.type, id: title.tmdbID)
+                isInWatchlist = true
+            }
+        } catch {
+            print("Watchlist toggle failed: \(error)")
+        }
     }
 
     private func loadEpisodes() async {
