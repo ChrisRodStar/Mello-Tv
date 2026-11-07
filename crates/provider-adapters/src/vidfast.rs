@@ -21,8 +21,25 @@ use stream_core::{
     },
 };
 use stream_provider_codecs::vidfast as codec;
+use stream_provider_sdk::http::Request;
 
 const ORIGIN: &str = "https://vidfast.vc";
+
+fn material_post(
+    url: impl Into<String>,
+    embed_url: &str,
+    limit: u32,
+    material: &codec::ProtocolMaterial,
+) -> Request {
+    let mut req = post(url, embed_url, limit);
+    req.timeout_ms = 2_000;
+    req.headers.push(header("Origin", ORIGIN));
+    if !material.csrf_token().is_empty() {
+        req.headers
+            .push(header("X-Csrf-Token", material.csrf_token()));
+    }
+    req
+}
 
 fn material_cache() -> &'static RwLock<BTreeMap<String, (codec::ProtocolMaterial, Instant)>> {
     static CACHE: OnceLock<RwLock<BTreeMap<String, (codec::ProtocolMaterial, Instant)>>> =
@@ -76,14 +93,14 @@ pub fn resolve(lookup: &Lookup, host: &dyn ProviderHost) -> Result<AdapterResult
 
     let player_url = format!("{ORIGIN}{player_script}");
     let now = Instant::now();
-    let mut material_opt = material_cache().read().ok().and_then(|cache| {
+    let material = if let Some(m) = material_cache().read().ok().and_then(|cache| {
         cache
             .get(&player_url)
             .filter(|(_, exp)| *exp > now)
             .map(|(m, _)| m.clone())
-    });
-
-    if material_opt.is_none() {
+    }) {
+        m
+    } else {
         let mut player_req = get(&player_url, &embed_url, 3 * 1024 * 1024);
         player_req.timeout_ms = 2_000;
         let player = fetch(host, player_req)?;
@@ -95,9 +112,8 @@ pub fn resolve(lookup: &Lookup, host: &dyn ProviderHost) -> Result<AdapterResult
                 (mat.clone(), now + Duration::from_secs(3600 * 24)),
             );
         }
-        material_opt = Some(mat);
-    }
-    let material = material_opt.ok_or(AdapterError::Protocol("VidFast player version"))?;
+        mat
+    };
 
     let salt = host.random_bytes(16)?;
     let timestamp = host.now_unix_ms()?;
@@ -105,27 +121,13 @@ pub fn resolve(lookup: &Lookup, host: &dyn ProviderHost) -> Result<AdapterResult
         .map_err(|_| AdapterError::Protocol("VidFast pack request"))?;
 
     let challenge_url = format!("{ORIGIN}{}/JgQXcWPNH7s/{packed}", material.root());
-    let mut req = post(challenge_url, &embed_url, 4096);
-    req.timeout_ms = 2_000;
-    req.headers.push(header("Origin", ORIGIN));
-    if !material.csrf_token().is_empty() {
-        req.headers
-            .push(header("X-Csrf-Token", material.csrf_token()));
-    }
-    let challenge_resp = fetch(host, req)?;
+    let challenge_resp = fetch(host, material_post(challenge_url, &embed_url, 4096, &material))?;
 
     let ticket = codec::challenge_token(&challenge_resp.body)
         .map_err(|_| AdapterError::Protocol("VidFast challenge token"))?;
 
     let list_url = format!("{ORIGIN}{}/dBWKuO8aW6U/{ticket}", material.root());
-    let mut req = post(list_url, &embed_url, 256 * 1024);
-    req.timeout_ms = 2_000;
-    req.headers.push(header("Origin", ORIGIN));
-    if !material.csrf_token().is_empty() {
-        req.headers
-            .push(header("X-Csrf-Token", material.csrf_token()));
-    }
-    let list_resp = fetch(host, req)?;
+    let list_resp = fetch(host, material_post(list_url, &embed_url, 256 * 1024, &material))?;
 
     let servers_encoded = std::str::from_utf8(&list_resp.body)
         .map_err(|_| AdapterError::Protocol("VidFast servers encoding"))?;
@@ -147,14 +149,7 @@ pub fn resolve(lookup: &Lookup, host: &dyn ProviderHost) -> Result<AdapterResult
         }
         seen_servers.insert(server.name.clone());
         let unlock_url = format!("{ORIGIN}{}/M6SyMXJBpeg/{}", material.root(), server.data);
-        let mut req = post(unlock_url, &embed_url, 256 * 1024);
-        req.timeout_ms = 2_000;
-        req.headers.push(header("Origin", ORIGIN));
-        if !material.csrf_token().is_empty() {
-            req.headers
-                .push(header("X-Csrf-Token", material.csrf_token()));
-        }
-        unlock_requests.push(req);
+        unlock_requests.push(material_post(unlock_url, &embed_url, 256 * 1024, &material));
         active_servers.push(server.name);
     }
 

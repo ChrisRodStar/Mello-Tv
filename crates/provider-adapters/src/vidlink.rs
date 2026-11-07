@@ -69,7 +69,7 @@ pub fn resolve(lookup: &Lookup, host: &dyn ProviderHost) -> Result<AdapterResult
         .map_err(|_| AdapterError::Protocol("VidLink token"))?;
 
     let sources_url = format!("{ORIGIN}{api}");
-    let sources = match fetch_session(host, &mut jar, sources_url.clone(), &referer, 1024 * 1024) {
+    let sources = match fetch_session(host, &mut jar, sources_url, &referer, 1024 * 1024) {
         Ok(resp) => resp,
         Err(_) if cached => {
             if let Ok(mut guard) = cached_player().write() {

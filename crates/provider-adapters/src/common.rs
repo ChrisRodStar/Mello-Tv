@@ -57,10 +57,15 @@ pub fn header(name: &str, value: impl Into<String>) -> Header {
         value: value.into(),
     }
 }
-pub fn get(url: impl Into<String>, referer: &str, limit: u32) -> Request {
+fn request_with_method(
+    method: &'static str,
+    url: impl Into<String>,
+    referer: &str,
+    limit: u32,
+) -> Request {
     Request {
         url: url.into(),
-        method: "GET".into(),
+        method: method.into(),
         headers: vec![
             header("User-Agent", USER_AGENT),
             header("Accept", "*/*"),
@@ -71,19 +76,13 @@ pub fn get(url: impl Into<String>, referer: &str, limit: u32) -> Request {
         timeout_ms: 3_000,
     }
 }
+
+pub fn get(url: impl Into<String>, referer: &str, limit: u32) -> Request {
+    request_with_method("GET", url, referer, limit)
+}
+
 pub fn post(url: impl Into<String>, referer: &str, limit: u32) -> Request {
-    Request {
-        url: url.into(),
-        method: "POST".into(),
-        headers: vec![
-            header("User-Agent", USER_AGENT),
-            header("Accept", "*/*"),
-            header("Referer", referer),
-        ],
-        body: Vec::new(),
-        max_response_bytes: limit,
-        timeout_ms: 3_000,
-    }
+    request_with_method("POST", url, referer, limit)
 }
 pub fn checked_response(request: &Request, response: Response) -> Result<Response, AdapterError> {
     if request.max_response_bytes > 0 && response.body.len() > request.max_response_bytes as usize {

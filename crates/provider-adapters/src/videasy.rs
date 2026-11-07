@@ -441,7 +441,7 @@ mod tests {
 
         let title = ProviderTitle::episode(TmdbId::try_from(tmdb_id).unwrap(), 1, 1).unwrap();
         let lookup = Lookup {
-            title: title.clone(),
+            title,
             preferences: QualityPreference::default(),
             device: DeviceCapabilities::default(),
             context_key: String::new(),

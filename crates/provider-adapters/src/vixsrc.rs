@@ -87,7 +87,7 @@ pub fn resolve(lookup: &Lookup, host: &dyn ProviderHost) -> Result<AdapterResult
         server: "VixSrc".into(),
         selected_variant_url: String::new(),
         url: master_url,
-        provider: provider.clone(),
+        provider,
         format: StreamFormat::Hls,
         title: lookup.title.clone(),
         fetch_context: FetchContext {
