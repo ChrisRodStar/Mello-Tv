@@ -195,3 +195,13 @@ public struct Episode: Codable, Hashable, Identifiable, Sendable {
     }
 }
 
+public struct SeasonDetails: Codable, Sendable {
+    public let seasonNumber: Int
+    public let episodes: [Episode]
+
+    public init(seasonNumber: Int, episodes: [Episode] = []) {
+        self.seasonNumber = seasonNumber
+        self.episodes = episodes
+    }
+}
+
