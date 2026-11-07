@@ -115,6 +115,12 @@ public struct ServerDiscoveryView: View {
             Spacer()
         }
         .padding(.horizontal, 64)
+        .onAppear {
+            serverAddress.startDiscovery()
+        }
+        .onDisappear {
+            serverAddress.stopDiscovery()
+        }
     }
 
     private func connect(to url: URL, name: String) async {

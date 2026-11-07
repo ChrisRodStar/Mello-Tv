@@ -1,43 +1,44 @@
 import SwiftUI
+import MelloKit
 
 /// Top-level tvOS tab navigation bar following Apple TV Human Interface Guidelines.
 public struct MainTabView: View {
-    @State private var selectedTab = Tab.home
-
-    public enum Tab: Hashable {
-        case home
-        case library
-        case search
-        case settings
-    }
+    @State private var selectedTab: AppTab = .home
 
     public init() {}
 
     public var body: some View {
         TabView(selection: $selectedTab) {
-            HomeView()
+            CatalogView(category: .home)
                 .tabItem {
-                    Label("Home", systemImage: "house.fill")
+                    Label(AppTab.home.title, systemImage: AppTab.home.systemImage)
                 }
-                .tag(Tab.home)
+                .tag(AppTab.home)
 
-            LibraryView()
+            CatalogView(category: .movies)
                 .tabItem {
-                    Label("Library", systemImage: "square.stack.fill")
+                    Label(AppTab.movies.title, systemImage: AppTab.movies.systemImage)
                 }
-                .tag(Tab.library)
+                .tag(AppTab.movies)
+
+            CatalogView(category: .tv)
+                .tabItem {
+                    Label(AppTab.tv.title, systemImage: AppTab.tv.systemImage)
+                }
+                .tag(AppTab.tv)
 
             SearchView()
                 .tabItem {
-                    Label("Search", systemImage: "magnifyingglass")
+                    Label(AppTab.search.title, systemImage: AppTab.search.systemImage)
                 }
-                .tag(Tab.search)
+                .tag(AppTab.search)
 
             SettingsView()
                 .tabItem {
-                    Label("Settings", systemImage: "gearshape.fill")
+                    Label(AppTab.settings.title, systemImage: AppTab.settings.systemImage)
                 }
-                .tag(Tab.settings)
+                .tag(AppTab.settings)
         }
+        .background(MelloTVTheme.background.ignoresSafeArea())
     }
 }

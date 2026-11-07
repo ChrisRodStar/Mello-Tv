@@ -14,13 +14,20 @@
 		TVB0000000400000001 /* FocusCardStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = TVF0000000400000001 /* FocusCardStyle.swift */; };
 		TVB0000000500000001 /* PosterCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = TVF0000000500000001 /* PosterCard.swift */; };
 		TVB0000000600000001 /* HeroBillboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = TVF0000000600000001 /* HeroBillboardView.swift */; };
-		TVB0000000700000001 /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = TVF0000000700000001 /* HomeView.swift */; };
 		TVB0000000800000001 /* TitleDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = TVF0000000800000001 /* TitleDetailView.swift */; };
 		TVB0000000900000001 /* TVPlayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = TVF0000000900000001 /* TVPlayerView.swift */; };
-		TVB0000000A00000001 /* LibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = TVF0000000A00000001 /* LibraryView.swift */; };
 		TVB0000000B00000001 /* SearchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = TVF0000000B00000001 /* SearchView.swift */; };
 		TVB0000000C00000001 /* ServerDiscoveryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = TVF0000000C00000001 /* ServerDiscoveryView.swift */; };
 		TVB0000000D00000001 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = TVF0000000D00000001 /* SettingsView.swift */; };
+		TVB0000000E00000001 /* AppTab.swift in Sources */ = {isa = PBXBuildFile; fileRef = TVF0000000E00000001 /* AppTab.swift */; };
+		TVB0000000F00000001 /* FeaturedCarouselView.swift in Sources */ = {isa = PBXBuildFile; fileRef = TVF0000000F00000001 /* FeaturedCarouselView.swift */; };
+		TVB0000001000000001 /* NumberedShelf.swift in Sources */ = {isa = PBXBuildFile; fileRef = TVF0000001000000001 /* NumberedShelf.swift */; };
+		TVB0000001100000001 /* PanoramicShelf.swift in Sources */ = {isa = PBXBuildFile; fileRef = TVF0000001100000001 /* PanoramicShelf.swift */; };
+		TVB0000001200000001 /* ContinueWatchingShelf.swift in Sources */ = {isa = PBXBuildFile; fileRef = TVF0000001200000001 /* ContinueWatchingShelf.swift */; };
+		TVB0000001300000001 /* CatalogCategory.swift in Sources */ = {isa = PBXBuildFile; fileRef = TVF0000001300000001 /* CatalogCategory.swift */; };
+		TVB0000001400000001 /* CatalogView.swift in Sources */ = {isa = PBXBuildFile; fileRef = TVF0000001400000001 /* CatalogView.swift */; };
+		TVB0000001500000001 /* CatalogStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = TVF0000001500000001 /* CatalogStore.swift */; };
+		TVB0000001600000001 /* LibraryStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = TVF0000001600000001 /* LibraryStore.swift */; };
 		TVB0000009900000001 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = TVF0000009900000001 /* Assets.xcassets */; };
 		TVB0000009800000001 /* MelloKit in Frameworks */ = {isa = PBXBuildFile; productRef = TVP0000009800000001 /* MelloKit */; };
 /* End PBXBuildFile section */
@@ -31,15 +38,22 @@
 		TVF0000000200000001 /* ServerAddress.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Services/ServerAddress.swift"; sourceTree = "<group>"; };
 		TVF0000000300000001 /* MelloTVAPI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Services/MelloTVAPI.swift"; sourceTree = "<group>"; };
 		TVF0000000400000001 /* FocusCardStyle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "UI/FocusCardStyle.swift"; sourceTree = "<group>"; };
-		TVF0000000500000001 /* PosterCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "UI/PosterCard.swift"; sourceTree = "<group>"; };
+		TVF0000000500000001 /* PosterCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "UI/Components/PosterCard.swift"; sourceTree = "<group>"; };
 		TVF0000000600000001 /* HeroBillboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "UI/HeroBillboardView.swift"; sourceTree = "<group>"; };
-		TVF0000000700000001 /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Features/Home/HomeView.swift"; sourceTree = "<group>"; };
 		TVF0000000800000001 /* TitleDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Features/Details/TitleDetailView.swift"; sourceTree = "<group>"; };
 		TVF0000000900000001 /* TVPlayerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Features/Playback/TVPlayerView.swift"; sourceTree = "<group>"; };
-		TVF0000000A00000001 /* LibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Features/Library/LibraryView.swift"; sourceTree = "<group>"; };
 		TVF0000000B00000001 /* SearchView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Features/Search/SearchView.swift"; sourceTree = "<group>"; };
 		TVF0000000C00000001 /* ServerDiscoveryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Features/Connection/ServerDiscoveryView.swift"; sourceTree = "<group>"; };
 		TVF0000000D00000001 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Features/Settings/SettingsView.swift"; sourceTree = "<group>"; };
+		TVF0000000E00000001 /* AppTab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "App/Navigation/AppTab.swift"; sourceTree = "<group>"; };
+		TVF0000000F00000001 /* FeaturedCarouselView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "UI/Components/FeaturedCarouselView.swift"; sourceTree = "<group>"; };
+		TVF0000001000000001 /* NumberedShelf.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "UI/Components/NumberedShelf.swift"; sourceTree = "<group>"; };
+		TVF0000001100000001 /* PanoramicShelf.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "UI/Components/PanoramicShelf.swift"; sourceTree = "<group>"; };
+		TVF0000001200000001 /* ContinueWatchingShelf.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "UI/Components/ContinueWatchingShelf.swift"; sourceTree = "<group>"; };
+		TVF0000001300000001 /* CatalogCategory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Features/Catalog/CatalogCategory.swift"; sourceTree = "<group>"; };
+		TVF0000001400000001 /* CatalogView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Features/Catalog/CatalogView.swift"; sourceTree = "<group>"; };
+		TVF0000001500000001 /* CatalogStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Features/Catalog/CatalogStore.swift"; sourceTree = "<group>"; };
+		TVF0000001600000001 /* LibraryStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Features/PersonalLibrary/LibraryStore.swift"; sourceTree = "<group>"; };
 		TVF0000009900000001 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Resources/Assets.xcassets; sourceTree = "<group>"; };
 		TV0000000000000000000003 /* MelloTV.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "MelloTV.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -74,13 +88,20 @@
 				TVF0000000400000001 /* FocusCardStyle.swift */,
 				TVF0000000500000001 /* PosterCard.swift */,
 				TVF0000000600000001 /* HeroBillboardView.swift */,
-				TVF0000000700000001 /* HomeView.swift */,
 				TVF0000000800000001 /* TitleDetailView.swift */,
 				TVF0000000900000001 /* TVPlayerView.swift */,
-				TVF0000000A00000001 /* LibraryView.swift */,
 				TVF0000000B00000001 /* SearchView.swift */,
 				TVF0000000C00000001 /* ServerDiscoveryView.swift */,
 				TVF0000000D00000001 /* SettingsView.swift */,
+				TVF0000000E00000001 /* AppTab.swift */,
+				TVF0000000F00000001 /* FeaturedCarouselView.swift */,
+				TVF0000001000000001 /* NumberedShelf.swift */,
+				TVF0000001100000001 /* PanoramicShelf.swift */,
+				TVF0000001200000001 /* ContinueWatchingShelf.swift */,
+				TVF0000001300000001 /* CatalogCategory.swift */,
+				TVF0000001400000001 /* CatalogView.swift */,
+				TVF0000001500000001 /* CatalogStore.swift */,
+				TVF0000001600000001 /* LibraryStore.swift */,
 				TVF0000009900000001 /* Assets.xcassets */,
 			);
 			path = MelloTV;
@@ -175,13 +196,20 @@
 				TVB0000000400000001 /* FocusCardStyle.swift in Sources */,
 				TVB0000000500000001 /* PosterCard.swift in Sources */,
 				TVB0000000600000001 /* HeroBillboardView.swift in Sources */,
-				TVB0000000700000001 /* HomeView.swift in Sources */,
 				TVB0000000800000001 /* TitleDetailView.swift in Sources */,
 				TVB0000000900000001 /* TVPlayerView.swift in Sources */,
-				TVB0000000A00000001 /* LibraryView.swift in Sources */,
 				TVB0000000B00000001 /* SearchView.swift in Sources */,
 				TVB0000000C00000001 /* ServerDiscoveryView.swift in Sources */,
 				TVB0000000D00000001 /* SettingsView.swift in Sources */,
+				TVB0000000E00000001 /* AppTab.swift in Sources */,
+				TVB0000000F00000001 /* FeaturedCarouselView.swift in Sources */,
+				TVB0000001000000001 /* NumberedShelf.swift in Sources */,
+				TVB0000001100000001 /* PanoramicShelf.swift in Sources */,
+				TVB0000001200000001 /* ContinueWatchingShelf.swift in Sources */,
+				TVB0000001300000001 /* CatalogCategory.swift in Sources */,
+				TVB0000001400000001 /* CatalogView.swift in Sources */,
+				TVB0000001500000001 /* CatalogStore.swift in Sources */,
+				TVB0000001600000001 /* LibraryStore.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
