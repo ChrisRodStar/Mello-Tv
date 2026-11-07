@@ -11,11 +11,29 @@ public struct TVCardFocusModifier: ViewModifier {
             .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .stroke(isFocused ? Color.white.opacity(0.8) : Color.clear, lineWidth: 4)
+                    .strokeBorder(
+                        LinearGradient(
+                            colors: isFocused ? [
+                                Color.white.opacity(0.65),
+                                Color.white.opacity(0.20)
+                            ] : [
+                                Color.white.opacity(0.08),
+                                Color.white.opacity(0.02)
+                            ],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        ),
+                        lineWidth: isFocused ? 1.5 : 0.5
+                    )
             )
-            .shadow(color: isFocused ? Color.black.opacity(0.6) : Color.clear, radius: isFocused ? 24 : 0, y: isFocused ? 14 : 0)
-            .scaleEffect(isFocused ? 1.06 : 1.0)
-            .animation(.spring(response: 0.32, dampingFraction: 0.72), value: isFocused)
+            .shadow(
+                color: isFocused ? Color.black.opacity(0.65) : Color.black.opacity(0.18),
+                radius: isFocused ? 26 : 6,
+                x: 0,
+                y: isFocused ? 14 : 3
+            )
+            .scaleEffect(isFocused ? 1.05 : 1.0)
+            .animation(.spring(response: 0.30, dampingFraction: 0.78), value: isFocused)
     }
 }
 

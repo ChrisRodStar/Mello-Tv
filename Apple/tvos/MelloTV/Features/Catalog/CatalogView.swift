@@ -29,7 +29,7 @@ public struct CatalogView: View {
 
     public var body: some View {
         ScrollView(.vertical, showsIndicators: false) {
-            VStack(alignment: .leading, spacing: 36) {
+            VStack(alignment: .leading, spacing: 48) {
                 if isLoading && sections.isEmpty && featuredTitles.isEmpty {
                     loadingStage
                 } else if let error = errorMessage, sections.isEmpty {
@@ -119,7 +119,7 @@ public struct CatalogView: View {
 
     @ViewBuilder
     private var curatedShelves: some View {
-        VStack(alignment: .leading, spacing: 36) {
+        VStack(alignment: .leading, spacing: 44) {
             ForEach(Array(sections.enumerated()), id: \.element.id) { index, section in
                 if index == 0 && section.titles.count >= 4 {
                     // First shelf: Numbered Top 10 Ranking

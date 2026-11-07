@@ -118,26 +118,28 @@ private struct NumberedPosterTile: View {
                         .overlay(
                             RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                                 .strokeBorder(
-                                    isFocused ? Color.white : MelloTVTheme.subtleBorder,
-                                    lineWidth: isFocused ? 4 : 0.75
+                                    LinearGradient(
+                                        colors: isFocused ? [
+                                            Color.white.opacity(0.65),
+                                            Color.white.opacity(0.20)
+                                        ] : [
+                                            Color.white.opacity(0.08),
+                                            Color.white.opacity(0.02)
+                                        ],
+                                        startPoint: .top,
+                                        endPoint: .bottom
+                                    ),
+                                    lineWidth: isFocused ? 1.5 : 0.5
                                 )
                         )
                         .shadow(
-                            color: isFocused ? Color.black.opacity(0.7) : Color.black.opacity(0.2),
+                            color: isFocused ? Color.black.opacity(0.65) : Color.black.opacity(0.18),
                             radius: isFocused ? 24 : 6,
                             x: 0,
                             y: isFocused ? 14 : 3
                         )
-                        .overlay {
-                            if isFocused {
-                                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                                    .strokeBorder(MelloTVTheme.accentGlow, lineWidth: 8)
-                                    .blur(radius: 6)
-                                    .opacity(0.6)
-                            }
-                        }
-                        .scaleEffect(isFocused ? 1.06 : 1.0)
-                        .animation(.spring(response: 0.32, dampingFraction: 0.75), value: isFocused)
+                        .scaleEffect(isFocused ? 1.05 : 1.0)
+                        .animation(.spring(response: 0.30, dampingFraction: 0.78), value: isFocused)
 
                     // Title & Year / Rating below poster
                     VStack(alignment: .leading, spacing: 4) {
