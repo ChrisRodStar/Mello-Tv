@@ -1,11 +1,11 @@
 //! VidZee's current plain-stream endpoint (`/streams/...?...&e=0`).
 use crate::{
     AdapterError, ProviderHost,
-    common::{self, batch, get, header},
+    common::{self, batch, header},
     destination::public_url,
 };
 use serde::Deserialize;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use stream_core::{
     domain::MediaType,
     providers::{
@@ -13,11 +13,19 @@ use stream_core::{
         PublicResourceContext, StreamFormat,
     },
 };
+use stream_provider_sdk::http::Request;
 
 const API: &str = "https://core.vidzee.wtf";
 const PLAYER: &str = "https://player.vidzee.wtf";
-const SERVERS: [&str; 4] = ["dcloud", "tik", "v6:Hindi", "v6:English"];
+const PLAYER_REFERER: &str = "https://player.vidzee.wtf/";
+const SERVERS: [(&str, &str); 4] = [
+    ("dcloud", "?s=dcloud&e=0"),
+    ("tik", "?s=tik&e=0"),
+    ("v6:Hindi", "?s=v6%3AHindi&e=0"),
+    ("v6:English", "?s=v6%3AEnglish&e=0"),
+];
 const LIMIT: u32 = 128 * 1024;
+
 #[derive(Deserialize)]
 struct Stream {
     url: String,
@@ -26,6 +34,7 @@ struct Stream {
     #[serde(default)]
     subtitles: Vec<Subtitle>,
 }
+
 #[derive(Deserialize)]
 struct Subtitle {
     url: String,
@@ -34,19 +43,53 @@ struct Subtitle {
     #[serde(default)]
     language: String,
 }
+
+#[inline]
+fn detect_format(url: &str) -> Option<StreamFormat> {
+    let path = url.split('?').next()?;
+    let bytes = path.as_bytes();
+    if bytes.len() >= 5 && bytes[bytes.len() - 5..].eq_ignore_ascii_case(b".m3u8") {
+        Some(StreamFormat::Hls)
+    } else if bytes.len() >= 4 && bytes[bytes.len() - 4..].eq_ignore_ascii_case(b".mpd") {
+        Some(StreamFormat::Dash)
+    } else if bytes.len() >= 4 && bytes[bytes.len() - 4..].eq_ignore_ascii_case(b".mp4") {
+        Some(StreamFormat::Mp4)
+    } else {
+        None
+    }
+}
+
+fn candidate_id(server: &str, source_url: &str) -> String {
+    let hash = stream_provider_codecs::sha256(&[source_url.as_bytes()]);
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut id = String::with_capacity(7 + server.len() + 1 + 24);
+    id.push_str("vidzee-");
+    id.push_str(server);
+    id.push('-');
+    for &b in &hash[..12] {
+        id.push(HEX[(b >> 4) as usize] as char);
+        id.push(HEX[(b & 0x0f) as usize] as char);
+    }
+    id
+}
+
+#[cfg(test)]
 fn stream_context(url: &str, raw: &serde_json::Value) -> Result<FetchContext, AdapterError> {
+    let destination = public_url(url)?;
+    stream_context_inner(&destination, raw)
+}
+
+fn stream_context_inner(
+    destination: &url::Url,
+    raw: &serde_json::Value,
+) -> Result<FetchContext, AdapterError> {
     let object = raw
         .as_object()
         .ok_or(AdapterError::Protocol("VidZee stream headers"))?;
     if object.len() > 32 {
         return Err(AdapterError::Protocol("VidZee stream header count"));
     }
-    let destination = public_url(url)?;
     let destination_origin = destination.origin().ascii_serialization();
-    let player_origin = url::Url::parse(PLAYER)
-        .map_err(|_| AdapterError::Protocol("VidZee player origin"))?
-        .origin()
-        .ascii_serialization();
     let mut headers = BTreeMap::new();
     for (name, value) in object {
         let value = value
@@ -56,24 +99,30 @@ fn stream_context(url: &str, raw: &serde_json::Value) -> Result<FetchContext, Ad
             return Err(AdapterError::Protocol("VidZee stream header value"));
         }
         let canonical = if name.eq_ignore_ascii_case("referer") {
-            let referer = public_url(value)?;
-            let origin = referer.origin().ascii_serialization();
-            if origin != destination_origin && origin != player_origin {
-                return Err(AdapterError::Protocol("VidZee stream referer origin"));
+            if value != PLAYER_REFERER && value != PLAYER && value != destination_origin {
+                let referer = public_url(value)?;
+                let origin = referer.origin().ascii_serialization();
+                if origin != destination_origin && origin != PLAYER {
+                    return Err(AdapterError::Protocol("VidZee stream referer origin"));
+                }
             }
             "Referer"
         } else if name.eq_ignore_ascii_case("origin") {
-            let origin = url::Url::parse(value)
-                .map_err(|_| AdapterError::Protocol("VidZee stream origin"))?;
-            if origin.path() != "/"
-                || origin.query().is_some()
-                || origin.fragment().is_some()
-                || origin.username() != ""
-                || origin.password().is_some()
-                || (origin.origin().ascii_serialization() != destination_origin
-                    && origin.origin().ascii_serialization() != player_origin)
-            {
-                return Err(AdapterError::Protocol("VidZee stream origin"));
+            if value != PLAYER && value != destination_origin {
+                let origin = url::Url::parse(value)
+                    .map_err(|_| AdapterError::Protocol("VidZee stream origin"))?;
+                if origin.path() != "/"
+                    || origin.query().is_some()
+                    || origin.fragment().is_some()
+                    || !origin.username().is_empty()
+                    || origin.password().is_some()
+                {
+                    return Err(AdapterError::Protocol("VidZee stream origin"));
+                }
+                let origin_str = origin.origin().ascii_serialization();
+                if origin_str != destination_origin && origin_str != PLAYER {
+                    return Err(AdapterError::Protocol("VidZee stream origin"));
+                }
             }
             "Origin"
         } else if name.eq_ignore_ascii_case("user-agent") {
@@ -93,53 +142,68 @@ fn stream_context(url: &str, raw: &serde_json::Value) -> Result<FetchContext, Ad
             return Err(AdapterError::Protocol("VidZee duplicate stream header"));
         }
     }
-    let mut context = FetchContext {
-        scopes: Vec::new(),
+    let mut scope_origin = String::with_capacity(destination_origin.len() + 1);
+    scope_origin.push_str(&destination_origin);
+    scope_origin.push('/');
+    Ok(FetchContext {
+        scopes: vec![FetchScope {
+            headers,
+            origin: scope_origin,
+            path_prefix: "/".into(),
+            ..Default::default()
+        }],
         public_resources: Some(PublicResourceContext {
             origin: PLAYER.into(),
-            referer: format!("{PLAYER}/"),
+            referer: PLAYER_REFERER.into(),
         }),
-    };
-    context.scopes.push(FetchScope {
-        headers,
-        origin: format!("{destination_origin}/"),
-        path_prefix: "/".into(),
-        ..Default::default()
-    });
-    Ok(context)
+    })
 }
 
 pub fn resolve(lookup: &Lookup, host: &dyn ProviderHost) -> Result<AdapterResult, AdapterError> {
     lookup.title.validate().map_err(|_| AdapterError::Input)?;
-    let path = if lookup.title.media_type == MediaType::Tv {
-        format!(
-            "tv/{}/{}/{}",
+    let base_url = match lookup.title.media_type {
+        MediaType::Tv => format!(
+            "{API}/streams/tv/{}/{}/{}",
             lookup.title.tmdb_id.get(),
             lookup.title.season.ok_or(AdapterError::Input)?,
             lookup.title.episode.ok_or(AdapterError::Input)?
-        )
-    } else {
-        format!("movie/{}", lookup.title.tmdb_id.get())
+        ),
+        _ => format!("{API}/streams/movie/{}", lookup.title.tmdb_id.get()),
     };
+
+    let mut base_headers = vec![
+        header("User-Agent", common::USER_AGENT),
+        header("Accept", "*/*"),
+        header("Referer", PLAYER_REFERER),
+        header("Origin", PLAYER),
+    ];
+
     let mut requests = Vec::with_capacity(SERVERS.len());
-    for server in SERVERS {
-        let mut endpoint = url::Url::parse(&format!("{API}/streams/{path}"))
-            .map_err(|_| AdapterError::Protocol("VidZee endpoint"))?;
-        endpoint
-            .query_pairs_mut()
-            .append_pair("s", server)
-            .append_pair("e", "0");
-        let mut request = get(endpoint.as_str(), &format!("{PLAYER}/"), LIMIT);
-        request.timeout_ms = 3_000;
-        request.headers.push(header("Origin", PLAYER));
-        requests.push(request);
+    for (i, &(_, query)) in SERVERS.iter().enumerate() {
+        let mut url = String::with_capacity(base_url.len() + query.len());
+        url.push_str(&base_url);
+        url.push_str(query);
+        let headers = if i + 1 == SERVERS.len() {
+            std::mem::take(&mut base_headers)
+        } else {
+            base_headers.clone()
+        };
+        requests.push(Request {
+            url,
+            method: "GET".into(),
+            headers,
+            body: Vec::new(),
+            max_response_bytes: LIMIT,
+            timeout_ms: 3_000,
+        });
     }
+
     let responses = batch(host, requests)?;
     let provider = common::provider_id("vidzee")?;
-    let mut candidates = Vec::new();
+    let mut candidates = Vec::with_capacity(SERVERS.len());
     let mut issues = Vec::new();
-    let mut seen = BTreeSet::new();
-    for (server, response) in SERVERS.into_iter().zip(responses) {
+
+    for ((server, _), response) in SERVERS.into_iter().zip(responses) {
         if candidates.len() >= 32 {
             break;
         }
@@ -157,34 +221,34 @@ pub fn resolve(lookup: &Lookup, host: &dyn ProviderHost) -> Result<AdapterResult
                 continue;
             }
         };
-        if stream.url.len() > 8192 || public_url(&stream.url).is_err() || seen.contains(&stream.url)
+        if stream.url.is_empty()
+            || stream.url.len() > 8192
+            || candidates
+                .iter()
+                .any(|c: &CandidateStream| c.url == stream.url)
         {
             continue;
         }
-        let fetch_context = match stream_context(&stream.url, &stream.headers) {
+        let destination = match public_url(&stream.url) {
+            Ok(d) => d,
+            Err(_) => continue,
+        };
+        let fetch_context = match stream_context_inner(&destination, &stream.headers) {
             Ok(c) => c,
             Err(e) => {
                 issues.push(common::issue(&e, "headers"));
                 continue;
             }
         };
-        let lower = stream.url.to_ascii_lowercase();
-        let format = if lower
-            .split('?')
-            .next()
-            .is_some_and(|p| p.ends_with(".m3u8"))
-        {
-            StreamFormat::Hls
-        } else if lower.split('?').next().is_some_and(|p| p.ends_with(".mpd")) {
-            StreamFormat::Dash
-        } else if lower.split('?').next().is_some_and(|p| p.ends_with(".mp4")) {
-            StreamFormat::Mp4
-        } else {
-            issues.push(common::issue(
-                &AdapterError::Protocol("VidZee stream format"),
-                "server",
-            ));
-            continue;
+        let format = match detect_format(&stream.url) {
+            Some(f) => f,
+            None => {
+                issues.push(common::issue(
+                    &AdapterError::Protocol("VidZee stream format"),
+                    "server",
+                ));
+                continue;
+            }
         };
         let mut metadata = Metadata::default();
         if !stream.language.is_empty()
@@ -193,7 +257,7 @@ pub fn resolve(lookup: &Lookup, host: &dyn ProviderHost) -> Result<AdapterResult
         {
             metadata.provider_data.insert(
                 "audio_language_claim".into(),
-                serde_json::json!(stream.language),
+                serde_json::Value::String(stream.language),
             );
         }
         metadata.tracks = stream
@@ -206,7 +270,7 @@ pub fn resolve(lookup: &Lookup, host: &dyn ProviderHost) -> Result<AdapterResult
                 {
                     return None;
                 }
-                let url = public_url(&subtitle.url).ok()?;
+                public_url(&subtitle.url).ok()?;
                 Some(stream_core::providers::Track {
                     kind: "subtitles".into(),
                     language: subtitle.language,
@@ -215,18 +279,16 @@ pub fn resolve(lookup: &Lookup, host: &dyn ProviderHost) -> Result<AdapterResult
                     } else {
                         subtitle.label
                     },
-                    url: url.to_string(),
+                    url: subtitle.url,
                     ..Default::default()
                 })
             })
             .collect();
+
         let source_url = stream.url;
-        seen.insert(source_url.clone());
+        let id = candidate_id(server, &source_url);
         candidates.push(CandidateStream {
-            id: format!(
-                "vidzee-{server}-{}",
-                common::hash_id(&[source_url.as_bytes()])
-            ),
+            id,
             server: server.into(),
             url: source_url,
             format,

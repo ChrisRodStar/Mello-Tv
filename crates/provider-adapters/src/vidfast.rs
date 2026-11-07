@@ -27,7 +27,18 @@ const ORIGIN: &str = "https://vidfast.vc";
 fn material_cache() -> &'static RwLock<BTreeMap<String, (codec::ProtocolMaterial, Instant)>> {
     static CACHE: OnceLock<RwLock<BTreeMap<String, (codec::ProtocolMaterial, Instant)>>> =
         OnceLock::new();
-    CACHE.get_or_init(|| RwLock::new(BTreeMap::new()))
+    CACHE.get_or_init(|| {
+        let mut map = BTreeMap::new();
+        let known_url = format!("{ORIGIN}{}", codec::KNOWN_PLAYER_PATH);
+        map.insert(
+            known_url,
+            (
+                codec::known_material(),
+                Instant::now() + Duration::from_secs(3600 * 24 * 365),
+            ),
+        );
+        RwLock::new(map)
+    })
 }
 
 #[derive(Deserialize)]
@@ -41,15 +52,15 @@ struct SourceTrack {
 #[derive(Deserialize)]
 struct SourceRecord {
     url: String,
-    #[serde(default, rename = "tmdbId")]
+    #[serde(default, rename = "tmdbId", alias = "tmdb_id", alias = "id")]
     tmdb_id: Value,
     #[serde(default)]
     mp4: Option<bool>,
     #[serde(default, rename = "noReferrer")]
     no_referrer: Option<bool>,
-    #[serde(default)]
+    #[serde(default, alias = "seasonNumber", alias = "s")]
     season: Option<Value>,
-    #[serde(default)]
+    #[serde(default, alias = "episodeNumber", alias = "ep", alias = "e")]
     episode: Option<Value>,
     #[serde(default)]
     tracks: Option<Vec<SourceTrack>>,
@@ -59,7 +70,7 @@ pub fn resolve(lookup: &Lookup, host: &dyn ProviderHost) -> Result<AdapterResult
     let path = embed_path(&lookup.title)?;
     let embed_url = format!("{ORIGIN}{path}");
     let mut embed_req = get(&embed_url, &format!("{ORIGIN}/"), 512 * 1024);
-    embed_req.timeout_ms = 3_000;
+    embed_req.timeout_ms = 2_000;
     let embed = fetch(host, embed_req)?;
     let (token, player_script) = parse_bootstrap(&embed.body, &lookup.title)?;
 
@@ -74,7 +85,7 @@ pub fn resolve(lookup: &Lookup, host: &dyn ProviderHost) -> Result<AdapterResult
 
     if material_opt.is_none() {
         let mut player_req = get(&player_url, &embed_url, 3 * 1024 * 1024);
-        player_req.timeout_ms = 3_000;
+        player_req.timeout_ms = 2_000;
         let player = fetch(host, player_req)?;
         let mat = codec::recognize_player(&player.body)
             .map_err(|_| AdapterError::Protocol("VidFast player version"))?;
@@ -95,6 +106,7 @@ pub fn resolve(lookup: &Lookup, host: &dyn ProviderHost) -> Result<AdapterResult
 
     let challenge_url = format!("{ORIGIN}{}/JgQXcWPNH7s/{packed}", material.root());
     let mut req = post(challenge_url, &embed_url, 4096);
+    req.timeout_ms = 2_000;
     req.headers.push(header("Origin", ORIGIN));
     if !material.csrf_token().is_empty() {
         req.headers
@@ -107,6 +119,7 @@ pub fn resolve(lookup: &Lookup, host: &dyn ProviderHost) -> Result<AdapterResult
 
     let list_url = format!("{ORIGIN}{}/dBWKuO8aW6U/{ticket}", material.root());
     let mut req = post(list_url, &embed_url, 256 * 1024);
+    req.timeout_ms = 2_000;
     req.headers.push(header("Origin", ORIGIN));
     if !material.csrf_token().is_empty() {
         req.headers
@@ -123,18 +136,19 @@ pub fn resolve(lookup: &Lookup, host: &dyn ProviderHost) -> Result<AdapterResult
         return Err(AdapterError::Unavailable("VidFast servers"));
     }
 
+    let servers = prioritize_servers(servers);
     let mut unlock_requests = Vec::new();
     let mut active_servers = Vec::new();
     let mut seen_servers = BTreeSet::new();
 
-    for server in servers.into_iter().take(8) {
+    for server in servers.into_iter().take(3) {
         if server.name.is_empty() || seen_servers.contains(&server.name) || server.data.is_empty() {
             continue;
         }
         seen_servers.insert(server.name.clone());
         let unlock_url = format!("{ORIGIN}{}/M6SyMXJBpeg/{}", material.root(), server.data);
         let mut req = post(unlock_url, &embed_url, 256 * 1024);
-        req.timeout_ms = 3_000;
+        req.timeout_ms = 2_000;
         req.headers.push(header("Origin", ORIGIN));
         if !material.csrf_token().is_empty() {
             req.headers
@@ -196,7 +210,8 @@ pub fn resolve(lookup: &Lookup, host: &dyn ProviderHost) -> Result<AdapterResult
 
         let tmdb_matches = match &record.tmdb_id {
             Value::Number(n) => n.as_i64() == Some(lookup.title.tmdb_id.get()),
-            Value::String(s) => s.parse::<i64>().ok() == Some(lookup.title.tmdb_id.get()),
+            Value::String(s) => parse_coordinate_str(s) == Some(lookup.title.tmdb_id.get()),
+            Value::Null => true,
             _ => false,
         };
         if !tmdb_matches {
@@ -319,6 +334,17 @@ pub fn resolve(lookup: &Lookup, host: &dyn ProviderHost) -> Result<AdapterResult
     Ok(common::result(candidates, issues))
 }
 
+fn prioritize_servers(mut servers: Vec<codec::Server>) -> Vec<codec::Server> {
+    const PREFERRED: &[&str] = &["vRapid", "vBlaze", "Cine"];
+    servers.sort_by_key(|s| {
+        PREFERRED
+            .iter()
+            .position(|&p| p.eq_ignore_ascii_case(&s.name))
+            .unwrap_or(usize::MAX)
+    });
+    servers
+}
+
 fn embed_path(title: &ProviderTitle) -> Result<String, AdapterError> {
     title.validate().map_err(|_| AdapterError::Input)?;
     Ok(match title.media_type {
@@ -332,13 +358,25 @@ fn embed_path(title: &ProviderTitle) -> Result<String, AdapterError> {
     })
 }
 
+fn parse_coordinate_str(s: &str) -> Option<i64> {
+    let trimmed = s.trim();
+    if let Ok(n) = trimmed.parse::<i64>() {
+        return Some(n);
+    }
+    let digits: String = trimmed.chars().filter(|c| c.is_ascii_digit()).collect();
+    digits.parse::<i64>().ok()
+}
+
 fn coordinate_matches(value: Option<&Value>, expected: Option<i64>) -> bool {
     let Some(value) = value else {
         return true;
     };
+    if value.is_null() {
+        return false;
+    }
     let actual = match value {
         Value::Number(number) => number.as_i64(),
-        Value::String(string) => string.parse::<i64>().ok(),
+        Value::String(string) => parse_coordinate_str(string),
         _ => None,
     };
     actual == expected
@@ -389,19 +427,32 @@ fn parse_bootstrap(body: &[u8], title: &ProviderTitle) -> Result<(String, String
             continue;
         };
 
-        let host_matches = props.get("host").and_then(|v| v.as_str()) == Some("vidfast.vc");
-        let id_matches =
-            props.get("id").and_then(|v| v.as_str()) == Some(&title.tmdb_id.get().to_string());
-        if !host_matches || !id_matches {
+        if let Some(host) = props.get("host").and_then(|v| v.as_str())
+            && !host.contains("vidfast")
+        {
+            continue;
+        }
+
+        let id_matches = match props.get("id") {
+            Some(Value::Number(n)) => n.as_i64() == Some(title.tmdb_id.get()),
+            Some(Value::String(s)) => parse_coordinate_str(s) == Some(title.tmdb_id.get()),
+            _ => false,
+        };
+        if !id_matches {
             continue;
         }
 
         if title.media_type == MediaType::Tv {
-            let season_str = title.season.map(|s| s.to_string());
-            let ep_str = title.episode.map(|e| e.to_string());
-            let season_matches =
-                props.get("season").and_then(|v| v.as_str()) == season_str.as_deref();
-            let ep_matches = props.get("episode").and_then(|v| v.as_str()) == ep_str.as_deref();
+            let season_matches = match props.get("season") {
+                Some(Value::Number(n)) => n.as_i64() == title.season,
+                Some(Value::String(s)) => parse_coordinate_str(s) == title.season,
+                _ => false,
+            };
+            let ep_matches = match props.get("episode") {
+                Some(Value::Number(n)) => n.as_i64() == title.episode,
+                Some(Value::String(s)) => parse_coordinate_str(s) == title.episode,
+                _ => false,
+            };
             if !season_matches || !ep_matches {
                 continue;
             }
@@ -439,6 +490,14 @@ mod tests {
             Some(&serde_json::json!("1")),
             expected_season
         ));
+        assert!(coordinate_matches(
+            Some(&serde_json::json!("S01")),
+            expected_season
+        ));
+        assert!(coordinate_matches(
+            Some(&serde_json::json!("E01")),
+            expected_episode
+        ));
         assert!(!coordinate_matches(
             Some(&serde_json::json!(2)),
             expected_season
@@ -473,6 +532,54 @@ mod tests {
         assert_eq!(tracks.len(), 1);
         assert_eq!(tracks[0].file, "https://sub.vidfast.vc/en.srt");
         assert_eq!(tracks[0].label, "English");
+        Ok(())
+    }
+
+    #[test]
+    fn parses_source_record_with_aliases() -> Result<(), Box<dyn std::error::Error>> {
+        let json_payload = serde_json::json!({
+            "url": "https://moon.goldenkite.top/vd/master.m3u8",
+            "tmdb_id": 60625,
+            "seasonNumber": 1,
+            "episodeNumber": 7,
+            "noReferrer": true,
+        });
+        let record: SourceRecord = serde_json::from_value(json_payload)?;
+        assert_eq!(record.url, "https://moon.goldenkite.top/vd/master.m3u8");
+        assert_eq!(record.no_referrer, Some(true));
+        assert_eq!(record.tmdb_id, serde_json::json!(60625));
+        assert_eq!(record.season, Some(serde_json::json!(1)));
+        assert_eq!(record.episode, Some(serde_json::json!(7)));
+        Ok(())
+    }
+
+    #[test]
+    fn parses_bootstrap_from_fixture_html() -> Result<(), Box<dyn std::error::Error>> {
+        use stream_core::providers::TmdbId;
+        let movie_fixture =
+            include_bytes!("../../provider-codecs/testdata/providers/vidfast/movie.html");
+        let movie_title = ProviderTitle::movie(TmdbId::try_from(27205)?);
+        let (token, script) = parse_bootstrap(movie_fixture, &movie_title)?;
+        assert_eq!(token, "synthetic_bootstrap_token_only");
+        assert_eq!(script, "/_next/static/chunks/365-fixture.js");
+
+        let tv_fixture = include_bytes!("../../provider-codecs/testdata/providers/vidfast/tv.html");
+        let tv_title = ProviderTitle::episode(TmdbId::try_from(60625)?, 0, 7)?;
+        let (tv_token, tv_script) = parse_bootstrap(tv_fixture, &tv_title)?;
+        assert_eq!(tv_token, "synthetic_bootstrap_token_only");
+        assert_eq!(tv_script, "/_next/static/chunks/365-fixture.js");
+        Ok(())
+    }
+
+    #[test]
+    fn parses_bootstrap_with_numeric_coordinates() -> Result<(), Box<dyn std::error::Error>> {
+        use stream_core::providers::TmdbId;
+        let html = br#"<!doctype html><script src="/_next/static/chunks/365-57c331b65ee30ab6.js"></script>
+<script>self.__next_f.push([1,"5:[\"$\",\"$L11\",null,{\"en\":\"test_token\",\"id\":1399,\"season\":2,\"episode\":5}]\n"])</script>"#;
+        let tv_title = ProviderTitle::episode(TmdbId::try_from(1399)?, 2, 5)?;
+        let (token, script) = parse_bootstrap(html, &tv_title)?;
+        assert_eq!(token, "test_token");
+        assert_eq!(script, "/_next/static/chunks/365-57c331b65ee30ab6.js");
         Ok(())
     }
 }

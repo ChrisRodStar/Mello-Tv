@@ -16,23 +16,22 @@ use stream_core::{
     },
 };
 use stream_provider_codecs::vidnest::{decrypt, decrypt_v2};
-use stream_provider_sdk::http::HostError;
 
 const ORIGIN: &str = "https://vidnest.fun";
 const API: &str = "https://new.vidnest.fun";
 const SERVERS: [(&str, &str); 12] = [
-    ("catflix", "yflix"),
-    ("filxer", "rogflix"),
-    ("gama", "vidzee"),
-    ("lamda", "ophim"),
-    ("beta", "flixhq"),
-    ("alfa", "onehd"),
-    ("prime", "rpmvid"),
     ("zeta", "nextgencloudfabric"),
-    ("ophim", "klikxxi"),
+    ("alfa", "onehd"),
+    ("beta", "flixhq"),
+    ("gama", "vidzee"),
+    ("delta", "allmovies"),
+    ("prime", "rpmvid"),
+    ("catflix", "yflix"),
     ("sigma", "hollymoviehd"),
     ("hexa", "vidlink"),
-    ("delta", "allmovies"),
+    ("filxer", "rogflix"),
+    ("lamda", "ophim"),
+    ("ophim", "klikxxi"),
 ];
 const LIMIT: u32 = 512 * 1024;
 struct Source {
@@ -260,34 +259,11 @@ pub fn resolve(lookup: &Lookup, host: &dyn ProviderHost) -> Result<AdapterResult
             .map_err(|_| AdapterError::Protocol("VidNest endpoint"))?;
         endpoint.query_pairs_mut().append_pair("_n", &nonce);
         let mut req = get(endpoint.as_str(), &format!("{ORIGIN}/"), LIMIT);
-        req.timeout_ms = 3_000;
+        req.timeout_ms = 1_500;
         req.headers.push(common::header("Origin", ORIGIN));
         requests.push(req);
     }
-    let mut responses = batch(host, requests.clone())?;
-    let retry_indices = responses
-        .iter()
-        .enumerate()
-        .filter_map(|(index, response)| {
-            matches!(
-                response,
-                Err(AdapterError::Host(
-                    HostError::Timeout | HostError::UpstreamFailure
-                ))
-            )
-            .then_some(index)
-        })
-        .collect::<Vec<_>>();
-    if !retry_indices.is_empty() {
-        let retry_requests = retry_indices
-            .iter()
-            .map(|index| requests[*index].clone())
-            .collect();
-        let retry_results = batch(host, retry_requests)?;
-        for (index, retry) in retry_indices.into_iter().zip(retry_results) {
-            responses[index] = retry;
-        }
-    }
+    let responses = batch(host, requests)?;
     let provider = common::provider_id("vidnest")?;
     let mut candidates = Vec::new();
     let mut issues = Vec::new();
@@ -452,7 +428,7 @@ mod tests {
             let mut responses = Vec::with_capacity(requests.len());
             for request in requests {
                 assert!(request.url.contains("_n="));
-                assert_eq!(request.timeout_ms, 3_000);
+                assert_eq!(request.timeout_ms, 1_500);
                 let path = if request.url.contains("/tv/") {
                     "/tv/1399/2/5"
                 } else {

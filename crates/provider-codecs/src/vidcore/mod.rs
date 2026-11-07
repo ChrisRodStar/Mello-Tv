@@ -79,6 +79,8 @@ impl std::fmt::Debug for ProtocolParameters {
 pub struct Protocol {
     parameters: ProtocolParameters,
     version: Option<ProtocolVersion>,
+    response_master: [u8; 32],
+    alphabet_lut: [u8; 256],
 }
 
 impl std::fmt::Debug for Protocol {
@@ -151,9 +153,23 @@ impl Protocol {
             }
             *entry = true;
         }
+
+        let mut seed = Zeroizing::new(parameters.response_seed.to_vec());
+        for number in &parameters.response_numbers {
+            seed.extend_from_slice(&number.to_le_bytes());
+        }
+        let response_master = crate::sha256(&[&seed]);
+
+        let mut alphabet_lut = [0u8; 256];
+        for (i, &src) in URL_ALPHABET.iter().enumerate() {
+            alphabet_lut[usize::from(src)] = parameters.alphabet[i];
+        }
+
         Ok(Self {
             parameters,
             version: None,
+            response_master,
+            alphabet_lut,
         })
     }
 
@@ -184,7 +200,13 @@ impl Protocol {
         unix_milliseconds: i64,
         nonce: &[u8],
     ) -> Result<String, ProtocolError> {
-        crypto::challenge(&self.parameters, session, unix_milliseconds, nonce)
+        crypto::challenge(
+            &self.parameters,
+            &self.alphabet_lut,
+            session,
+            unix_milliseconds,
+            nonce,
+        )
     }
 
     pub fn ticket(&self, challenge_response: &[u8]) -> Result<String, ProtocolError> {
@@ -192,6 +214,6 @@ impl Protocol {
     }
 
     pub fn decode_response(&self, body: &[u8]) -> Result<Zeroizing<Vec<u8>>, ProtocolError> {
-        crypto::decode_response(&self.parameters, body)
+        crypto::decode_response(&self.parameters, &self.response_master, body)
     }
 }

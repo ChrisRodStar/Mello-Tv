@@ -1,4 +1,5 @@
 //! FShareTV's movie page embeds a source ID that is exchanged for direct files.
+//! Upstream (fsharetv.cc) is strictly movie-only; TV lookups exit early with 0 overhead.
 use crate::{
     AdapterError, ProviderHost,
     common::{self, fetch, get},
@@ -6,10 +7,13 @@ use crate::{
 };
 use regex::Regex;
 use serde::Deserialize;
-use std::{collections::BTreeSet, sync::OnceLock};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::OnceLock,
+};
 use stream_core::providers::{
-    AdapterResult, CandidateStream, FetchContext, Lookup, Metadata, PublicResourceContext,
-    StreamFormat,
+    AdapterResult, CandidateStream, FetchContext, FetchScope, Lookup, Metadata,
+    PublicResourceContext, StreamFormat,
 };
 use url::Url;
 
@@ -48,6 +52,10 @@ struct Source {
     label: String,
     #[serde(default, deserialize_with = "deserialize_quality")]
     quality: String,
+    #[serde(default)]
+    storage: String,
+    #[serde(default)]
+    selected: bool,
 }
 
 fn deserialize_quality<'de, D>(deserializer: D) -> Result<String, D::Error>
@@ -62,7 +70,35 @@ where
     }
 }
 
+/// Upstream FShare storage tiers:
+/// - Tier 3: Dedicated tokenized CDN edges ("sp", "bg1", or tokenized hash query)
+/// - Tier 2: Cloudflare Worker v2 media storage ("version=2")
+/// - Tier 1: Generic media sources (test fixtures, external storage)
+/// - Tier 0: Deprecated legacy backup without version or hash (fails with 500 error code 1101 upstream)
+fn source_tier(source: &Source) -> u8 {
+    if source.storage == "sp" || source.storage == "bg1" || source.src.contains("hash=") {
+        3
+    } else if source.src.contains("version=") {
+        2
+    } else if source.storage != "__backup" {
+        1
+    } else {
+        0
+    }
+}
+
+fn parse_quality_num(quality: &str, label: &str) -> u32 {
+    let parse = |s: &str| -> Option<u32> {
+        let digits: String = s.chars().filter(|c| c.is_ascii_digit()).collect();
+        digits.parse().ok()
+    };
+    parse(quality).or_else(|| parse(label)).unwrap_or(0)
+}
+
 pub fn resolve(lookup: &Lookup, host: &dyn ProviderHost) -> Result<AdapterResult, AdapterError> {
+    // FShareTV (fsharetv.cc) upstream is strictly a movie-only platform.
+    // TV shows, episodes, and seasons are not indexed or hosted upstream.
+    // Exits immediately with zero allocations and zero overhead.
     if lookup.title.media_type != stream_core::domain::MediaType::Movie {
         return Err(AdapterError::Unsupported);
     }
@@ -133,6 +169,24 @@ pub fn resolve(lookup: &Lookup, host: &dyn ProviderHost) -> Result<AdapterResult
     let mut all = file.sources;
     all.extend(file.backups);
     all.extend(file.alternatives.into_iter().flatten());
+
+    // Filter out dead legacy Tier 0 sources when working sources exist.
+    let max_tier = all.iter().map(source_tier).max().unwrap_or(0);
+    if max_tier > 0 {
+        all.retain(|s| source_tier(s) > 0);
+    }
+
+    // Rank candidates by:
+    // 1. Resolution / Quality descending (1080p > 720p > 480p > 360p)
+    // 2. High-speed tokenized CDN edge tier descending (Tier 3 [sp/bg1] > Tier 2 [v2] > Tier 1)
+    // 3. Upstream selected stream first
+    all.sort_by(|a, b| {
+        parse_quality_num(&b.quality, &b.label)
+            .cmp(&parse_quality_num(&a.quality, &a.label))
+            .then_with(|| source_tier(b).cmp(&source_tier(a)))
+            .then_with(|| b.selected.cmp(&a.selected))
+    });
+
     let mut candidates = Vec::new();
     let mut issues = Vec::new();
     let mut seen = BTreeSet::new();
@@ -176,7 +230,16 @@ pub fn resolve(lookup: &Lookup, host: &dyn ProviderHost) -> Result<AdapterResult
                     format,
                     title: lookup.title.clone(),
                     fetch_context: FetchContext {
-                        scopes: Vec::new(),
+                        scopes: vec![FetchScope {
+                            origin: ORIGIN.into(),
+                            path_prefix: "/".into(),
+                            headers: BTreeMap::from([
+                                ("User-Agent".into(), common::USER_AGENT.into()),
+                                ("Referer".into(), format!("{ORIGIN}/")),
+                                ("Origin".into(), ORIGIN.into()),
+                            ]),
+                            ..Default::default()
+                        }],
                         public_resources: Some(PublicResourceContext {
                             origin: ORIGIN.into(),
                             referer: format!("{ORIGIN}/"),
@@ -414,5 +477,113 @@ mod tests {
             StreamFormat::Dash
         );
         assert_eq!(format_from_type("", "/master.m3u8"), StreamFormat::Hls);
+    }
+
+    #[test]
+    fn tv_lookup_exits_early_as_unsupported() -> Result<(), Box<dyn std::error::Error>> {
+        let lookup: Lookup = serde_json::from_value(serde_json::json!({
+            "title": {
+                "type": "tv",
+                "tmdb_id": 1399,
+                "imdb_id": "tt0944947",
+                "season": 1,
+                "episode": 1
+            }
+        }))?;
+        assert!(matches!(
+            resolve(&lookup, &FixtureHost),
+            Err(AdapterError::Unsupported)
+        ));
+        Ok(())
+    }
+
+    struct TierFilterHost;
+    impl ProviderHost for TierFilterHost {
+        fn fetch(&self, request: Request) -> Result<Response, HostError> {
+            let body = if request.url.ends_with("/movie/tt0133093") {
+                br#"Movie.setSource('source-tiers', 720, "movie")"#.to_vec()
+            } else if request.url.contains("/api/file/source-tiers/source?") {
+                serde_json::json!({
+                    "status": "ok",
+                    "data": {
+                        "file": {
+                            "sources": [
+                                // Dead legacy backup (Tier 0)
+                                {"src": "/api/media/dead_legacy", "type": "video/mp4", "quality": "1080", "label": "1080p", "storage": "__backup"},
+                                // Cloudflare Worker v2 (Tier 2) - 1080p
+                                {"src": "/api/media/v2_1080?version=2", "type": "video/mp4", "quality": "1080", "label": "1080p", "storage": "__backup"}
+                            ],
+                            "backups": [],
+                            "alternatives": [
+                                [
+                                    // High-speed CDN edge (Tier 3) - 720p
+                                    {"src": "/api/media/sp_720?hash=sp123", "type": "video/mp4", "quality": "720", "label": "720p", "storage": "sp", "selected": true},
+                                    // Cloudflare Worker v2 (Tier 2) - 360p
+                                    {"src": "/api/media/v2_360?version=2", "type": "video/mp4", "quality": "360", "label": "360p", "storage": "__backup"}
+                                ]
+                            ]
+                        }
+                    }
+                })
+                .to_string()
+                .into_bytes()
+            } else {
+                return Err(HostError::Denied);
+            };
+            Ok(Response {
+                url: request.url,
+                status: 200,
+                headers: Vec::new(),
+                body,
+            })
+        }
+        fn fetch_batch(
+            &self,
+            _: Vec<Request>,
+        ) -> Result<Vec<Result<Response, HostError>>, HostError> {
+            Err(HostError::Denied)
+        }
+        fn now_unix_ms(&self) -> Result<i64, HostError> {
+            Ok(0)
+        }
+        fn random_bytes(&self, _: u32) -> Result<Vec<u8>, HostError> {
+            Err(HostError::Denied)
+        }
+    }
+
+    #[test]
+    fn filters_dead_legacy_sources_and_ranks_tiers_and_quality()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let lookup: Lookup = serde_json::from_value(
+            serde_json::json!({"title":{"type":"movie","tmdb_id":603,"imdb_id":"tt0133093"}}),
+        )?;
+        let result = resolve(&lookup, &TierFilterHost)?;
+        let candidates = result.candidates.ok_or("candidates missing")?;
+        // Dead legacy source should be filtered out, leaving 3 candidates
+        assert_eq!(candidates.len(), 3);
+        // Candidate 0: 1080p (Tier 2)
+        assert!(candidates[0].url.contains("v2_1080?version=2"));
+        // Candidate 1: 720p (Tier 3 sp)
+        assert!(candidates[1].url.contains("sp_720?hash=sp123"));
+        // Candidate 2: 360p (Tier 2)
+        assert!(candidates[2].url.contains("v2_360?version=2"));
+
+        // Check fetch context headers
+        for candidate in &candidates {
+            let pr = candidate
+                .fetch_context
+                .public_resources
+                .as_ref()
+                .ok_or("public_resources missing")?;
+            assert_eq!(pr.origin, ORIGIN);
+            assert_eq!(pr.referer, format!("{ORIGIN}/"));
+            assert_eq!(candidate.fetch_context.scopes.len(), 1);
+            let scope = &candidate.fetch_context.scopes[0];
+            assert_eq!(
+                scope.headers.get("User-Agent").map(|s| s.as_str()),
+                Some(common::USER_AGENT)
+            );
+        }
+        Ok(())
     }
 }

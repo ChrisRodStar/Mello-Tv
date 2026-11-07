@@ -129,15 +129,15 @@ pub fn decrypt_payload(
     }
     // Go's standard decoder ignores CR/LF. Its caller normalizes both alphabets
     // and restores missing padding, including partially supplied padding.
-    let mut normalized: Vec<u8> = payload
-        .bytes()
-        .filter(|byte| !matches!(byte, b'\r' | b'\n'))
-        .map(|byte| match byte {
-            b'-' => b'+',
-            b'_' => b'/',
-            other => other,
-        })
-        .collect();
+    let mut normalized: Vec<u8> = Vec::with_capacity(payload.len() + 4);
+    for byte in payload.bytes() {
+        match byte {
+            b'\r' | b'\n' => {}
+            b'-' => normalized.push(b'+'),
+            b'_' => normalized.push(b'/'),
+            other => normalized.push(other),
+        }
+    }
     if normalized.len() % 4 == 1 {
         return Err(CryptoError::Encoding);
     }

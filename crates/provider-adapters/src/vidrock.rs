@@ -17,6 +17,8 @@ use crate::{
     destination::public_url,
 };
 
+use url::Url;
+
 const ORIGIN: &str = "https://vidrock.net";
 const LIMIT: u32 = 512 * 1024;
 
@@ -35,6 +37,29 @@ struct Subtitle {
     file: String,
 }
 
+fn is_reachable_media_url(url: &Url, format: StreamFormat) -> bool {
+    if url
+        .host_str()
+        .is_some_and(|host| host.ends_with(".workers.dev") || host == "workers.dev")
+    {
+        return false;
+    }
+    let path = url.path().to_ascii_lowercase();
+    match format {
+        StreamFormat::Hls => path.ends_with(".m3u8"),
+        StreamFormat::Mp4 => path.ends_with(".mp4"),
+        _ => false,
+    }
+}
+
+fn candidate_rank(candidate: &CandidateStream) -> u8 {
+    match candidate.server.as_str() {
+        "Orion" => 0,
+        "Nova" => 1,
+        _ => 2,
+    }
+}
+
 pub fn resolve(lookup: &Lookup, host: &dyn ProviderHost) -> Result<AdapterResult, AdapterError> {
     let path = if lookup.title.media_type == MediaType::Tv {
         format!(
@@ -49,7 +74,7 @@ pub fn resolve(lookup: &Lookup, host: &dyn ProviderHost) -> Result<AdapterResult
     // Optional subtitles share the lookup's batch and deadline; no serial lookup per mirror.
     let requests = [
         format!("{ORIGIN}/api/{path}"),
-        format!("https://sub.vdrk.site/v2/{path}"),
+        format!("https://sub.vdrk.site/v1/{path}"),
     ]
     .into_iter()
     .enumerate()
@@ -109,12 +134,15 @@ pub fn resolve(lookup: &Lookup, host: &dyn ProviderHost) -> Result<AdapterResult
                 .map_err(|_| AdapterError::Protocol("VidRock URL envelope"))?;
             let url = std::str::from_utf8(&decoded)
                 .map_err(|_| AdapterError::Protocol("VidRock URL encoding"))?;
-            public_url(url)?;
+            let destination = public_url(url)?;
             let format = match source.format.as_str() {
                 "hls" => StreamFormat::Hls,
                 "mp4" => StreamFormat::Mp4,
                 _ => return Err(AdapterError::Protocol("VidRock stream format")),
             };
+            if !is_reachable_media_url(&destination, format) {
+                return Err(AdapterError::Protocol("VidRock stream endpoint"));
+            }
             Ok((url.to_owned(), format))
         })();
         let (url, format) = match parsed {
@@ -161,12 +189,14 @@ pub fn resolve(lookup: &Lookup, host: &dyn ProviderHost) -> Result<AdapterResult
     if candidates.is_empty() {
         return Err(AdapterError::Unavailable("VidRock servers"));
     }
+    candidates.sort_by_key(candidate_rank);
     Ok(common::result(candidates, issues))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use stream_core::providers::{ProviderTitle, TmdbId};
     use stream_provider_sdk::http::{HostError, Request, Response};
     struct Host {
         expected: &'static str,
@@ -187,7 +217,7 @@ mod tests {
             );
             assert_eq!(
                 requests[1].url,
-                format!("https://sub.vdrk.site/v2/{}", self.expected)
+                format!("https://sub.vdrk.site/v1/{}", self.expected)
             );
             let body = serde_json::json!({
                 "Good": {"url": "BwcHBwcHBwcHBwcHUIDmI2upLjuC1aGKIukhZeM6LFAjnj7NR4QXN3j7KptnsoFvi_ClGoJ1JLGTJininJ-BBXw", "type": "hls", "language": "English"},
@@ -239,6 +269,55 @@ mod tests {
             assert!(source.resolver_metadata.variants.is_empty());
             assert_eq!(result.issues.len(), 3);
         }
+        Ok(())
+    }
+
+    #[test]
+    fn reachability_filter_and_server_priority() -> Result<(), Box<dyn std::error::Error>> {
+        let valid_hls = Url::parse("https://stellarpathways.xyz/master.m3u8")?;
+        let valid_mp4 = Url::parse("https://stellarpathways.xyz/video.mp4")?;
+        let worker_hls = Url::parse("https://belfast.armadilloscp.workers.dev/test.m3u8")?;
+        let raw_worker = Url::parse("https://belfast.armadilloscp.workers.dev/cCiYXLhHVr")?;
+        let no_ext = Url::parse("https://stellarpathways.xyz/stream/12345")?;
+
+        assert!(is_reachable_media_url(&valid_hls, StreamFormat::Hls));
+        assert!(is_reachable_media_url(&valid_mp4, StreamFormat::Mp4));
+        assert!(!is_reachable_media_url(&worker_hls, StreamFormat::Hls));
+        assert!(!is_reachable_media_url(&raw_worker, StreamFormat::Hls));
+        assert!(!is_reachable_media_url(&no_ext, StreamFormat::Hls));
+        assert!(!is_reachable_media_url(&valid_hls, StreamFormat::Mp4));
+
+        let title = ProviderTitle {
+            media_type: MediaType::Movie,
+            tmdb_id: TmdbId::try_from(550)?,
+            imdb_id: String::new(),
+            my_anime_list_id: None,
+            season: None,
+            episode: None,
+        };
+        let pid = common::provider_id("vidrock")?;
+        let mk_candidate = |server: &str| CandidateStream {
+            id: format!("test-{server}"),
+            server: server.into(),
+            url: "https://media.example.com/master.m3u8".into(),
+            format: StreamFormat::Hls,
+            provider: pid.clone(),
+            title: title.clone(),
+            fetch_context: FetchContext::default(),
+            resolver_metadata: Metadata::default(),
+            content_verified: false,
+            expires_at: None,
+            selected_variant_url: String::new(),
+        };
+        let mut list = [
+            mk_candidate("Luna"),
+            mk_candidate("Nova"),
+            mk_candidate("Orion"),
+        ];
+        list.sort_by_key(candidate_rank);
+        assert_eq!(list[0].server, "Orion");
+        assert_eq!(list[1].server, "Nova");
+        assert_eq!(list[2].server, "Luna");
         Ok(())
     }
 }

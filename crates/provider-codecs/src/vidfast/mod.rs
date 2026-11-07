@@ -37,6 +37,10 @@ pub enum VidFastError {
     Crypto(#[from] CryptoError),
 }
 
+pub const KNOWN_PLAYER_PATH: &str = "/_next/static/chunks/365-57c331b65ee30ab6.js";
+pub const KNOWN_ROOT: &str = "/zirlaku/u/APA91MSazAqs15Y4Zq1ItjF08mPMtJVhWut0zDMIANkwkoFtWSQJ64wxHoyfbfWlJyWslp0l_QbebmONeqggpVxJEIettvJ6A6eKGXufZpEMNpkN0TKQQUpRYE8y6JqnB599ue5t5xgKmouz3biPoUzoPD-pp0B4_MBMl-gq2D_fK-uuvHA9pvy";
+pub const KNOWN_CSRF: &str = "PZIWpSBvrfz8BRQvaYmvLGQmQZ1mJ2xN";
+
 #[derive(Clone, Eq, PartialEq)]
 pub struct ProtocolMaterial {
     root: String,
@@ -44,11 +48,25 @@ pub struct ProtocolMaterial {
 }
 
 impl ProtocolMaterial {
+    pub fn new(root: impl Into<String>, csrf: impl Into<String>) -> Self {
+        Self {
+            root: root.into(),
+            csrf: csrf.into(),
+        }
+    }
+
     pub fn root(&self) -> &str {
         &self.root
     }
     pub fn csrf_token(&self) -> &str {
         &self.csrf
+    }
+}
+
+pub fn known_material() -> ProtocolMaterial {
+    ProtocolMaterial {
+        root: KNOWN_ROOT.to_string(),
+        csrf: KNOWN_CSRF.to_string(),
     }
 }
 

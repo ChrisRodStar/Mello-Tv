@@ -6,10 +6,7 @@ use zeroize::Zeroizing;
 
 use crate::{MAX_PROTOCOL_BYTES, aes_cbc_encrypt, aes_gcm_decrypt, rc4_xor, sha256};
 
-use super::{
-    MAX_CHALLENGE_RESPONSE_BYTES, MAX_SESSION_BYTES, ProtocolError, ProtocolParameters,
-    URL_ALPHABET,
-};
+use super::{MAX_CHALLENGE_RESPONSE_BYTES, MAX_SESSION_BYTES, ProtocolError, ProtocolParameters};
 
 const STAGE_OPERATIONS: [[u8; 10]; 5] = [
     [0, 1, 2, 3, 4, 1, 4, 3, 4, 0],
@@ -72,6 +69,7 @@ pub fn permutation(length: usize, seed: &[u8]) -> Result<Vec<usize>, ProtocolErr
 
 pub(super) fn challenge(
     parameters: &ProtocolParameters,
+    alphabet_lut: &[u8; 256],
     session: &str,
     unix_milliseconds: i64,
     nonce: &[u8],
@@ -158,14 +156,11 @@ pub(super) fn challenge(
     ])?;
     let mut encoded = URL_SAFE_NO_PAD.encode(payload).into_bytes();
     for value in &mut encoded {
-        let index = URL_ALPHABET
-            .iter()
-            .position(|source| source == value)
-            .ok_or(ProtocolError::Invalid("challenge alphabet"))?;
-        *value = *parameters
-            .alphabet
-            .get(index)
-            .ok_or(ProtocolError::Invalid("challenge alphabet"))?;
+        let mapped = alphabet_lut[usize::from(*value)];
+        if mapped == 0 {
+            return Err(ProtocolError::Invalid("challenge alphabet"));
+        }
+        *value = mapped;
     }
     String::from_utf8(encoded).map_err(|_| ProtocolError::Invalid("challenge encoding"))
 }
@@ -244,7 +239,8 @@ pub(super) fn ticket(
 }
 
 pub(super) fn decode_response(
-    parameters: &ProtocolParameters,
+    _parameters: &ProtocolParameters,
+    response_master: &[u8; 32],
     body: &[u8],
 ) -> Result<Zeroizing<Vec<u8>>, ProtocolError> {
     if body.len() > MAX_PROTOCOL_BYTES {
@@ -269,12 +265,7 @@ pub(super) fn decode_response(
     let ciphertext = envelope
         .get(28..)
         .ok_or(ProtocolError::Invalid("response ciphertext"))?;
-    let mut seed = Zeroizing::new(parameters.response_seed.to_vec());
-    for number in &parameters.response_numbers {
-        seed.extend_from_slice(&number.to_le_bytes());
-    }
-    let master = sha256(&[&seed]);
-    let derived = Zeroizing::new(sha256(&[&master, salt]));
+    let derived = Zeroizing::new(sha256(&[response_master, salt]));
     let plain = aes_gcm_decrypt(derived.as_ref(), nonce, &[], ciphertext)?;
     Ok(Zeroizing::new(
         plain

@@ -12,7 +12,8 @@ use serde::{Deserialize, de::DeserializeOwned};
 use serde_json::Value;
 use std::{
     collections::{BTreeMap, BTreeSet},
-    sync::OnceLock,
+    sync::{OnceLock, RwLock},
+    time::{Duration, Instant},
 };
 use stream_core::{
     domain::MediaType,
@@ -21,13 +22,60 @@ use stream_core::{
         PublicResourceContext, StreamFormat,
     },
 };
-use stream_provider_codecs::vidsrc::decrypt_streams;
+use stream_provider_codecs::vidsrc::{RecognizedKey, decrypt_streams_with_key, module_key};
 use url::Url;
 
 const ORIGIN: &str = "https://vidsrc.sh";
 const PLAYER: &str = "https://stellarconductornexus.com";
 const DATA: &str = "https://data.vidsrc.sh";
 type Query = BTreeMap<String, Vec<String>>;
+
+fn cached_key(w: i64) -> Option<RecognizedKey> {
+    static CACHE: OnceLock<RwLock<BTreeMap<i64, (RecognizedKey, Instant)>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| RwLock::new(BTreeMap::new()));
+    let read = cache.read().ok()?;
+    let (key, instant) = read.get(&w)?;
+    if instant.elapsed() < Duration::from_secs(3600) {
+        Some(key.clone())
+    } else {
+        None
+    }
+}
+
+fn put_cached_key(w: i64, key: RecognizedKey) {
+    static CACHE: OnceLock<RwLock<BTreeMap<i64, (RecognizedKey, Instant)>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| RwLock::new(BTreeMap::new()));
+    if let Ok(mut write) = cache.write() {
+        if write.len() > 64 {
+            write.clear();
+        }
+        write.insert(w, (key, Instant::now()));
+    }
+}
+
+type TokenCacheMap = BTreeMap<(String, String), (String, Instant)>;
+static TOKEN_CACHE: OnceLock<RwLock<TokenCacheMap>> = OnceLock::new();
+
+fn cached_token(origin: &str, api_token: &str) -> Option<String> {
+    let cache = TOKEN_CACHE.get_or_init(|| RwLock::new(BTreeMap::new()));
+    let read = cache.read().ok()?;
+    let (token, instant) = read.get(&(origin.to_string(), api_token.to_string()))?;
+    if instant.elapsed() < Duration::from_secs(3600) {
+        Some(token.clone())
+    } else {
+        None
+    }
+}
+
+fn put_cached_token(origin: String, api_token: String, token: String) {
+    let cache = TOKEN_CACHE.get_or_init(|| RwLock::new(BTreeMap::new()));
+    if let Ok(mut write) = cache.write() {
+        if write.len() > 128 {
+            write.clear();
+        }
+        write.insert((origin, api_token), (token, Instant::now()));
+    }
+}
 
 #[derive(Deserialize)]
 struct Gate {
@@ -60,7 +108,7 @@ struct PlayerConfig {
 }
 #[derive(Deserialize)]
 struct SourceEnvelope {
-    status_code: String,
+    status_code: Value,
     data: SourceData,
     #[serde(default)]
     vs: Value,
@@ -88,10 +136,29 @@ struct Protection {
 pub fn resolve(lookup: &Lookup, host: &dyn ProviderHost) -> Result<AdapterResult, AdapterError> {
     let path = embed_path(&lookup.title)?;
     let embed_url = format!("{ORIGIN}/embed{path}");
-    let embed = fetch(host, get(&embed_url, &format!("{ORIGIN}/"), 256 * 1024))?;
-    let gate_url = gate_endpoint(&embed.body, &lookup.title)?;
-    let gate = fetch(host, get(gate_url, &embed_url, 8 * 1024))?;
-    let gate: Gate = common::json(&gate.body, 8 * 1024, "VidSrc gate envelope")?;
+    let direct_gate_url = match lookup.title.media_type {
+        MediaType::Movie => format!(
+            "{ORIGIN}/vs_src.php?type=movie&id={}",
+            lookup.title.tmdb_id.get()
+        ),
+        MediaType::Tv => format!(
+            "{ORIGIN}/vs_src.php?type=tv&id={}&season={}&episode={}",
+            lookup.title.tmdb_id.get(),
+            lookup.title.season.ok_or(AdapterError::Input)?,
+            lookup.title.episode.ok_or(AdapterError::Input)?
+        ),
+    };
+    let gate: Gate = match fetch(host, get(&direct_gate_url, &embed_url, 8 * 1024))
+        .and_then(|res| common::json(&res.body, 8 * 1024, "VidSrc gate envelope"))
+    {
+        Ok(gate) => gate,
+        Err(_) => {
+            let embed = fetch(host, get(&embed_url, &format!("{ORIGIN}/"), 256 * 1024))?;
+            let gate_url = gate_endpoint(&embed.body, &lookup.title)?;
+            let gate = fetch(host, get(gate_url, &embed_url, 8 * 1024))?;
+            common::json(&gate.body, 8 * 1024, "VidSrc gate envelope")?
+        }
+    };
     let landing_url = player_endpoint(&gate.src, &format!("/embed{path}"))?;
     let landing = fetch(host, get(&landing_url, &format!("{ORIGIN}/"), 256 * 1024))?;
     let config: Landing = parse_config(&landing.body, "CFG")?;
@@ -320,25 +387,27 @@ fn source_endpoint(config: &PlayerConfig, title: &ProviderTitle) -> Result<Strin
         }
         _ => {}
     }
-    if title.media_type == MediaType::Tv && !config.api.is_empty() {
-        return Err(AdapterError::Protocol("TV API configuration"));
-    }
-    let mut url = public_url(if title.media_type == MediaType::Tv {
-        &config.stream_base
+    let endpoint_candidate = if title.media_type == MediaType::Tv {
+        if !config.stream_base.is_empty() {
+            &config.stream_base
+        } else {
+            &config.api
+        }
     } else {
         &config.api
-    })?;
+    };
+    let mut url = public_url(endpoint_candidate)?;
     if !common::same_origin(&url, DATA) || url.path() != "/api.php" {
         return Err(AdapterError::Protocol("stream API endpoint"));
     }
     let mut values = query(&url)?;
     if title.media_type == MediaType::Tv {
-        if values.len() != 2
-            || !single(&values, "type", "tv")
-            || !single(&values, "tmdb", &title.tmdb_id.get().to_string())
-        {
-            return Err(AdapterError::Protocol("TV stream base"));
-        }
+        values
+            .entry("type".into())
+            .or_insert_with(|| vec!["tv".into()]);
+        values
+            .entry("tmdb".into())
+            .or_insert_with(|| vec![title.tmdb_id.get().to_string()]);
         values.insert(
             "season".into(),
             vec![title.season.ok_or(AdapterError::Input)?.to_string()],
@@ -399,46 +468,64 @@ fn decode_sources(
         if protection.w < 0 {
             return Err(AdapterError::Protocol("static module window"));
         }
-        let module = if !protection.wasm_url.is_empty() {
-            let url = public_url(&protection.wasm_url)?;
-            if !common::same_origin(&url, DATA) || url.path() != "/wasm.php" {
-                return Err(AdapterError::Protocol("static module endpoint"));
-            }
-            let values = query(&url)?;
-            if values.len() != 2
-                || !single(&values, "w", &protection.w.to_string())
-                || values.get("_").is_none_or(|values| values.len() != 1)
-            {
-                return Err(AdapterError::Protocol("static module window"));
-            }
-            fetch(host, get(url.as_str(), &format!("{PLAYER}/"), 128 * 1024))?.body
+        if let Some(key) = cached_key(protection.w) {
+            decrypt_streams_with_key(encoded, &key)
+                .map_err(|_| AdapterError::Protocol("unrecognized static cipher"))
         } else {
-            if protection.wasm.len() > 192 * 1024 {
-                return Err(AdapterError::Protocol("static module byte limit"));
-            }
-            let encoded: Vec<_> = protection
-                .wasm
-                .bytes()
-                .filter(|byte| !matches!(byte, b'\r' | b'\n'))
-                .collect();
-            STANDARD
-                .decode(encoded)
-                .map_err(|_| AdapterError::Protocol("static module encoding"))?
-        };
-        decrypt_streams(encoded, &module)
-            .map_err(|_| AdapterError::Protocol("unrecognized static cipher"))
+            let module = if !protection.wasm_url.is_empty() {
+                let url = public_url(&protection.wasm_url)?;
+                if !common::same_origin(&url, DATA) || url.path() != "/wasm.php" {
+                    return Err(AdapterError::Protocol("static module endpoint"));
+                }
+                let values = query(&url)?;
+                if values.len() != 2
+                    || !single(&values, "w", &protection.w.to_string())
+                    || values.get("_").is_none_or(|values| values.len() != 1)
+                {
+                    return Err(AdapterError::Protocol("static module window"));
+                }
+                fetch(host, get(url.as_str(), &format!("{PLAYER}/"), 128 * 1024))?.body
+            } else {
+                if protection.wasm.len() > 192 * 1024 {
+                    return Err(AdapterError::Protocol("static module byte limit"));
+                }
+                let encoded_wasm: Vec<_> = protection
+                    .wasm
+                    .bytes()
+                    .filter(|byte| !matches!(byte, b'\r' | b'\n'))
+                    .collect();
+                STANDARD
+                    .decode(encoded_wasm)
+                    .map_err(|_| AdapterError::Protocol("static module encoding"))?
+            };
+            let key = module_key(&module)
+                .map_err(|_| AdapterError::Protocol("unrecognized static cipher"))?;
+            put_cached_key(protection.w, key.clone());
+            decrypt_streams_with_key(encoded, &key)
+                .map_err(|_| AdapterError::Protocol("unrecognized static cipher"))
+        }
+    } else if let Ok(urls) = Vec::<String>::deserialize(streams) {
+        Ok(urls)
+    } else if let Ok(map) = BTreeMap::<String, String>::deserialize(streams) {
+        Ok(map.into_values().collect())
     } else {
-        Vec::<String>::deserialize(streams)
-            .map_err(|_| AdapterError::Protocol("stream list schema"))
+        Err(AdapterError::Protocol("stream list schema"))
     }
 }
 
-fn val_to_str(v: &Value) -> String {
-    match v {
-        Value::String(s) => s.clone(),
-        Value::Number(n) => n.to_string(),
-        _ => String::new(),
+fn coordinate_matches(value: Option<&Value>, expected: Option<i64>) -> bool {
+    let Some(value) = value else {
+        return true;
+    };
+    if value.is_null() {
+        return true;
     }
+    let actual = match value {
+        Value::Number(number) => number.as_i64(),
+        Value::String(string) => string.parse::<i64>().ok(),
+        _ => None,
+    };
+    actual == expected
 }
 
 pub fn sources(
@@ -448,7 +535,22 @@ pub fn sources(
     host: &dyn ProviderHost,
 ) -> Result<AdapterResult, AdapterError> {
     let envelope: SourceEnvelope = common::json(body, 256 * 1024, "VidSrc stream envelope")?;
-    match envelope.status_code.as_str() {
+    let status_code = match &envelope.status_code {
+        Value::String(s) => s.as_str(),
+        Value::Number(n) => match n.as_i64() {
+            Some(200) => "200",
+            Some(404) => "404",
+            Some(410) => "410",
+            Some(401) => "401",
+            Some(403) => "403",
+            Some(429) => "429",
+            Some(500) => "500",
+            Some(503) => "503",
+            _ => "unknown",
+        },
+        _ => "unknown",
+    };
+    match status_code {
         "200" => {}
         "404" | "410" => return Err(AdapterError::Unavailable("VidSrc stream API")),
         "401" | "403" | "429" | "500" | "503" => {
@@ -465,14 +567,14 @@ pub fn sources(
         return Err(AdapterError::Protocol("source IMDb cross-ID"));
     }
     if title.media_type == MediaType::Tv {
-        let season_matches =
-            envelope.data.season.as_ref().map(val_to_str) == title.season.map(|v| v.to_string());
-        let episode_matches =
-            envelope.data.episode.as_ref().map(val_to_str) == title.episode.map(|v| v.to_string());
-        if !season_matches || !episode_matches {
+        if !coordinate_matches(envelope.data.season.as_ref(), title.season)
+            || !coordinate_matches(envelope.data.episode.as_ref(), title.episode)
+        {
             return Err(AdapterError::Protocol("source episode coordinates"));
         }
-    } else if envelope.data.season.is_some() || envelope.data.episode.is_some() {
+    } else if envelope.data.season.as_ref().is_some_and(|v| !v.is_null())
+        || envelope.data.episode.as_ref().is_some_and(|v| !v.is_null())
+    {
         return Err(AdapterError::Protocol("movie source coordinates"));
     }
     let streams = decode_sources(&envelope, host)?;
@@ -492,45 +594,56 @@ pub fn sources(
         }
     }
     let mut token_results = BTreeMap::new();
-    // VidSrc binds the media token to the API token used for the stream list.
     let encoded_api_token: String =
         url::form_urlencoded::byte_serialize(api_token.as_bytes()).collect();
-    let start = host.now_unix_ms()?;
-    let origins: Vec<_> = origins.into_iter().collect();
-    for group in origins.chunks(3) {
-        if host.now_unix_ms()?.saturating_sub(start) >= 3000 {
-            break;
+
+    let mut missing_origins = Vec::new();
+    for origin in &origins {
+        if let Some(tok) = cached_token(origin, api_token) {
+            token_results.insert(origin.clone(), Ok(tok));
+        } else {
+            missing_origins.push(origin.clone());
         }
-        let requests = group
-            .iter()
-            .map(|origin| {
-                let token_url = if encoded_api_token.is_empty() {
-                    format!("{origin}/generate.php")
-                } else {
-                    format!("{origin}/generate.php?api_token={encoded_api_token}")
-                };
-                let mut request = get(token_url, &format!("{PLAYER}/"), 8 * 1024);
-                request.timeout_ms = 1000;
-                request
-            })
-            .collect();
-        match batch(host, requests) {
-            Ok(responses) => {
-                for (origin, response) in group.iter().zip(responses) {
-                    token_results.insert(
-                        origin.clone(),
-                        response.and_then(|response| parse_token(&response.body)),
-                    );
-                }
-            }
-            Err(error) => {
-                if matches!(
-                    error,
-                    AdapterError::Host(stream_provider_sdk::http::HostError::Cancelled)
-                ) {
-                    return Err(error);
-                }
+    }
+
+    if !missing_origins.is_empty() {
+        let start = host.now_unix_ms()?;
+        for group in missing_origins.chunks(4) {
+            if host.now_unix_ms()?.saturating_sub(start) >= 3000 {
                 break;
+            }
+            let requests = group
+                .iter()
+                .map(|origin| {
+                    let token_url = if encoded_api_token.is_empty() {
+                        format!("{origin}/generate.php")
+                    } else {
+                        format!("{origin}/generate.php?api_token={encoded_api_token}")
+                    };
+                    let mut request = get(token_url, &format!("{PLAYER}/"), 8 * 1024);
+                    request.timeout_ms = 1000;
+                    request
+                })
+                .collect();
+            match batch(host, requests) {
+                Ok(responses) => {
+                    for (origin, response) in group.iter().zip(responses) {
+                        let parsed = response.and_then(|response| parse_token(&response.body));
+                        if let Ok(ref tok) = parsed {
+                            put_cached_token(origin.clone(), api_token.to_string(), tok.clone());
+                        }
+                        token_results.insert(origin.clone(), parsed);
+                    }
+                }
+                Err(error) => {
+                    if matches!(
+                        error,
+                        AdapterError::Host(stream_provider_sdk::http::HostError::Cancelled)
+                    ) {
+                        return Err(error);
+                    }
+                    break;
+                }
             }
         }
     }
@@ -583,9 +696,10 @@ pub fn sources(
             }
         };
         let path = resource.path().to_ascii_lowercase();
-        let format = if path.ends_with(".m3u8") {
+        let query_str = resource.query().unwrap_or("").to_ascii_lowercase();
+        let format = if path.ends_with(".m3u8") || query_str.contains(".m3u8") {
             StreamFormat::Hls
-        } else if path.ends_with(".mp4") {
+        } else if path.ends_with(".mp4") || query_str.contains(".mp4") {
             StreamFormat::Mp4
         } else {
             StreamFormat::Unknown
@@ -688,6 +802,247 @@ mod tests {
                 "VidSrc requires upstream verification"
             ))
         ));
+        Ok(())
+    }
+
+    #[test]
+    fn tv_source_coordinates_may_be_omitted_or_formatted_as_numbers_or_strings() {
+        let expected_season = Some(1);
+        let expected_episode = Some(2);
+        assert!(coordinate_matches(None, expected_season));
+        assert!(coordinate_matches(
+            Some(&serde_json::json!(null)),
+            expected_season
+        ));
+        assert!(coordinate_matches(
+            Some(&serde_json::json!(1)),
+            expected_season
+        ));
+        assert!(coordinate_matches(
+            Some(&serde_json::json!("1")),
+            expected_season
+        ));
+        assert!(coordinate_matches(
+            Some(&serde_json::json!("01")),
+            expected_season
+        ));
+        assert!(coordinate_matches(
+            Some(&serde_json::json!(2)),
+            expected_episode
+        ));
+        assert!(coordinate_matches(
+            Some(&serde_json::json!("2")),
+            expected_episode
+        ));
+        assert!(coordinate_matches(
+            Some(&serde_json::json!("02")),
+            expected_episode
+        ));
+
+        // Mismatches fail closed
+        assert!(!coordinate_matches(
+            Some(&serde_json::json!(2)),
+            expected_season
+        ));
+        assert!(!coordinate_matches(
+            Some(&serde_json::json!("not-a-number")),
+            expected_season
+        ));
+    }
+
+    #[test]
+    fn test_decrypt_and_validate_tv_fixture() -> Result<(), Box<dyn std::error::Error>> {
+        let tv_title = ProviderTitle {
+            media_type: MediaType::Tv,
+            tmdb_id: TmdbId::try_from(60625)?,
+            imdb_id: "tt1375666".to_string(),
+            my_anime_list_id: None,
+            season: Some(1),
+            episode: Some(1),
+        };
+        struct MockHost;
+        impl ProviderHost for MockHost {
+            fn fetch(
+                &self,
+                _request: stream_provider_sdk::http::Request,
+            ) -> Result<stream_provider_sdk::http::Response, stream_provider_sdk::http::HostError>
+            {
+                Ok(stream_provider_sdk::http::Response {
+                    url: "https://data.vidsrc.sh/wasm.php?w=42&_=12600".into(),
+                    status: 200,
+                    headers: vec![],
+                    body: include_bytes!(
+                        "../../provider-codecs/testdata/providers/vidsrc/chacha-layout.wasm"
+                    )
+                    .to_vec(),
+                })
+            }
+            fn fetch_batch(
+                &self,
+                requests: Vec<stream_provider_sdk::http::Request>,
+            ) -> Result<
+                Vec<
+                    Result<
+                        stream_provider_sdk::http::Response,
+                        stream_provider_sdk::http::HostError,
+                    >,
+                >,
+                stream_provider_sdk::http::HostError,
+            > {
+                Ok(requests
+                    .into_iter()
+                    .map(|_| {
+                        Ok(stream_provider_sdk::http::Response {
+                            url: "".into(),
+                            status: 200,
+                            headers: vec![],
+                            body: b"dummy-token".to_vec(),
+                        })
+                    })
+                    .collect())
+            }
+            fn now_unix_ms(&self) -> Result<i64, stream_provider_sdk::http::HostError> {
+                Ok(1000)
+            }
+            fn random_bytes(
+                &self,
+                _length: u32,
+            ) -> Result<Vec<u8>, stream_provider_sdk::http::HostError> {
+                Ok(vec![0; 16])
+            }
+        }
+        let res = sources(
+            include_bytes!("../../provider-codecs/testdata/providers/vidsrc/encrypted.json"),
+            &tv_title,
+            "fixture-api-token",
+            &MockHost,
+        )?;
+        let provider = common::provider_id("vidsrc")?;
+        res.validate_for(&provider, &tv_title, 32)?;
+        assert_eq!(res.candidates.as_ref().map(|c| c.len()), Some(2));
+        Ok(())
+    }
+
+    #[test]
+    fn test_resolves_movie_and_tv_via_full_chain() -> Result<(), Box<dyn std::error::Error>> {
+        struct FixtureHost {
+            is_tv: bool,
+        }
+        impl ProviderHost for FixtureHost {
+            fn fetch(
+                &self,
+                req: stream_provider_sdk::http::Request,
+            ) -> Result<stream_provider_sdk::http::Response, stream_provider_sdk::http::HostError>
+            {
+                let body = if req.url.contains("/vs_src.php") {
+                    if self.is_tv {
+                        br#"{"src": "/embed/tv/60625/1/1?vs=fixture-gate"}"#.to_vec()
+                    } else {
+                        br#"{"src": "/embed/movie/27205?vs=fixture-gate"}"#.to_vec()
+                    }
+                } else if req.url.contains("/embed/player/") {
+                    if self.is_tv {
+                        include_bytes!(
+                            "../../provider-codecs/testdata/providers/vidsrc/tv-player.html"
+                        )
+                        .to_vec()
+                    } else {
+                        include_bytes!(
+                            "../../provider-codecs/testdata/providers/vidsrc/movie-player.html"
+                        )
+                        .to_vec()
+                    }
+                } else if req.url.contains("stellarconductornexus.com/embed/") {
+                    if self.is_tv {
+                        include_bytes!(
+                            "../../provider-codecs/testdata/providers/vidsrc/tv-landing.html"
+                        )
+                        .to_vec()
+                    } else {
+                        include_bytes!(
+                            "../../provider-codecs/testdata/providers/vidsrc/movie-landing.html"
+                        )
+                        .to_vec()
+                    }
+                } else if req.url.contains("vidsrc.sh/embed/movie/") {
+                    include_bytes!(
+                        "../../provider-codecs/testdata/providers/vidsrc/movie-embed.html"
+                    )
+                    .to_vec()
+                } else if req.url.contains("vidsrc.sh/embed/tv/") {
+                    include_bytes!("../../provider-codecs/testdata/providers/vidsrc/tv-embed.html")
+                        .to_vec()
+                } else if req.url.contains("/api.php") {
+                    include_bytes!("../../provider-codecs/testdata/providers/vidsrc/encrypted.json")
+                        .to_vec()
+                } else if req.url.contains("/wasm.php") {
+                    include_bytes!(
+                        "../../provider-codecs/testdata/providers/vidsrc/chacha-layout.wasm"
+                    )
+                    .to_vec()
+                } else {
+                    return Err(stream_provider_sdk::http::HostError::UpstreamFailure);
+                };
+                Ok(stream_provider_sdk::http::Response {
+                    url: req.url,
+                    status: 200,
+                    headers: vec![],
+                    body,
+                })
+            }
+            fn fetch_batch(
+                &self,
+                requests: Vec<stream_provider_sdk::http::Request>,
+            ) -> Result<
+                Vec<
+                    Result<
+                        stream_provider_sdk::http::Response,
+                        stream_provider_sdk::http::HostError,
+                    >,
+                >,
+                stream_provider_sdk::http::HostError,
+            > {
+                Ok(requests
+                    .into_iter()
+                    .map(|_| {
+                        Ok(stream_provider_sdk::http::Response {
+                            url: "".into(),
+                            status: 200,
+                            headers: vec![],
+                            body: b"media-token".to_vec(),
+                        })
+                    })
+                    .collect())
+            }
+            fn now_unix_ms(&self) -> Result<i64, stream_provider_sdk::http::HostError> {
+                Ok(1000)
+            }
+            fn random_bytes(
+                &self,
+                _length: u32,
+            ) -> Result<Vec<u8>, stream_provider_sdk::http::HostError> {
+                Ok(vec![0; 16])
+            }
+        }
+
+        let provider = common::provider_id("vidsrc")?;
+
+        // Movie
+        let movie_lookup: Lookup = serde_json::from_value(serde_json::json!({
+            "title": {"type": "movie", "tmdb_id": 27205, "imdb_id": "tt1375666"}
+        }))?;
+        let res_movie = resolve(&movie_lookup, &FixtureHost { is_tv: false })?;
+        res_movie.validate_for(&provider, &movie_lookup.title, 32)?;
+        assert_eq!(res_movie.candidates.as_ref().map(|c| c.len()), Some(2));
+
+        // TV
+        let tv_lookup: Lookup = serde_json::from_value(serde_json::json!({
+            "title": {"type": "tv", "tmdb_id": 60625, "imdb_id": "tt1375666", "season": 1, "episode": 1}
+        }))?;
+        let res_tv = resolve(&tv_lookup, &FixtureHost { is_tv: true })?;
+        res_tv.validate_for(&provider, &tv_lookup.title, 32)?;
+        assert_eq!(res_tv.candidates.as_ref().map(|c| c.len()), Some(2));
+
         Ok(())
     }
 }

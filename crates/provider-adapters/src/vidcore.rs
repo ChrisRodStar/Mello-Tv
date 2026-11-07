@@ -79,16 +79,55 @@ struct SourceRecord {
     url: String,
     #[serde(default, rename = "tmdbId")]
     tmdb_id: Option<Value>,
+    #[serde(default)]
+    season: Option<Value>,
+    #[serde(default)]
+    episode: Option<Value>,
     #[serde(default, rename = "noReferrer")]
     no_referrer: Option<bool>,
     #[serde(default)]
     headers: BTreeMap<String, String>,
     #[serde(default)]
     tracks: Option<Vec<SourceTrack>>,
+    #[serde(flatten)]
+    extra: BTreeMap<String, Value>,
+}
+
+fn is_valid_imdb(imdb: &str) -> bool {
+    imdb.len() >= 4
+        && imdb.len() <= 16
+        && imdb.starts_with("tt")
+        && imdb[2..].bytes().all(|b| b.is_ascii_digit())
+}
+
+fn coordinate_matches(value: Option<&Value>, expected: Option<i64>) -> bool {
+    let Some(value) = value else {
+        return true;
+    };
+    let actual = match value {
+        Value::Number(number) => number.as_i64(),
+        Value::String(string) => string.parse().ok(),
+        _ => return false,
+    };
+    actual == expected
 }
 
 pub fn resolve(lookup: &Lookup, host: &dyn ProviderHost) -> Result<AdapterResult, AdapterError> {
-    let path = embed_path(&lookup.title)?;
+    match resolve_with(lookup, host, false) {
+        Ok(result) => Ok(result),
+        Err(AdapterError::Unavailable(_)) if is_valid_imdb(&lookup.title.imdb_id) => {
+            resolve_with(lookup, host, true)
+        }
+        Err(err) => Err(err),
+    }
+}
+
+fn resolve_with(
+    lookup: &Lookup,
+    host: &dyn ProviderHost,
+    use_imdb: bool,
+) -> Result<AdapterResult, AdapterError> {
+    let path = embed_path_with(&lookup.title, use_imdb)?;
     let embed_url = format!("{ORIGIN}{path}");
     let mut embed_req = get(&embed_url, &format!("{ORIGIN}/"), 512 * 1024);
     embed_req.timeout_ms = 2_500;
@@ -216,7 +255,7 @@ pub fn resolve(lookup: &Lookup, host: &dyn ProviderHost) -> Result<AdapterResult
             server.data
         );
         let mut req = post(unlock_url, &embed_url, 256 * 1024);
-        req.timeout_ms = 1_000;
+        req.timeout_ms = 2_500;
         req.headers.push(header("Origin", ORIGIN));
         if !protocol.csrf_token().is_empty() {
             req.headers
@@ -265,7 +304,7 @@ pub fn resolve(lookup: &Lookup, host: &dyn ProviderHost) -> Result<AdapterResult
         if record.url.is_empty() || seen_urls.contains(&record.url) {
             continue;
         }
-        if let Some(tmdb) = &record.tmdb_id {
+        if let Some(tmdb) = record.tmdb_id.as_ref().filter(|_| !use_imdb) {
             let matches = match tmdb {
                 Value::Number(n) => n.as_i64() == Some(lookup.title.tmdb_id.get()),
                 Value::String(s) => s.parse::<i64>().ok() == Some(lookup.title.tmdb_id.get()),
@@ -278,6 +317,16 @@ pub fn resolve(lookup: &Lookup, host: &dyn ProviderHost) -> Result<AdapterResult
                 ));
                 continue;
             }
+        }
+        if lookup.title.media_type == MediaType::Tv
+            && (!coordinate_matches(record.season.as_ref(), lookup.title.season)
+                || !coordinate_matches(record.episode.as_ref(), lookup.title.episode))
+        {
+            issues.push(common::issue(
+                &AdapterError::Protocol("VidCore episode coordinates"),
+                "sources",
+            ));
+            continue;
         }
         let stream_url = match public_url(&record.url) {
             Ok(url) => url,
@@ -354,8 +403,7 @@ pub fn resolve(lookup: &Lookup, host: &dyn ProviderHost) -> Result<AdapterResult
             }
         }
 
-        let mut provider_data: BTreeMap<String, Value> =
-            common::json(&decrypted, 256 * 1024, "VidCore raw attributes").unwrap_or_default();
+        let mut provider_data = record.extra;
         provider_data.remove("url");
         provider_data.remove("headers");
         provider_data.remove("cookies");
@@ -426,13 +474,25 @@ pub fn resolve(lookup: &Lookup, host: &dyn ProviderHost) -> Result<AdapterResult
     Ok(common::result(candidates, issues))
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 fn embed_path(title: &ProviderTitle) -> Result<String, AdapterError> {
+    embed_path_with(title, false)
+}
+
+fn embed_path_with(title: &ProviderTitle, use_imdb: bool) -> Result<String, AdapterError> {
     title.validate().map_err(|_| AdapterError::Input)?;
+    let id_str = if use_imdb {
+        if !is_valid_imdb(&title.imdb_id) {
+            return Err(AdapterError::Input);
+        }
+        title.imdb_id.clone()
+    } else {
+        title.tmdb_id.get().to_string()
+    };
     Ok(match title.media_type {
-        MediaType::Movie => format!("/movie/{}", title.tmdb_id.get()),
+        MediaType::Movie => format!("/movie/{id_str}"),
         MediaType::Tv => format!(
-            "/tv/{}/{}/{}",
-            title.tmdb_id.get(),
+            "/tv/{id_str}/{}/{}",
             title.season.ok_or(AdapterError::Input)?,
             title.episode.ok_or(AdapterError::Input)?
         ),
@@ -523,5 +583,29 @@ mod tests {
         ];
         let ordered = candidate_chunks(&chunks);
         assert_eq!(ordered[0], "/_next/static/chunks/281-789.js");
+    }
+
+    #[test]
+    fn embed_path_with_imdb_fallback() -> Result<(), Box<dyn std::error::Error>> {
+        let movie = ProviderTitle {
+            media_type: MediaType::Movie,
+            tmdb_id: TmdbId::try_from(550)?,
+            imdb_id: "tt0137523".into(),
+            my_anime_list_id: None,
+            season: None,
+            episode: None,
+        };
+        assert_eq!(embed_path_with(&movie, true)?, "/movie/tt0137523");
+
+        let tv = ProviderTitle {
+            media_type: MediaType::Tv,
+            tmdb_id: TmdbId::try_from(1622)?,
+            imdb_id: "tt0460681".into(),
+            my_anime_list_id: None,
+            season: Some(4),
+            episode: Some(11),
+        };
+        assert_eq!(embed_path_with(&tv, true)?, "/tv/tt0460681/4/11");
+        Ok(())
     }
 }

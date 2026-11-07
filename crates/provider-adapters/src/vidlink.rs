@@ -9,7 +9,11 @@ use crate::{
 use cookie::Cookie;
 use serde::Deserialize;
 use serde_json::Value;
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::{OnceLock, RwLock},
+    time::{Duration, Instant},
+};
 use stream_core::{
     domain::MediaType,
     providers::{
@@ -23,40 +27,87 @@ use url::Url;
 
 const ORIGIN: &str = "https://vidlink.pro";
 
+fn cached_player() -> &'static RwLock<Option<(codec::RecognizedPlayer, Instant)>> {
+    static CACHE: OnceLock<RwLock<Option<(codec::RecognizedPlayer, Instant)>>> = OnceLock::new();
+    CACHE.get_or_init(|| RwLock::new(None))
+}
+
 pub fn resolve(lookup: &Lookup, host: &dyn ProviderHost) -> Result<AdapterResult, AdapterError> {
     let path = codec::embed_path(&lookup.title).map_err(|_| AdapterError::Input)?;
     let referer = format!("{ORIGIN}{path}");
     let mut jar = SessionCookies::default();
-    let embed = fetch_session(
-        host,
-        &mut jar,
-        format!("{ORIGIN}{path}"),
-        &referer,
-        512 * 1024,
-    )?;
-    drop(embed);
-    let player = fetch_session(
-        host,
-        &mut jar,
-        format!("{ORIGIN}/fu.wasm"),
-        &referer,
-        3 * 1024 * 1024,
-    )?;
-    let recognized = codec::recognize_player(&player.body)
-        .map_err(|_| AdapterError::Protocol("VidLink player version"))?;
-    let api = codec::api_path(
-        recognized,
-        &lookup.title,
-        host.now_unix_ms()?.div_euclid(1000),
-    )
-    .map_err(|_| AdapterError::Protocol("VidLink token"))?;
-    let sources = fetch_session(
-        host,
-        &mut jar,
-        format!("{ORIGIN}{api}"),
-        &referer,
-        1024 * 1024,
-    )?;
+    let now = Instant::now();
+
+    let recognized = cached_player().read().ok().and_then(|guard| {
+        guard
+            .as_ref()
+            .filter(|(_, exp)| *exp > now)
+            .map(|(player, _)| *player)
+    });
+
+    let (recognized, cached) = match recognized {
+        Some(player) => (player, true),
+        None => {
+            let player_resp = fetch_session(
+                host,
+                &mut jar,
+                format!("{ORIGIN}/fu.wasm"),
+                &referer,
+                3 * 1024 * 1024,
+            )?;
+            let player = codec::recognize_player(&player_resp.body)
+                .map_err(|_| AdapterError::Protocol("VidLink player version"))?;
+            if let Ok(mut guard) = cached_player().write() {
+                *guard = Some((player, now + Duration::from_secs(7200)));
+            }
+            (player, false)
+        }
+    };
+
+    let unix_now = host.now_unix_ms()?.div_euclid(1000);
+    let api = codec::api_path(recognized, &lookup.title, unix_now)
+        .map_err(|_| AdapterError::Protocol("VidLink token"))?;
+
+    let sources_url = format!("{ORIGIN}{api}");
+    let sources = match fetch_session(host, &mut jar, sources_url.clone(), &referer, 1024 * 1024) {
+        Ok(resp) => resp,
+        Err(_) if cached => {
+            if let Ok(mut guard) = cached_player().write() {
+                *guard = None;
+            }
+            let embed = fetch_session(
+                host,
+                &mut jar,
+                format!("{ORIGIN}{path}"),
+                &referer,
+                512 * 1024,
+            )?;
+            drop(embed);
+            let player = fetch_session(
+                host,
+                &mut jar,
+                format!("{ORIGIN}/fu.wasm"),
+                &referer,
+                3 * 1024 * 1024,
+            )?;
+            let player = codec::recognize_player(&player.body)
+                .map_err(|_| AdapterError::Protocol("VidLink player version"))?;
+            if let Ok(mut guard) = cached_player().write() {
+                *guard = Some((player, Instant::now() + Duration::from_secs(7200)));
+            }
+            let api = codec::api_path(player, &lookup.title, host.now_unix_ms()?.div_euclid(1000))
+                .map_err(|_| AdapterError::Protocol("VidLink token"))?;
+            fetch_session(
+                host,
+                &mut jar,
+                format!("{ORIGIN}{api}"),
+                &referer,
+                1024 * 1024,
+            )?
+        }
+        Err(err) => return Err(err),
+    };
+
     normalize_sources(&sources.body, &lookup.title)
 }
 
@@ -319,7 +370,55 @@ pub fn normalize_sources(
             AdapterError::Protocol("VidLink sources rejected")
         });
     }
+    // Highest quality / lowest latency CDN candidate is ranked first
+    candidates.sort_by_key(|a| std::cmp::Reverse(candidate_rank(a)));
     Ok(common::result(candidates, issues))
+}
+
+fn candidate_rank(candidate: &CandidateStream) -> (i64, u8, u8) {
+    let height = candidate
+        .resolver_metadata
+        .variants
+        .first()
+        .and_then(|v| v.height)
+        .or_else(|| parse_height_from_url(&candidate.url))
+        .unwrap_or(if candidate.format == StreamFormat::Hls {
+            1080
+        } else {
+            0
+        });
+
+    let format_priority = match candidate.format {
+        StreamFormat::Hls => 2,
+        StreamFormat::Mp4 => 1,
+        _ => 0,
+    };
+
+    let direct_cdn = candidate
+        .resolver_metadata
+        .provider_data
+        .get("source_record")
+        .and_then(|raw| raw.get("requiresProxy"))
+        .and_then(|val| val.as_bool())
+        .map(|proxy| if !proxy { 1 } else { 0 })
+        .unwrap_or(1);
+
+    (height, format_priority, direct_cdn)
+}
+
+fn parse_height_from_url(url_str: &str) -> Option<i64> {
+    for pattern in [
+        "/2160", "2160p", "/1440", "1440p", "/1080", "1080p", "/720", "720p", "/540", "540p",
+        "/480", "480p", "/360", "360p",
+    ] {
+        if url_str.contains(pattern) {
+            let digits: String = pattern.chars().filter(|c| c.is_ascii_digit()).collect();
+            if let Ok(h) = digits.parse::<i64>() {
+                return Some(h);
+            }
+        }
+    }
+    None
 }
 
 fn normalize_source(
@@ -346,10 +445,12 @@ fn normalize_source(
         _ => return Err(AdapterError::Unsupported),
     };
     let context = source_context(&url, record.headers)?;
-    let variants = identity
+    let height = identity
         .strip_prefix("quality:")
         .and_then(|quality| quality.parse::<i64>().ok())
         .filter(|height| (1..=16384).contains(height))
+        .or_else(|| parse_height_from_url(&record.url));
+    let variants = height
         .map(|height| Variant {
             url: record.url.clone(),
             height: Some(height),
@@ -379,7 +480,6 @@ pub fn source_context(
     resource: &Url,
     headers: BTreeMap<String, String>,
 ) -> Result<FetchContext, AdapterError> {
-    public_url(resource.as_str())?;
     let mut scope = FetchScope {
         origin: resource.origin().ascii_serialization(),
         path_prefix: resource.path().into(),
@@ -438,4 +538,171 @@ pub fn source_context(
         .validate()
         .map_err(|_| AdapterError::Protocol("source fetch context"))?;
     Ok(context)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use stream_core::providers::{ProviderTitle, TmdbId};
+
+    fn sample_title() -> Result<ProviderTitle, Box<dyn std::error::Error>> {
+        Ok(ProviderTitle {
+            media_type: MediaType::Tv,
+            tmdb_id: TmdbId::try_from(1399)?,
+            imdb_id: String::new(),
+            my_anime_list_id: None,
+            season: Some(1),
+            episode: Some(1),
+        })
+    }
+
+    #[test]
+    fn normalize_sources_ranks_highest_quality_candidate_first()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let title = sample_title()?;
+        let body = br#"{
+            "sourceId": "mwVault",
+            "stream": {
+                "id": "primary",
+                "deliveryType": "mp4",
+                "playlist": "https://cdn.example.com/720.mp4",
+                "qualities": {
+                    "360": {"type": "mp4", "url": "https://cdn.example.com/360.mp4", "requiresProxy": true},
+                    "1080": {"type": "mp4", "url": "https://cdn.example.com/1080.mp4", "requiresProxy": false},
+                    "540": {"type": "mp4", "url": "https://cdn.example.com/540.mp4", "requiresProxy": true}
+                }
+            }
+        }"#;
+
+        let result = normalize_sources(body, &title)?;
+        let candidates = result.candidates.ok_or("candidates present")?;
+        assert_eq!(candidates.len(), 4);
+
+        // 1080p must be ranked FIRST!
+        assert_eq!(
+            candidates[0]
+                .resolver_metadata
+                .variants
+                .first()
+                .and_then(|v| v.height),
+            Some(1080)
+        );
+        // 720p second
+        assert_eq!(
+            candidates[1]
+                .resolver_metadata
+                .variants
+                .first()
+                .and_then(|v| v.height),
+            Some(720)
+        );
+        // 540p third
+        assert_eq!(
+            candidates[2]
+                .resolver_metadata
+                .variants
+                .first()
+                .and_then(|v| v.height),
+            Some(540)
+        );
+        // 360p fourth
+        assert_eq!(
+            candidates[3]
+                .resolver_metadata
+                .variants
+                .first()
+                .and_then(|v| v.height),
+            Some(360)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn normalize_sources_prioritizes_direct_cdn_over_proxy_for_same_height()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let title = sample_title()?;
+        let body = br#"{
+            "sourceId": "mwVault",
+            "stream": {
+                "id": "primary",
+                "deliveryType": "mp4",
+                "playlist": "",
+                "qualities": {
+                    "1080proxied": {"type": "mp4", "url": "https://cdn.example.com/1080_p.mp4", "requiresProxy": true},
+                    "1080direct": {"type": "mp4", "url": "https://cdn.example.com/1080_d.mp4", "requiresProxy": false}
+                }
+            }
+        }"#;
+
+        let result = normalize_sources(body, &title)?;
+        let candidates = result.candidates.ok_or("candidates present")?;
+        assert_eq!(candidates.len(), 2);
+        assert!(candidates[0].url.contains("1080_d.mp4"));
+        assert!(candidates[1].url.contains("1080_p.mp4"));
+        Ok(())
+    }
+
+    #[test]
+    fn normalize_sources_prioritizes_hls_adaptive_over_single_mp4()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let title = sample_title()?;
+        let body = br#"{
+            "sourceId": "mwVault",
+            "stream": {
+                "id": "primary",
+                "deliveryType": "hls",
+                "playlist": "https://cdn.example.com/master.m3u8",
+                "qualities": {
+                    "1080": {"type": "mp4", "url": "https://cdn.example.com/1080.mp4"}
+                }
+            }
+        }"#;
+
+        let result = normalize_sources(body, &title)?;
+        let candidates = result.candidates.ok_or("candidates present")?;
+        assert_eq!(candidates.len(), 2);
+        // HLS candidate has format priority over MP4 for equal height
+        assert_eq!(candidates[0].format, StreamFormat::Hls);
+        assert_eq!(candidates[1].format, StreamFormat::Mp4);
+        Ok(())
+    }
+
+    #[test]
+    fn normalize_sources_rejects_mismatched_coordinates() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let title = sample_title()?;
+        let body = br#"{
+            "sourceId": "mwVault",
+            "stream": {
+                "id": "primary",
+                "deliveryType": "mp4",
+                "playlist": "",
+                "qualities": {
+                    "720": {"type": "mp4", "url": "https://cdn.example.com/720.mp4", "se": 2, "ep": 1}
+                }
+            }
+        }"#;
+
+        assert!(normalize_sources(body, &title).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn session_cookies_filter_and_sort_by_path_specificity()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let mut jar = SessionCookies::default();
+        let resp = Response {
+            url: "https://vidlink.pro/test".into(),
+            status: 200,
+            headers: vec![
+                crate::common::header("Set-Cookie", "root=val1; Path=/; Max-Age=3600"),
+                crate::common::header("Set-Cookie", "sub=val2; Path=/test; Max-Age=3600"),
+            ],
+            body: Vec::new(),
+        };
+        jar.receive(&resp, "/test", 1000)?;
+        let header = jar.header("/test/page", 1000)?.ok_or("header expected")?;
+        assert_eq!(header, "sub=val2; root=val1");
+        Ok(())
+    }
 }

@@ -225,22 +225,12 @@ fn byte_mask(mut seed: u32, step: u32) -> [u8; 256] {
     output
 }
 
-/// Decode bounded static program fragments, without executing instructions.
-/// Only `Protocol::from_source` establishes recognized instruction fingerprints.
-pub fn decode_program(
-    prefix: &str,
-    stage: &str,
-    expected_parts: usize,
-) -> Result<Vec<u8>, ProtocolError> {
-    if prefix.len() > MAX_PLAYER_BYTES
-        || stage.len() > MAX_PLAYER_BYTES
-        || !(1..=64).contains(&expected_parts)
-    {
-        return Err(ProtocolError::InputLimit);
-    }
-    let patterns = patterns()?;
-    let mut codecs = BTreeMap::new();
-    let mut blobs = BTreeMap::new();
+fn parse_prefix_blobs<'a>(
+    patterns: &Patterns,
+    prefix: &'a str,
+) -> Result<BTreeMap<&'a str, Vec<u8>>, ProtocolError> {
+    let mut codecs: BTreeMap<&'a str, String> = BTreeMap::new();
+    let mut blobs: BTreeMap<&'a str, Vec<u8>> = BTreeMap::new();
     for (index, captures) in patterns.codec.captures_iter(prefix).enumerate() {
         if index >= 4096 {
             return Err(ProtocolError::InputLimit);
@@ -315,6 +305,18 @@ pub fn decode_program(
         }
         blobs.insert(capture(&captures, 1)?, data);
     }
+    Ok(blobs)
+}
+
+fn decode_stage(
+    patterns: &Patterns,
+    blobs: &BTreeMap<&str, Vec<u8>>,
+    stage: &str,
+    expected_parts: usize,
+) -> Result<Vec<u8>, ProtocolError> {
+    if stage.len() > MAX_PLAYER_BYTES || !(1..=64).contains(&expected_parts) {
+        return Err(ProtocolError::InputLimit);
+    }
     let mut ordered = vec![None; expected_parts];
     for (match_index, captures) in patterns.order.captures_iter(stage).enumerate() {
         if match_index >= expected_parts {
@@ -380,6 +382,24 @@ pub fn decode_program(
         *value ^= masks[0][index % 256] ^ masks[1][index % 256];
     }
     Ok(combined)
+}
+
+/// Decode bounded static program fragments, without executing instructions.
+/// Only `Protocol::from_source` establishes recognized instruction fingerprints.
+pub fn decode_program(
+    prefix: &str,
+    stage: &str,
+    expected_parts: usize,
+) -> Result<Vec<u8>, ProtocolError> {
+    if prefix.len() > MAX_PLAYER_BYTES
+        || stage.len() > MAX_PLAYER_BYTES
+        || !(1..=64).contains(&expected_parts)
+    {
+        return Err(ProtocolError::InputLimit);
+    }
+    let patterns = patterns()?;
+    let blobs = parse_prefix_blobs(patterns, prefix)?;
+    decode_stage(patterns, &blobs, stage, expected_parts)
 }
 
 /// Read a mapped string only after instruction fingerprint verification.
@@ -547,8 +567,10 @@ pub(super) fn compile(source: &str) -> Result<Protocol, ProtocolError> {
         .iter()
         .find(|layout| crate::ct_eq(layout.material.as_bytes(), material_hash.as_bytes()))
         .ok_or(ProtocolError::UnknownMaterial)?;
-    let list = decode_program(fragments.prefix, fragments.list, layout.list_parts)?;
-    let unlock = decode_program(fragments.prefix, fragments.unlock, layout.unlock_parts)?;
+    let patterns = patterns()?;
+    let blobs = parse_prefix_blobs(patterns, fragments.prefix)?;
+    let list = decode_stage(patterns, &blobs, fragments.list, layout.list_parts)?;
+    let unlock = decode_stage(patterns, &blobs, fragments.unlock, layout.unlock_parts)?;
     let list_fp = fingerprint(&[&list]);
     let unlock_fp = fingerprint(&[&unlock]);
     if !crate::ct_eq(list_fp.as_bytes(), layout.list.as_bytes())
@@ -571,7 +593,7 @@ pub(super) fn compile(source: &str) -> Result<Protocol, ProtocolError> {
         prefixes[index] = literal(read(layout.prefixes[index])?, "base64")?;
         rc4_keys[index] = fixed(literal(read(layout.rc4_keys[index])?, "base64")?)?;
     }
-    let alphabet_capture = patterns()?
+    let alphabet_capture = patterns
         .alphabet
         .captures(fragments.prefix)
         .ok_or(ProtocolError::Invalid("alphabet"))?;

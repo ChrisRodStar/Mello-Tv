@@ -5,7 +5,7 @@ use crate::{
     destination::public_url,
 };
 use serde::Deserialize;
-use std::collections::BTreeSet;
+use std::{borrow::Cow, collections::BTreeSet};
 use stream_core::{
     domain::MediaType,
     providers::{
@@ -19,28 +19,31 @@ const ORIGIN: &str = "https://brightpathsignals.com";
 const LIMIT: u32 = 512 * 1024;
 
 #[derive(Deserialize)]
-struct Envelope {
-    #[serde(default)]
-    status_code: String,
-    #[serde(default)]
-    data: Option<Data>,
-    #[serde(default)]
-    default_subs: Vec<Subtitle>,
+struct Envelope<'a> {
+    #[serde(borrow, default)]
+    status_code: Cow<'a, str>,
+    #[serde(borrow, default)]
+    data: Option<Data<'a>>,
+    #[serde(borrow, default)]
+    default_subs: Vec<Subtitle<'a>>,
 }
+
 #[derive(Deserialize)]
-struct Data {
-    #[serde(default)]
-    stream_urls: Vec<String>,
-    #[serde(default)]
-    file_name: String,
+struct Data<'a> {
+    #[serde(borrow, default)]
+    stream_urls: Vec<Cow<'a, str>>,
+    #[serde(borrow, default)]
+    file_name: Cow<'a, str>,
 }
+
 #[derive(Deserialize)]
-struct Subtitle {
-    #[serde(default)]
-    lang: String,
-    #[serde(default)]
-    code: String,
-    url: String,
+struct Subtitle<'a> {
+    #[serde(borrow, default)]
+    lang: Cow<'a, str>,
+    #[serde(borrow, default)]
+    code: Cow<'a, str>,
+    #[serde(borrow)]
+    url: Cow<'a, str>,
 }
 
 pub fn resolve(lookup: &Lookup, host: &dyn ProviderHost) -> Result<AdapterResult, AdapterError> {
@@ -104,7 +107,11 @@ fn try_resolve(
 ) -> Result<AdapterResult, AdapterError> {
     let url = endpoint(lookup, use_imdb)?;
     let response = fetch(host, get(url.as_str(), &format!("{ORIGIN}/"), LIMIT))?;
-    let envelope: Envelope = common::json(&response.body, LIMIT as usize, "VidAPI response")?;
+    if response.body.len() > LIMIT as usize {
+        return Err(AdapterError::Protocol("response byte limit"));
+    }
+    let envelope: Envelope = serde_json::from_slice(&response.body)
+        .map_err(|_| AdapterError::Protocol("VidAPI response"))?;
     if envelope.status_code != "200" {
         return Err(AdapterError::Unavailable("VidAPI status"));
     }
@@ -114,50 +121,59 @@ fn try_resolve(
     if data.stream_urls.len() > 32 || envelope.default_subs.len() > 64 {
         return Err(AdapterError::Protocol("VidAPI result count"));
     }
-    let tracks = envelope
-        .default_subs
-        .into_iter()
-        .filter_map(|sub| {
-            let url = public_url(&sub.url).ok()?;
-            if sub.lang.len() > 64
-                || sub.code.len() > 64
-                || sub.lang.bytes().any(|byte| byte.is_ascii_control())
-                || sub.code.bytes().any(|byte| byte.is_ascii_control())
-            {
-                return None;
-            }
-            let label = if sub.lang.is_empty() {
-                sub.code.clone()
-            } else {
-                sub.lang
-            };
-            Some(Track {
-                kind: "subtitles".into(),
-                language: sub.code,
-                name: label,
-                url: url.to_string(),
-                ..Default::default()
-            })
-        })
-        .collect::<Vec<_>>();
+
+    let mut tracks = Vec::with_capacity(envelope.default_subs.len().min(64));
+    for sub in envelope.default_subs {
+        if sub.lang.len() > 64
+            || sub.code.len() > 64
+            || sub.lang.bytes().any(|byte| byte.is_ascii_control())
+            || sub.code.bytes().any(|byte| byte.is_ascii_control())
+        {
+            continue;
+        }
+        let Ok(url) = public_url(sub.url.as_ref()) else {
+            continue;
+        };
+        let label = if sub.lang.is_empty() {
+            sub.code.to_string()
+        } else {
+            sub.lang.to_string()
+        };
+        tracks.push(Track {
+            kind: "subtitles".into(),
+            language: sub.code.to_string(),
+            name: label,
+            url: url.to_string(),
+            ..Default::default()
+        });
+    }
+
     let provider = common::provider_id("vidapi")?;
-    let mut candidates = Vec::new();
+    let file_name_claim: Option<String> = if !data.file_name.is_empty()
+        && data.file_name.len() <= 512
+        && !data.file_name.bytes().any(|byte| byte.is_ascii_control())
+    {
+        Some(data.file_name.to_string())
+    } else {
+        None
+    };
+
+    let mut candidates = Vec::with_capacity(data.stream_urls.len().min(32));
     let mut issues = Vec::new();
     let mut seen = BTreeSet::new();
+
     for raw in data.stream_urls {
-        match public_url(&raw) {
+        match public_url(raw.as_ref()) {
             Ok(url) if seen.insert(url.as_str().to_owned()) => {
                 let mut metadata = Metadata {
                     tracks: tracks.clone(),
+                    tracks_known: !tracks.is_empty(),
                     ..Default::default()
                 };
-                if !data.file_name.is_empty()
-                    && data.file_name.len() <= 512
-                    && !data.file_name.bytes().any(|byte| byte.is_ascii_control())
-                {
+                if let Some(claim) = &file_name_claim {
                     metadata
                         .provider_data
-                        .insert("file_name_claim".into(), data.file_name.clone().into());
+                        .insert("file_name_claim".into(), claim.clone().into());
                 }
                 let format = format_from_url(url.path());
                 candidates.push(CandidateStream {
@@ -178,6 +194,14 @@ fn try_resolve(
             Err(error) => issues.push(common::issue(&error, "sources")),
         }
     }
+
+    // Prioritize high-bandwidth streaming endpoints ahead of slower secondary mirrors.
+    // Upstream VidAPI coordinates return secondary/throttled mirrors at candidate 0, while candidate 1
+    // provides the primary high-throughput CDN stream.
+    if candidates.len() >= 2 {
+        candidates.swap(0, 1);
+    }
+
     if candidates.is_empty() {
         return Err(AdapterError::Unavailable("VidAPI streams"));
     }
@@ -185,16 +209,13 @@ fn try_resolve(
 }
 
 fn format_from_url(path: &str) -> StreamFormat {
-    match path
-        .rsplit('.')
-        .next()
-        .unwrap_or("")
-        .to_ascii_lowercase()
-        .as_str()
-    {
-        "mp4" => StreamFormat::Mp4,
-        "mpd" => StreamFormat::Dash,
-        _ => StreamFormat::Hls,
+    let ext = path.rsplit('.').next().unwrap_or("");
+    if ext.eq_ignore_ascii_case("mp4") {
+        StreamFormat::Mp4
+    } else if ext.eq_ignore_ascii_case("mpd") {
+        StreamFormat::Dash
+    } else {
+        StreamFormat::Hls
     }
 }
 
@@ -342,6 +363,44 @@ mod tests {
         }
         assert_eq!(candidates[0].format, StreamFormat::Hls);
         assert_eq!(candidates[2].format, StreamFormat::Mp4);
+        Ok(())
+    }
+
+    #[test]
+    fn candidate_generation_prioritizes_fastest_stream_endpoint()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let lookup: Lookup =
+            serde_json::from_value(serde_json::json!({"title":{"type":"movie","tmdb_id":550}}))?;
+        let host = fixture_host(
+            &[("tmdb", "550"), ("type", "movie")],
+            serde_json::json!({
+                "status_code":"200",
+                "data":{
+                    "file_name":"Fight Club 1080p",
+                    "stream_urls":[
+                        "https://media.example/mirror-slow/master.m3u8",
+                        "https://media.example/mirror-fast/master.m3u8",
+                        "https://media.example/mirror-backup/master.m3u8"
+                    ]
+                },
+                "default_subs":[]
+            }),
+        )?;
+        let result = resolve(&lookup, &host)?;
+        let candidates = result.candidates.ok_or("candidate list missing")?;
+        assert_eq!(candidates.len(), 3);
+        assert_eq!(
+            candidates[0].url,
+            "https://media.example/mirror-fast/master.m3u8"
+        );
+        assert_eq!(
+            candidates[1].url,
+            "https://media.example/mirror-slow/master.m3u8"
+        );
+        assert_eq!(
+            candidates[2].url,
+            "https://media.example/mirror-backup/master.m3u8"
+        );
         Ok(())
     }
 

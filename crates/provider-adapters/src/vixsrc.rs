@@ -61,9 +61,8 @@ pub fn resolve(lookup: &Lookup, host: &dyn ProviderHost) -> Result<AdapterResult
     let token_data = extract_token_data(html)?;
     let now = host.now_unix_ms()? / 1000;
     let expires_at = valid_expiration(token_data.expires, now)?;
-    let mut master = Url::parse(&token_data.playlist)
+    let mut master = public_url(&token_data.playlist)
         .map_err(|_| AdapterError::Protocol("VixSrc playlist URL"))?;
-    public_url(master.as_str())?;
     master
         .query_pairs_mut()
         .append_pair("token", &token_data.token)
@@ -118,21 +117,23 @@ fn extract_token_data(html: &str) -> Result<TokenData, AdapterError> {
     if html.len() > LIMIT as usize {
         return Err(AdapterError::Protocol("VixSrc page byte limit"));
     }
-    static TOKEN: OnceLock<Result<Regex, regex::Error>> = OnceLock::new();
-    static EXPIRES: OnceLock<Result<Regex, regex::Error>> = OnceLock::new();
-    static PLAYLIST: OnceLock<Result<Regex, regex::Error>> = OnceLock::new();
-    let token_re = TOKEN
-        .get_or_init(|| Regex::new(r#"(?is)[\"']?token[\"']?\s*:\s*[\"']([^\"']+)[\"']"#))
+
+    if let Some(data) = fast_extract_token_data(html) {
+        return validate_token_data(data);
+    }
+
+    static PATTERNS: OnceLock<Result<(Regex, Regex, Regex), regex::Error>> = OnceLock::new();
+    let (token_re, expires_re, playlist_re) = PATTERNS
+        .get_or_init(|| {
+            Ok((
+                Regex::new(r#"['"]?token['"]?\s*:\s*['"]([^'"]+)['"]"#)?,
+                Regex::new(r#"['"]?expires['"]?\s*:\s*['"]?(\d+)['"]?"#)?,
+                Regex::new(r#"['"]?url['"]?\s*:\s*['"]([^'"]+)['"]"#)?,
+            ))
+        })
         .as_ref()
         .map_err(|_| AdapterError::Protocol("VixSrc token parser"))?;
-    let expires_re = EXPIRES
-        .get_or_init(|| Regex::new(r#"(?is)[\"']?expires[\"']?\s*:\s*[\"']?(\d+)[\"']?"#))
-        .as_ref()
-        .map_err(|_| AdapterError::Protocol("VixSrc expiration parser"))?;
-    let playlist_re = PLAYLIST
-        .get_or_init(|| Regex::new(r#"(?is)[\"']?url[\"']?\s*:\s*[\"']([^\"']+)[\"']"#))
-        .as_ref()
-        .map_err(|_| AdapterError::Protocol("VixSrc playlist parser"))?;
+
     let token = token_re
         .captures(html)
         .and_then(|captures| captures.get(1))
@@ -148,36 +149,130 @@ fn extract_token_data(html: &str) -> Result<TokenData, AdapterError> {
         .and_then(|captures| captures.get(1))
         .map(|value| value.as_str().replace("\\/", "/"))
         .ok_or(AdapterError::Protocol("VixSrc playlist"))?;
-    if token.is_empty()
-        || token.len() > 4096
-        || token.bytes().any(|b| b.is_ascii_control())
-        || playlist.len() > 8192
-    {
-        return Err(AdapterError::Protocol("VixSrc token bounds"));
-    }
-    Ok(TokenData {
+
+    validate_token_data(TokenData {
         token: token.into(),
         expires,
         playlist,
     })
 }
 
+fn fast_extract_token_data(html: &str) -> Option<TokenData> {
+    let token = extract_string_field(html, "token")?;
+    let expires_str = extract_value_field(html, "expires")?;
+    let expires = expires_str.parse::<i64>().ok()?;
+    let playlist = extract_string_field(html, "url")?.replace("\\/", "/");
+    Some(TokenData {
+        token: token.to_string(),
+        expires,
+        playlist,
+    })
+}
+
+fn extract_string_field<'a>(html: &'a str, key: &str) -> Option<&'a str> {
+    let pos = html.find(key)?;
+    let after_key = &html[pos + key.len()..];
+    let mut chars = after_key.char_indices();
+    let mut next = chars.next()?;
+    if next.1 == '"' || next.1 == '\'' {
+        next = chars.next()?;
+    }
+    while next.1.is_whitespace() {
+        next = chars.next()?;
+    }
+    if next.1 != ':' {
+        return None;
+    }
+    next = chars.next()?;
+    while next.1.is_whitespace() {
+        next = chars.next()?;
+    }
+    let quote = next.1;
+    if quote != '"' && quote != '\'' {
+        return None;
+    }
+    let val_start = next.0 + quote.len_utf8();
+    let val_end = after_key[val_start..].find(quote)?;
+    Some(&after_key[val_start..val_start + val_end])
+}
+
+fn extract_value_field<'a>(html: &'a str, key: &str) -> Option<&'a str> {
+    let pos = html.find(key)?;
+    let after_key = &html[pos + key.len()..];
+    let mut chars = after_key.char_indices();
+    let mut next = chars.next()?;
+    if next.1 == '"' || next.1 == '\'' {
+        next = chars.next()?;
+    }
+    while next.1.is_whitespace() {
+        next = chars.next()?;
+    }
+    if next.1 != ':' {
+        return None;
+    }
+    next = chars.next()?;
+    while next.1.is_whitespace() {
+        next = chars.next()?;
+    }
+    if next.1 == '"' || next.1 == '\'' {
+        let quote = next.1;
+        let val_start = next.0 + quote.len_utf8();
+        let val_end = after_key[val_start..].find(quote)?;
+        Some(&after_key[val_start..val_start + val_end])
+    } else {
+        let val_start = next.0;
+        let digits_len = after_key[val_start..]
+            .chars()
+            .take_while(|c| c.is_ascii_digit())
+            .map(|c| c.len_utf8())
+            .sum::<usize>();
+        if digits_len == 0 {
+            None
+        } else {
+            Some(&after_key[val_start..val_start + digits_len])
+        }
+    }
+}
+
+fn validate_token_data(data: TokenData) -> Result<TokenData, AdapterError> {
+    if data.token.is_empty()
+        || data.token.len() > 4096
+        || data.token.bytes().any(|b| b.is_ascii_control())
+        || data.playlist.len() > 8192
+    {
+        return Err(AdapterError::Protocol("VixSrc token bounds"));
+    }
+    Ok(data)
+}
+
 fn parse_variants(body: &str, manifest: &str) -> Result<Vec<Variant>, AdapterError> {
-    static RE: OnceLock<Result<Regex, regex::Error>> = OnceLock::new();
-    let regex = RE
-        .get_or_init(|| Regex::new(r"(?:^|,)RESOLUTION=(\d+)x(\d+)(?:,|$)"))
+    static PATTERNS: OnceLock<Result<(Regex, Regex), regex::Error>> = OnceLock::new();
+    let (res_re, bw_re) = PATTERNS
+        .get_or_init(|| {
+            Ok((
+                Regex::new(r"(?:^|,)RESOLUTION=(\d+)x(\d+)(?:,|$)")?,
+                Regex::new(r"(?:^|,)BANDWIDTH=(\d+)(?:,|$)")?,
+            ))
+        })
         .as_ref()
         .map_err(|_| AdapterError::Protocol("VixSrc manifest parser"))?;
     let base = Url::parse(manifest).map_err(|_| AdapterError::Protocol("VixSrc manifest URL"))?;
-    let lines: Vec<&str> = body.lines().map(str::trim).collect();
     let mut variants = Vec::new();
-    for pair in lines.windows(2) {
-        if !pair[0].starts_with("#EXT-X-STREAM-INF:") {
+    let mut lines = body.lines().map(str::trim).filter(|l| !l.is_empty());
+    while let Some(line) = lines.next() {
+        if !line.starts_with("#EXT-X-STREAM-INF:") {
             continue;
         }
-        let Some(caps) = regex.captures(pair[0].trim_start_matches("#EXT-X-STREAM-INF:")) else {
+        let inf = line.trim_start_matches("#EXT-X-STREAM-INF:");
+        let Some(caps) = res_re.captures(inf) else {
             continue;
         };
+        let Some(variant_uri) = lines.next() else {
+            break;
+        };
+        if variant_uri.starts_with('#') {
+            continue;
+        }
         if variants.len() >= MAX_VARIANTS {
             return Err(AdapterError::Protocol("VixSrc variant count"));
         }
@@ -187,17 +282,26 @@ fn parse_variants(body: &str, manifest: &str) -> Result<Vec<Variant>, AdapterErr
         let height = caps[2]
             .parse::<i64>()
             .map_err(|_| AdapterError::Protocol("VixSrc variant height"))?;
+        let bitrate = bw_re.captures(inf).and_then(|c| c[1].parse::<i64>().ok());
         let url = base
-            .join(pair[1])
+            .join(variant_uri)
             .map_err(|_| AdapterError::Protocol("VixSrc variant URL"))?;
         public_url(url.as_str())?;
         variants.push(Variant {
             url: url.to_string(),
+            bitrate,
             width: Some(width),
             height: Some(height),
             ..Default::default()
         });
     }
+    // Highest quality variant ranked first
+    variants.sort_by(|a, b| {
+        b.height
+            .cmp(&a.height)
+            .then_with(|| b.bitrate.cmp(&a.bitrate))
+            .then_with(|| b.width.cmp(&a.width))
+    });
     Ok(variants)
 }
 
