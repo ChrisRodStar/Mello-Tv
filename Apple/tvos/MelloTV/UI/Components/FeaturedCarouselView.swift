@@ -88,50 +88,9 @@ public struct FeaturedCarouselView: View {
 
                 // Arc Page Indicator (Timeline progress)
                 pageIndicator(span: 520)
-
-                // Active Title Headline & Actions Bar
-                if let title = currentTitle {
-                    VStack(spacing: 8) {
-                        Text(title.title)
-                            .font(.system(size: 32, weight: .bold, design: .rounded))
-                            .foregroundStyle(Color.white)
-                            .lineLimit(1)
-                            .shadow(color: Color.black.opacity(0.8), radius: 6, y: 3)
-
-                        HStack(spacing: 12) {
-                            if !title.year.isEmpty {
-                                Text(title.year)
-                                    .font(.system(size: 15, weight: .medium))
-                                    .foregroundStyle(Color.white.opacity(0.75))
-                            }
-
-                            if title.rating > 0 {
-                                HStack(spacing: 4) {
-                                    Image(systemName: "star.fill")
-                                        .font(.system(size: 11))
-                                        .foregroundStyle(Color.yellow)
-                                    Text(String(format: "%.1f", title.rating))
-                                        .font(.system(size: 14, weight: .bold))
-                                        .foregroundStyle(Color.white)
-                                }
-                            }
-
-                            Text(title.type == .movie ? "Movie" : "TV Series")
-                                .font(.system(size: 11, weight: .bold))
-                                .foregroundStyle(Color.white.opacity(0.85))
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 3)
-                                .background(Color.white.opacity(0.15))
-                                .clipShape(Capsule())
-                        }
-                    }
-                    .padding(.top, 4)
-                    .transition(.opacity)
-                    .id("meta-\(title.id)")
-                }
             }
             .padding(.top, 24)
-            .padding(.bottom, 16)
+            .padding(.bottom, 8)
             .onAppear { startTimer() }
             .onDisappear { stopTimer() }
         }
