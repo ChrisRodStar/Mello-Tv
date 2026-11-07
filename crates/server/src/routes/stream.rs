@@ -751,10 +751,7 @@ async fn mutate_session(
         .await?;
 
     if let Some(selection) = staged_upgrade
-        && state
-            .relay
-            .replace_selection(&id, selection)
-            .is_none()
+        && state.relay.replace_selection(&id, selection).is_none()
     {
         return Err(AppError::Internal(
             "playback quality upgrade could not replace relay selection".into(),

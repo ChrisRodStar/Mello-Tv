@@ -92,11 +92,11 @@ fn go_title_validation_vectors() -> TestResult {
 fn title_identity_distinguishes_coordinates_and_preserves_cross_ids() -> TestResult {
     let id = TmdbId::try_from(300)?;
     let first = ProviderTitle::episode(id, 1, 1)?;
-    assert!(first.same_content(&first.clone()));
+    assert!(first.same_content(&first));
     assert!(!first.same_content(&ProviderTitle::episode(id, 1, 2)?));
     assert!(!first.same_content(&ProviderTitle::episode(id, 2, 1)?));
     assert!(!first.same_content(&ProviderTitle::movie(id)));
-    let mut cross_a = first.clone();
+    let mut cross_a = first;
     cross_a.imdb_id = "tt0460681".to_owned();
     let mut cross_b = cross_a.clone();
     cross_b.imdb_id = "tt1234567".to_owned();

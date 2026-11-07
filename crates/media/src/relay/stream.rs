@@ -234,8 +234,7 @@ impl MediaRelay {
     pub fn has_session(&self, session_id: &str) -> bool {
         self.sessions
             .lock()
-            .map(|map| map.contains_key(session_id))
-            .unwrap_or(false)
+            .is_ok_and(|map| map.contains_key(session_id))
     }
 
     pub fn token_for(&self, session_id: &str) -> String {

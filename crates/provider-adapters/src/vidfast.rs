@@ -121,13 +121,19 @@ pub fn resolve(lookup: &Lookup, host: &dyn ProviderHost) -> Result<AdapterResult
         .map_err(|_| AdapterError::Protocol("VidFast pack request"))?;
 
     let challenge_url = format!("{ORIGIN}{}/JgQXcWPNH7s/{packed}", material.root());
-    let challenge_resp = fetch(host, material_post(challenge_url, &embed_url, 4096, &material))?;
+    let challenge_resp = fetch(
+        host,
+        material_post(challenge_url, &embed_url, 4096, &material),
+    )?;
 
     let ticket = codec::challenge_token(&challenge_resp.body)
         .map_err(|_| AdapterError::Protocol("VidFast challenge token"))?;
 
     let list_url = format!("{ORIGIN}{}/dBWKuO8aW6U/{ticket}", material.root());
-    let list_resp = fetch(host, material_post(list_url, &embed_url, 256 * 1024, &material))?;
+    let list_resp = fetch(
+        host,
+        material_post(list_url, &embed_url, 256 * 1024, &material),
+    )?;
 
     let servers_encoded = std::str::from_utf8(&list_resp.body)
         .map_err(|_| AdapterError::Protocol("VidFast servers encoding"))?;
