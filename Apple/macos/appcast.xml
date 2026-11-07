@@ -6,6 +6,26 @@
         <description>Updates for Mello TV on macOS.</description>
         <language>en</language>
         <item>
+            <title>0.3.0</title>
+            <pubDate>Fri, 06 Nov 2026 20:28:07 -0500</pubDate>
+            <sparkle:version>5</sparkle:version>
+            <sparkle:shortVersionString>0.3.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="markdown">Mello TV 0.3.0 brings a performance overhaul, faster stream discovery, real-time video upscaling, and an updated playback engine.
+
+- Instant Video Scrubbing: Cached media chunks allow zero-lag seeking and rewinding.
+- High-Performance Discovery: Parallelized provider lookups across all 11 media sources.
+- Concurrent Stream Probing: Faster time-to-first-frame with parallel HLS variant checks.
+- Encrypted HLS Support: Added key resolution and on-the-fly segment verification for protected streams.
+- Database &amp; Memory Optimization: Low-latency writes and connection pre-warming across providers.
+- Web Player Upgrades: In-player episode drawer, idle controls autohide, and 4K shader-based video upscaling.
+
+Keep your existing application data. This release also includes the redesigned iOS app and fresh sideloading IPA. See the GitHub release for the full notes.
+</description>
+            <enclosure url="https://github.com/ChrisRodStar/Mello-Tv/releases/download/v0.3.0/Mello-TV-0.3.0-macOS.dmg" length="10508392" type="application/octet-stream" sparkle:edSignature="KLC081HWOIrIXlUPAtQvBHwscGKn6M175KGhNSHzmIFRYbTd2zFGqHHet8jTjohpjcWNGW9T5lZEPJqXMywJDw==" />
+        </item>
+        <item>
             <title>0.2.0</title>
             <pubDate>Thu, 29 Oct 2026 20:28:36 -0400</pubDate>
             <sparkle:version>4</sparkle:version>
