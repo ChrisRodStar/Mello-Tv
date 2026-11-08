@@ -1,3 +1,5 @@
+use std::time::SystemTime;
+
 use chrono::{DateTime, Duration, Utc};
 use rusqlite::{Connection, params};
 use serde_json::json;
@@ -442,6 +444,93 @@ async fn progress_sequences_counters_seeks_and_completion_match_go() -> TestResu
         })
         .await?;
     assert_eq!(version, 5); // four applied writes; stale/conflicting writes add none.
+    store.shutdown().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn continue_watching_removal_survives_late_progress_until_played_again() -> TestResult {
+    let (store, owner) = store_with_profiles().await?;
+    let target = request()?.target;
+    let mut earlier = allocation("earlier")?;
+    let current: DateTime<Utc> = SystemTime::now().into();
+    earlier.created_at = current - Duration::minutes(5);
+    earlier.expires_at = earlier.created_at + Duration::hours(1);
+    earlier
+        .ready
+        .as_mut()
+        .ok_or("missing relay fixture")?
+        .expires_at = earlier.expires_at;
+    let first_sample_at = earlier.created_at + Duration::seconds(20);
+    store.create_playback(&owner, "first", earlier).await?;
+    store
+        .update_progress_at(
+            &owner,
+            "first",
+            update("earlier", 1, 25.0, 15.0),
+            first_sample_at,
+        )
+        .await?;
+
+    let next_episode = Target::new(*target.identity(), Some(0), Some(2))?;
+    store.mark_watched(&owner, "first", next_episode).await?;
+    store.mark_watched(&owner, "second", target.clone()).await?;
+    store
+        .remove_from_continue_watching(&owner, "first", *target.identity())
+        .await?;
+    let first_history = store.history(&owner, "first", 0).await?;
+    assert_eq!(first_history.len(), 2);
+    assert!(
+        first_history
+            .iter()
+            .all(|p| p.continue_watching_removed_at.is_some())
+    );
+    assert!(
+        store.history(&owner, "second", 0).await?[0]
+            .continue_watching_removed_at
+            .is_none()
+    );
+
+    let late = store
+        .update_progress_at(
+            &owner,
+            "first",
+            update("earlier", 2, 30.0, 20.0),
+            SystemTime::now().into(),
+        )
+        .await?;
+    assert!(late.continue_watching_removed_at.is_some());
+    assert_eq!(late.position_seconds, 30.0);
+    assert_eq!(late.watched_seconds, 20.0);
+
+    let mut later = allocation("later")?;
+    let current: DateTime<Utc> = SystemTime::now().into();
+    later.created_at = current + Duration::seconds(1);
+    later.expires_at = later.created_at + Duration::hours(1);
+    later
+        .ready
+        .as_mut()
+        .ok_or("missing relay fixture")?
+        .expires_at = later.expires_at;
+    let replay_sample_at = later.created_at + Duration::seconds(15);
+    store.create_playback(&owner, "first", later).await?;
+    let replay = store
+        .update_progress_at(
+            &owner,
+            "first",
+            update("later", 1, 35.0, 5.0),
+            replay_sample_at,
+        )
+        .await?;
+    assert!(replay.continue_watching_removed_at.is_none());
+    store.mark_watched(&owner, "first", target.clone()).await?;
+    let marked = store
+        .get_progress(&owner, "first", target)
+        .await?
+        .ok_or("missing progress")?;
+    assert!(marked.completed && marked.manually_completed);
+    assert_eq!(marked.position_seconds, replay.position_seconds);
+    assert_eq!(marked.watched_seconds, replay.watched_seconds);
     store.shutdown().await?;
     Ok(())
 }

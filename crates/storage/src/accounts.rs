@@ -15,7 +15,7 @@ use stream_core::{
         PlaybackRequest, Preferences, Profile, ProfileInput, Progress, ProgressUpdate, RelayReady,
         Target, is_safe_identifier,
     },
-    catalog::{Title, TitleIdentity},
+    catalog::{MediaType, Title, TitleIdentity},
 };
 use zeroize::Zeroizing;
 
@@ -743,6 +743,7 @@ impl AccountStore {
             request.validate().map_err(|_| StorageError::Corrupt("playback request"))?;
             let mut progress = read_progress(&transaction, &profile_id, &request.target)?.unwrap_or_else(|| Progress {
                 target: request.target.clone(), position_seconds:0.0, duration_seconds:0.0, watched_seconds:0.0, completed:false, updated_at: now,
+                manually_completed: false, continue_watching_removed_at: None,
             });
             if update.sequence <= sequence { return Ok(progress); }
             if update.watched_seconds < total { return Err(StorageError::Conflict("counter_regression")); }
@@ -752,15 +753,80 @@ impl AccountStore {
             progress.position_seconds = if update.duration_seconds > 0.0 { update.position_seconds.min(update.duration_seconds) } else { update.position_seconds };
             progress.duration_seconds = update.duration_seconds;
             progress.completed = progress.completed || (update.duration_seconds > 0.0 && progress.position_seconds >= update.duration_seconds * 0.9 && progress.watched_seconds >= update.duration_seconds * 0.6);
+            // A delayed sample from an existing session should not restore a removed card.
+            if progress.continue_watching_removed_at.is_some_and(|removed| created >= removed) {
+                progress.continue_watching_removed_at = None;
+            }
             progress.updated_at = now;
             progress.validate().map_err(|_| StorageError::Corrupt("progress accumulation"))?;
-            let media_type = match request.target.identity().media_type() { stream_core::domain::MediaType::Movie => "movie", stream_core::domain::MediaType::Tv => "tv" };
-            transaction.execute("INSERT INTO progress VALUES(?1,?2,?3,?4,?5) ON CONFLICT(profile,target) DO UPDATE SET data=excluded.data", params![profile_id, request.target.key(), media_type, request.target.identity().id(), serde_json::to_vec(&progress)?])?;
+            save_progress(&transaction, &profile_id, &progress)?;
             transaction.execute("UPDATE playbacks SET total=?1,sequence=?2 WHERE id=?3 AND profile=?4", params![update.watched_seconds, update.sequence, update.playback_id, profile_id])?;
             touch(&transaction, &profile_id, now)?;
             transaction.commit()?;
             Ok(progress)
         }).await
+    }
+
+    /// Hide every saved episode of a title while retaining its history and resume points.
+    pub async fn remove_from_continue_watching(
+        &self,
+        account: &str,
+        profile_id: &str,
+        identity: TitleIdentity,
+    ) -> Result<(), StorageError> {
+        let (account, profile_id) = identifiers(account, profile_id)?;
+        self.database.call(move |connection| {
+            let transaction = connection.transaction()?;
+            owned_profile(&transaction, &account, &profile_id)?;
+            let now: DateTime<Utc> = SystemTime::now().into();
+            let changed = transaction.execute(
+                "UPDATE progress SET data=CAST(json_set(data,'$.continue_watching_removed_at',?1) AS BLOB) WHERE profile=?2 AND type=?3 AND title_id=?4",
+                params![now.timestamp(), profile_id, progress_media_type(&identity), identity.id()],
+            )?;
+            if changed != 0 {
+                increment_version(&transaction, &profile_id)?;
+            }
+            transaction.commit()?;
+            Ok(())
+        }).await
+    }
+
+    /// Mark the selected movie or episode without recording additional watch time.
+    pub async fn mark_watched(
+        &self,
+        account: &str,
+        profile_id: &str,
+        target: Target,
+    ) -> Result<(), StorageError> {
+        let (account, profile_id) = identifiers(account, profile_id)?;
+        self.database
+            .call(move |connection| {
+                let transaction = connection.transaction()?;
+                owned_profile(&transaction, &account, &profile_id)?;
+                let now: DateTime<Utc> = SystemTime::now().into();
+                let mut progress = read_progress(&transaction, &profile_id, &target)?
+                    .unwrap_or_else(|| Progress {
+                        target: target.clone(),
+                        position_seconds: 0.0,
+                        duration_seconds: 0.0,
+                        watched_seconds: 0.0,
+                        completed: false,
+                        manually_completed: false,
+                        continue_watching_removed_at: None,
+                        updated_at: now,
+                    });
+                if progress.manually_completed {
+                    return Ok(());
+                }
+                progress.completed = true;
+                progress.manually_completed = true;
+                progress.updated_at = now;
+                save_progress(&transaction, &profile_id, &progress)?;
+                increment_version(&transaction, &profile_id)?;
+                transaction.commit()?;
+                Ok(())
+            })
+            .await
     }
 
     pub async fn get_progress(
@@ -1360,6 +1426,26 @@ fn decode_progress(target_key: &str, data: &[u8]) -> Result<Progress, StorageErr
         return Err(StorageError::Corrupt("progress identity"));
     }
     Ok(progress)
+}
+
+fn progress_media_type(identity: &TitleIdentity) -> &'static str {
+    match identity.media_type() {
+        MediaType::Movie => "movie",
+        MediaType::Tv => "tv",
+    }
+}
+
+fn save_progress(
+    transaction: &Transaction<'_>,
+    profile_id: &str,
+    progress: &Progress,
+) -> Result<(), StorageError> {
+    let identity = progress.target.identity();
+    transaction.execute(
+        "INSERT INTO progress VALUES(?1,?2,?3,?4,?5) ON CONFLICT(profile,target) DO UPDATE SET data=excluded.data",
+        params![profile_id, progress.target.key(), progress_media_type(identity), identity.id(), serde_json::to_vec(progress)?],
+    )?;
+    Ok(())
 }
 
 fn read_progress(

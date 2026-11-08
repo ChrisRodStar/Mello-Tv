@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ProfileLibrary, Title, WatchProgress } from '../model';
 import { apiJSON, noContent, profilePath, combineSignal } from '../lib/api';
-import { loadLibrary, loadHistory } from '../lib/library';
+import { loadLibrary, loadHistory, type ContinueWatchingAction } from '../lib/library';
 
 export function useProfileLibrary(id: string) {
   const [state, setState] = useState<
@@ -146,7 +146,37 @@ export function useProfileLibrary(id: string) {
       setSaving(false);
     }
   }
+  async function updateContinueWatching(item: WatchProgress, action: ContinueWatchingAction) {
+    const { title, season, episode } = item;
+    const target = `${title.type}/${title.id}`;
+    if (action === 'remove') {
+      await apiJSON(`${profilePath(id)}/continue-watching/${target}`, noContent, {
+        method: 'DELETE',
+      });
+    } else {
+      await apiJSON(`${profilePath(id)}/watched/${target}`, noContent, {
+        method: 'PUT',
+        body: JSON.stringify(title.type === 'tv' ? { season, episode } : {}),
+      });
+    }
+    const now = Date.now();
+    setState((previous) =>
+      previous.id !== id
+        ? previous
+        : {
+            ...previous,
+            progress: previous.progress.map((saved) => {
+              if (saved.title.type !== title.type || saved.title.id !== title.id) return saved;
+              if (action === 'remove') return { ...saved, continueWatchingRemovedAt: now / 1000 };
+              return saved.season === season && saved.episode === episode
+                ? { ...saved, completed: true }
+                : saved;
+            }),
+          },
+    );
+    window.dispatchEvent(new Event('family-stream-library'));
+  }
   const current =
     state.id === id ? state : { list: [], progress: [], ready: false, hasMore: false };
-  return { ...current, error, saving, refresh, toggle, loadMore };
+  return { ...current, error, saving, refresh, toggle, loadMore, updateContinueWatching };
 }

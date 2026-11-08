@@ -283,6 +283,13 @@
   outline-offset: 2px;
 }
 
+.continue-options {
+  right: 4px;
+  bottom: 2px;
+  width: 44px;
+  height: 44px;
+}
+
 .continue-error {
   margin-top: 8px;
   color: var(--text-secondary);
@@ -301,4 +308,42 @@
   .continue-card-group.is-poster {
     flex-basis: min(42vw, 168px);
   }
+}
+
+.continue-actions {
+  margin: auto;
+  width: min(22rem, calc(100% - 2rem));
+  padding: 20px;
+  border: 1px solid rgb(255 255 255 / 16%);
+  border-radius: 16px;
+  background: #202126;
+  color: #fff;
+}
+
+.continue-actions::backdrop {
+  background: rgb(0 0 0 / 55%);
+}
+
+.continue-actions h2 {
+  margin: 0 0 12px;
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+.continue-actions button {
+  display: block;
+  width: 100%;
+  min-height: 44px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  text-align: left;
+}
+
+.continue-actions button:hover,
+.continue-actions button:focus-visible {
+  background: rgb(255 255 255 / 12%);
+}
+
+.continue-actions button:disabled {
+  opacity: 0.55;
 }

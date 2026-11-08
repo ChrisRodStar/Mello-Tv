@@ -850,3 +850,15 @@
 .profile-app-settings > button:hover {
   background: var(--raised-hover);
 }
+
+.profile-continue-poster-group {
+  position: relative;
+}
+
+.profile-continue-poster-group .profile-continue-poster-meta {
+  padding-right: 44px;
+}
+
+.profile-continue-poster-group .continue-options {
+  right: 0;
+}

@@ -177,11 +177,12 @@ export const watchProgressSchema = z.object({
   duration: z.number().finite().nonnegative(),
   watchedSeconds: z.number().finite().nonnegative(),
   completed: z.boolean(),
+  continueWatchingRemovedAt: z.number().optional(),
   updatedAt: z.number(),
 });
 export type WatchProgress = z.infer<typeof watchProgressSchema>;
 export const watchUpdateSchema = watchProgressSchema
-  .omit({ completed: true, updatedAt: true })
+  .omit({ completed: true, continueWatchingRemovedAt: true, updatedAt: true })
   .extend({
     sessionId: profileIdSchema,
   })

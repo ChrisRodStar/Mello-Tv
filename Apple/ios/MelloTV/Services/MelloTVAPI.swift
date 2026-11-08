@@ -494,7 +494,9 @@ struct MelloTVAPI: Sendable {
             return WatchProgress(title: title, season: item.season ?? 0, episode: item.episode ?? 0,
                 episodeTitle: "", position: item.positionSeconds, duration: item.durationSeconds,
                 watchedSeconds: item.watchedSeconds, completed: item.completed,
-                updatedAt: parsedDate(item.updatedAt)?.timeIntervalSince1970 ?? 0)
+                updatedAt: parsedDate(item.updatedAt)?.timeIntervalSince1970 ?? 0,
+                manuallyCompleted: item.manuallyCompleted,
+                continueWatchingRemovedAt: item.continueWatchingRemovedAt)
         }
         return ProfileLibrary(list: titles, progress: progress)
     }
@@ -507,6 +509,22 @@ struct MelloTVAPI: Sendable {
     func removeFromMyList(profileID: String, type: MediaType, titleID: Int) async throws -> ProfileLibrary {
         let _: EmptyReply = try await request("profiles/\(profileID)/library/\(type.rawValue)/\(titleID)", method: "DELETE")
         return try await library(for: profileID)
+    }
+
+    func removeFromContinueWatching(profileID: String, title: MediaTitle) async throws {
+        let _: EmptyReply = try await request(
+            "profiles/\(profileID)/continue-watching/\(title.type.rawValue)/\(title.tmdbID)",
+            method: "DELETE"
+        )
+    }
+
+    func markWatched(profileID: String, item: WatchProgress) async throws {
+        let title = item.title
+        let _: EmptyReply = try await request(
+            "profiles/\(profileID)/watched/\(title.type.rawValue)/\(title.tmdbID)",
+            method: "PUT",
+            body: title.type == .tv ? ["season": item.season, "episode": item.episode] : [:]
+        )
     }
 
     func updateProgress(profileID: String, update: WatchProgressUpdate) async throws -> Bool {
@@ -817,6 +835,8 @@ private struct WireProgress: Decodable {
     let durationSeconds: Double
     let watchedSeconds: Double
     let completed: Bool
+    let manuallyCompleted: Bool?
+    let continueWatchingRemovedAt: Int?
     let updatedAt: String
 }
 private struct WirePlayback: Decodable {

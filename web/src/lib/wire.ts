@@ -98,6 +98,7 @@ export const progressWire = identityWire.extend({
   duration_seconds: z.number().nonnegative(),
   watched_seconds: z.number().nonnegative(),
   completed: z.boolean(),
+  continue_watching_removed_at: z.number().optional(),
   updated_at: z.iso.datetime({ offset: true }),
 });
 export const historyWire = z.object({
@@ -158,6 +159,7 @@ export function viewProgress(
     duration: p.duration_seconds,
     watchedSeconds: p.watched_seconds,
     completed: p.completed,
+    continueWatchingRemovedAt: p.continue_watching_removed_at,
     updatedAt: Date.parse(p.updated_at),
   };
 }

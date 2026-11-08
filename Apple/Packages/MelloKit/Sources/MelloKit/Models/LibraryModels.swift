@@ -8,7 +8,9 @@ public struct WatchProgress: Codable, Hashable, Sendable {
     public let position: Double
     public let duration: Double
     public let watchedSeconds: Double
-    public let completed: Bool
+    public var completed: Bool
+    public var manuallyCompleted: Bool?
+    public var continueWatchingRemovedAt: Int?
     public let updatedAt: Double
 
     public init(
@@ -20,7 +22,9 @@ public struct WatchProgress: Codable, Hashable, Sendable {
         duration: Double,
         watchedSeconds: Double,
         completed: Bool,
-        updatedAt: Double
+        updatedAt: Double,
+        manuallyCompleted: Bool? = nil,
+        continueWatchingRemovedAt: Int? = nil
     ) {
         self.title = title
         self.season = season
@@ -30,6 +34,8 @@ public struct WatchProgress: Codable, Hashable, Sendable {
         self.duration = duration
         self.watchedSeconds = watchedSeconds
         self.completed = completed
+        self.manuallyCompleted = manuallyCompleted
+        self.continueWatchingRemovedAt = continueWatchingRemovedAt
         self.updatedAt = updatedAt
     }
 }

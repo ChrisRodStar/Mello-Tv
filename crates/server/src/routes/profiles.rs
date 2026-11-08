@@ -50,6 +50,12 @@ pub struct ResumeQuery {
 }
 
 #[derive(Debug, Deserialize)]
+struct WatchedTarget {
+    season: Option<i64>,
+    episode: Option<i64>,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct HomeQuery {
     #[serde(rename = "type")]
     pub media_type: Option<String>,
@@ -218,6 +224,14 @@ pub fn routes() -> Router<AppState> {
         // Progress, Resume & History
         .route("/api/profiles/{id}/history", get(get_history))
         .route("/api/v1/profiles/{id}/history", get(get_history))
+        .route(
+            "/api/v1/profiles/{id}/continue-watching/{media_type}/{title_id}",
+            axum::routing::delete(remove_from_continue_watching),
+        )
+        .route(
+            "/api/v1/profiles/{id}/watched/{media_type}/{title_id}",
+            put(mark_watched),
+        )
         .route("/api/profiles/{id}/resume", get(get_resume))
         .route("/api/v1/profiles/{id}/resume", get(get_resume))
         .route("/api/profiles/{id}/progress", put(update_progress))
@@ -1631,6 +1645,32 @@ async fn get_history(
         "offset": offset,
         "limit": 100,
     })))
+}
+
+async fn remove_from_continue_watching(
+    State(state): State<AppState>,
+    Path((id, media_type, title_id)): Path<(String, String, i64)>,
+) -> Result<StatusCode, AppError> {
+    let identity = TitleIdentity::new(parse_media_type(&media_type)?, title_id)?;
+    state
+        .accounts
+        .remove_from_continue_watching(&state.household_account_id, &id, identity)
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn mark_watched(
+    State(state): State<AppState>,
+    Path((id, media_type, title_id)): Path<(String, String, i64)>,
+    Json(payload): Json<WatchedTarget>,
+) -> Result<StatusCode, AppError> {
+    let identity = TitleIdentity::new(parse_media_type(&media_type)?, title_id)?;
+    let target = Target::new(identity, payload.season, payload.episode)?;
+    state
+        .accounts
+        .mark_watched(&state.household_account_id, &id, target)
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 async fn get_resume(
