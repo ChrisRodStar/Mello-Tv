@@ -1,9 +1,22 @@
-import { expect, test } from 'bun:test';
-import { publicArtwork, streamURL } from '../src/lib/api';
+import { expect, spyOn, test } from 'bun:test';
+import { publicArtwork, requestID, streamURL } from '../src/lib/api';
 import { viewTitle, viewProgress, playbackWire } from '../src/lib/wire';
 
 // Synthetic fixture only. No provider, relay, VPN or external media requests.
 const origin = 'http://127.0.0.1:5173';
+test('playback request IDs are UUID v4 when randomUUID is unavailable', () => {
+  const webCrypto = globalThis.crypto;
+  const crypto = spyOn(globalThis, 'crypto', 'get').mockReturnValue({
+    getRandomValues: webCrypto.getRandomValues.bind(webCrypto),
+  } as Crypto);
+  try {
+    const id = requestID();
+    expect(id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    expect(requestID()).not.toBe(id);
+  } finally {
+    crypto.mockRestore();
+  }
+});
 function withWindow<T>(work: () => T): T {
   const before = globalThis.window;
   Object.defineProperty(globalThis, 'window', {

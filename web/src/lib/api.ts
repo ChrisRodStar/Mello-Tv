@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { createUUID } from './uuid';
 
 export class APIError extends Error {
   constructor(
@@ -77,7 +78,9 @@ export function profilePath(id: string) {
   return `/api/v1/profiles/${encodeURIComponent(id)}`;
 }
 export function requestID() {
-  return crypto.randomUUID();
+  const id = createUUID();
+  if (!id) throw new Error('Web Crypto is unavailable.');
+  return id;
 }
 export function isMissing(error: unknown) {
   return error instanceof APIError && error.status === 404;
