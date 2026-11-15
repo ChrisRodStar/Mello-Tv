@@ -236,7 +236,6 @@ impl NativeProviders {
                     "https://vidrock.net",
                     "https://vidcore.io",
                     "https://vidfast.vc",
-                    "https://api.wecollege.net",
                     "https://vidsrc.sh",
                     "https://new.vidnest.fun",
                 ];

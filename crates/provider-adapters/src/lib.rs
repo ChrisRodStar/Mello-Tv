@@ -19,9 +19,11 @@ pub use common::{AdapterError, ProviderHost};
 
 use stream_core::providers::{AdapterResult, Lookup};
 
-pub const PROVIDERS: [&str; 11] = [
-    "vidcore", "vidlink", "vidsrc", "vidfast", "videasy", "vidrock", "fshare", "vidapi", "vidnest",
-    "vidzee", "vixsrc",
+// Videasy's original service shut down. Keep the adapter available for
+// existing package identities, but exclude it from built-in discovery.
+pub const PROVIDERS: [&str; 10] = [
+    "vidcore", "vidlink", "vidsrc", "vidfast", "vidrock", "fshare", "vidapi", "vidnest", "vidzee",
+    "vixsrc",
 ];
 
 /// An individual component wrapper chooses its provider at compile time. A
