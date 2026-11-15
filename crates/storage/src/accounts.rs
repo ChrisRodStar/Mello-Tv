@@ -21,6 +21,9 @@ use zeroize::Zeroizing;
 
 use crate::{StorageError, db::Database};
 
+const MAX_PLAYBACKS: i64 = 4_096;
+const PROGRESS_EXPIRY_GRACE_SECONDS: i64 = 300;
+
 const QUEUE_CAPACITY: usize = 64;
 const SCHEMA_VERSION: i64 = 1;
 const SENTINEL_AAD: &str = "api-key-check";
@@ -548,7 +551,12 @@ impl AccountStore {
                 return load_playback(&transaction, &profile_id, &id);
             }
             let count: i64 = transaction.query_row("SELECT count(*) FROM playbacks", [], |row| row.get(0))?;
-            if count >= 4_096 { return Err(StorageError::Conflict("playback_limit")); }
+            if count >= MAX_PLAYBACKS {
+                // Preserve in-grace progress and idempotent replays while there is capacity.
+                let cutoff = playback.created_at.timestamp().saturating_sub(PROGRESS_EXPIRY_GRACE_SECONDS);
+                let removed = transaction.execute("DELETE FROM playbacks WHERE expires < ?1", [cutoff])?;
+                if removed == 0 { return Err(StorageError::Conflict("playback_limit")); }
+            }
             let exists: bool = transaction.query_row("SELECT EXISTS(SELECT 1 FROM playbacks WHERE id=?1)", [&playback.id], |row| row.get(0))?;
             if exists { return Err(StorageError::Conflict("playback_exists")); }
             let request = serde_json::to_vec(&playback.request)?;
@@ -729,7 +737,7 @@ impl AccountStore {
             ).optional()?;
             let ProgressSession { request, total, sequence, created, expires, revoked, ready } = row.ok_or(StorageError::NotFound)?;
             if ready.as_ref().is_none_or(Vec::is_empty) { return Err(StorageError::Conflict("setup_pending")); }
-            if revoked || now.timestamp() > expires.saturating_add(300) { return Err(StorageError::Conflict("session_expired")); }
+            if revoked || now.timestamp() > expires.saturating_add(PROGRESS_EXPIRY_GRACE_SECONDS) { return Err(StorageError::Conflict("session_expired")); }
             if !total.is_finite() || total < 0.0 || sequence < 0 || created <= 0 || expires <= 0 { return Err(StorageError::Corrupt("playback progress counters")); }
             let request: PlaybackRequest = serde_json::from_slice(&request)?;
             request.validate().map_err(|_| StorageError::Corrupt("playback request"))?;

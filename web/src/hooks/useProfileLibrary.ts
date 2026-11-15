@@ -139,10 +139,11 @@ export function useProfileLibrary(id: string) {
               },
         );
     } catch {
-      if (!controller.signal.aborted) setError('Couldn’t load more history. Try again.');
+      if (token === revision.current && !controller.signal.aborted)
+        setError('Couldn’t load more history. Try again.');
     } finally {
       busy.current = false;
-      if (!controller.signal.aborted) setSaving(false);
+      setSaving(false);
     }
   }
   const current =

@@ -92,6 +92,57 @@ struct SessionState {
     created_at: Instant,
 }
 
+/// A source and its fallback candidates before the playback revision commits.
+pub struct PreparedRelaySource {
+    active: ProbedStream,
+    backups: Vec<ProbedStream>,
+}
+
+impl PreparedRelaySource {
+    pub fn from_selection(selection: Selection) -> Option<Self> {
+        Some(Self {
+            active: selection.selected?.candidate,
+            backups: selection
+                .backups
+                .unwrap_or_default()
+                .into_iter()
+                .map(|ranked| ranked.candidate)
+                .collect(),
+        })
+    }
+
+    pub fn info(&self) -> (StreamFormat, Vec<i64>) {
+        source_info(&self.active)
+    }
+
+    pub fn height(&self) -> Option<i64> {
+        source_height(&self.active)
+    }
+}
+
+fn source_height(active: &ProbedStream) -> Option<i64> {
+    let variant = active.observation.variant.as_ref()?;
+    normalize_quality_height(variant.width, variant.height)
+}
+
+fn source_info(active: &ProbedStream) -> (StreamFormat, Vec<i64>) {
+    if active.observation.format == StreamFormat::Mp4 {
+        return (StreamFormat::Mp4, Vec::new());
+    }
+    let mut heights: Vec<i64> = active
+        .observation
+        .playlist_metadata
+        .variants
+        .iter()
+        .chain(active.source.resolver_metadata.variants.iter())
+        .filter_map(|variant| normalize_quality_height(variant.width, variant.height))
+        .chain(source_height(active))
+        .collect();
+    heights.sort_unstable_by(|a, b| b.cmp(a));
+    heights.dedup();
+    (StreamFormat::Hls, heights)
+}
+
 pub struct MediaRelay {
     sessions: Mutex<BTreeMap<String, SessionState>>,
     client: reqwest::Client,
@@ -195,16 +246,18 @@ impl MediaRelay {
         token: String,
         selection: Selection,
     ) -> bool {
-        let Some(selected) = selection.selected else {
+        let Some(source) = PreparedRelaySource::from_selection(selection) else {
             return false;
         };
-        let backups: Vec<ProbedStream> = selection
-            .backups
-            .unwrap_or_default()
-            .into_iter()
-            .map(|r| r.candidate)
-            .collect();
+        self.install_source(session_id, token, source)
+    }
 
+    fn install_source(
+        &self,
+        session_id: String,
+        token: String,
+        source: PreparedRelaySource,
+    ) -> bool {
         if let Ok(mut map) = self.sessions.lock() {
             if map.len() >= MAX_SESSIONS
                 && !map.contains_key(&session_id)
@@ -219,8 +272,8 @@ impl MediaRelay {
                 session_id,
                 SessionState {
                     token,
-                    active: selected.candidate,
-                    backups,
+                    active: source.active,
+                    backups: source.backups,
                     resources: BTreeMap::new(),
                     created_at: Instant::now(),
                 },
@@ -255,105 +308,37 @@ impl MediaRelay {
     pub fn active_info(&self, session_id: &str) -> Option<(StreamFormat, Vec<i64>)> {
         let map = self.sessions.lock().ok()?;
         let session = map.get(session_id)?;
-        let format = match session.active.observation.format {
-            StreamFormat::Mp4 => StreamFormat::Mp4,
-            _ => StreamFormat::Hls,
-        };
-        let mut heights: Vec<i64> = session
-            .active
-            .observation
-            .playlist_metadata
-            .variants
-            .iter()
-            .chain(session.active.source.resolver_metadata.variants.iter())
-            .filter_map(|v| normalize_quality_height(v.width, v.height))
-            .collect();
-        if let Some(v) = &session.active.observation.variant
-            && let Some(h) = normalize_quality_height(v.width, v.height)
-        {
-            heights.push(h);
-        }
-        heights.sort_unstable_by(|a, b| b.cmp(a));
-        heights.dedup();
-        if format != StreamFormat::Hls {
-            heights.clear();
-        }
-        Some((format, heights))
+        Some(source_info(&session.active))
     }
 
     /// Height of the measured active rendition, when the source exposes one.
     pub fn active_height(&self, session_id: &str) -> Option<i64> {
         let map = self.sessions.lock().ok()?;
-        let variant = map.get(session_id)?.active.observation.variant.as_ref()?;
-        normalize_quality_height(variant.width, variant.height)
+        source_height(&map.get(session_id)?.active)
     }
 
-    /// Resolve public playback details from a measured selection before it is
-    /// installed into a session.
-    pub fn selection_info(selection: &Selection) -> Option<(StreamFormat, Vec<i64>, i64)> {
-        let active = &selection.selected.as_ref()?.candidate;
-        let format = match active.observation.format {
-            StreamFormat::Mp4 => StreamFormat::Mp4,
-            _ => StreamFormat::Hls,
-        };
-        let mut heights: Vec<i64> = active
-            .observation
-            .playlist_metadata
-            .variants
-            .iter()
-            .chain(active.source.resolver_metadata.variants.iter())
-            .filter_map(|variant| normalize_quality_height(variant.width, variant.height))
-            .collect();
-        if let Some(height) = active
-            .observation
-            .variant
-            .as_ref()
-            .and_then(|variant| normalize_quality_height(variant.width, variant.height))
-        {
-            heights.push(height);
-        }
-        heights.sort_unstable_by(|a, b| b.cmp(a));
-        heights.dedup();
-        if format != StreamFormat::Hls {
-            heights.clear();
-        }
-        let active_height = active
-            .observation
-            .variant
-            .as_ref()
-            .and_then(|variant| normalize_quality_height(variant.width, variant.height))?;
-        Some((format, heights, active_height))
-    }
-
-    pub fn activate_backup(&self, session_id: &str) -> Result<String, RelayError> {
-        let mut map = self
+    pub fn prepare_backup(&self, session_id: &str) -> Result<PreparedRelaySource, RelayError> {
+        let map = self
             .sessions
             .lock()
             .map_err(|_| RelayError::SessionNotFound)?;
-        let session = map.get_mut(session_id).ok_or(RelayError::SessionNotFound)?;
-        // Variants of one HLS master share the same entry request. Retrying
-        // another variant cannot fix a failed request for that master.
-        session.backups.retain(|backup| {
+        let session = map.get(session_id).ok_or(RelayError::SessionNotFound)?;
+        // A different rendition of the failed master still uses the failed entry.
+        let mut backups = session.backups.iter().filter(|backup| {
             backup.source.url != session.active.source.url
                 || backup.source.fetch_context != session.active.source.fetch_context
         });
-        if session.backups.is_empty() {
-            return Err(RelayError::NoBackupAvailable);
-        }
-        session.active = session.backups.remove(0);
-        session.resources.clear();
-        let new_token = Self::generate_token();
-        session.token = new_token.clone();
-        Ok(new_token)
+        let active = backups.next().ok_or(RelayError::NoBackupAvailable)?.clone();
+        Ok(PreparedRelaySource {
+            active,
+            backups: backups.cloned().collect(),
+        })
     }
 
-    pub fn replace_selection(&self, session_id: &str, selection: Selection) -> Option<String> {
-        let new_token = Self::generate_token();
-        if self.register_session(session_id.to_owned(), new_token.clone(), selection) {
-            Some(new_token)
-        } else {
-            None
-        }
+    pub fn replace_source(&self, session_id: &str, source: PreparedRelaySource) -> Option<String> {
+        let token = Self::generate_token();
+        self.install_source(session_id.to_owned(), token.clone(), source)
+            .then_some(token)
     }
 
     pub fn revoke_session(&self, session_id: &str) {
@@ -523,15 +508,20 @@ impl MediaRelay {
             )
             .map_err(|e| RelayError::InvalidManifest(e.to_string()))?;
 
-            if let Ok(mut map) = self.sessions.lock()
-                && let Some(session) = map.get_mut(session_id)
-            {
-                for (rid, url) in discovered {
-                    if session.resources.len() < MAX_RESOURCES_PER_SESSION
-                        || session.resources.contains_key(&rid)
-                    {
-                        session.resources.insert(rid, url);
-                    }
+            let mut map = self
+                .sessions
+                .lock()
+                .map_err(|_| RelayError::SessionNotFound)?;
+            let session = map.get_mut(session_id).ok_or(RelayError::SessionNotFound)?;
+            // The upstream fetch may finish after the active source was replaced.
+            if session.token != token {
+                return Err(RelayError::InvalidToken);
+            }
+            for (rid, url) in discovered {
+                if session.resources.len() < MAX_RESOURCES_PER_SESSION
+                    || session.resources.contains_key(&rid)
+                {
+                    session.resources.insert(rid, url);
                 }
             }
 

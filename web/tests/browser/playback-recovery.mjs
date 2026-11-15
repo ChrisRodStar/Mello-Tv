@@ -25,7 +25,9 @@ const base = `http://127.0.0.1:${server.httpServer.address().port}`;
 let browser;
 try {
   browser = await chromium.launch({
-    channel: 'chrome',
+    ...(process.env.MELLO_TEST_CHROMIUM
+      ? { executablePath: process.env.MELLO_TEST_CHROMIUM }
+      : { channel: 'chrome' }),
     headless: true,
     args: ['--autoplay-policy=no-user-gesture-required'],
   });
@@ -179,7 +181,59 @@ async function scenario(
     await ctx.close();
   }
 }
+async function libraryRefreshDuringPagination() {
+  const context = await browser.newContext();
+  try {
+    const page = await context.newPage();
+    const progress = {
+      type: 'movie',
+      id: 7,
+      position_seconds: 30,
+      duration_seconds: 90,
+      watched_seconds: 30,
+      completed: false,
+      updated_at: '2026-11-02T20:00:00Z',
+    };
+    await page.route('**/library', (route) =>
+      route.fulfill({ json: { titles: [
+        { type: 'movie', id: 7, title: 'First title', overview: '', rating: 0, details: true },
+        { type: 'movie', id: 8, title: 'Second title', overview: '', rating: 0, details: true },
+      ] } }),
+    );
+    let firstPageRequest;
+    let pageRequests = 0;
+    await page.route('**/history?offset=*', (route) => {
+      const offset = Number(new URL(route.request().url()).searchParams.get('offset'));
+      if (offset === 1 && ++pageRequests === 1) {
+        firstPageRequest = route;
+        return;
+      }
+      return route.fulfill({
+        json: { offset, limit: offset === 0 ? 1 : 2, records: [{ ...progress, id: 7 + offset }] },
+      });
+    });
+    await page.goto(base + '/?library');
+    const loadMore = page.getByRole('button', { name: 'Load more history' });
+    const firstRequest = page.waitForRequest('**/history?offset=1');
+    await loadMore.click();
+    await firstRequest;
+    assert(await loadMore.isDisabled());
+    const refreshed = page.waitForResponse('**/history?offset=0');
+    await page.getByRole('button', { name: 'Refresh library' }).click();
+    await refreshed;
+    // A new request can start only once the cancelled request releases the UI.
+    await loadMore.click({ timeout: 3000 });
+    await page.waitForFunction(() => document.querySelector('output')?.textContent === '2');
+    assert.equal(pageRequests, 2);
+    await firstPageRequest?.abort().catch(() => {});
+    console.log('PASS library refresh cancels pagination and releases its loading state');
+  } finally {
+    await context.close();
+  }
+}
+
 try {
+  await libraryRefreshDuringPagination();
   await scenario(
     'ended episode -> rejected next source -> one fresh lookup -> next plays without leaving',
     { badEpisodes: [2, 3] },

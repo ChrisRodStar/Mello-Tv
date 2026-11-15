@@ -865,3 +865,65 @@ async fn mutate_playback_rejects_overflowing_revision() -> TestResult {
     ));
     Ok(())
 }
+
+#[tokio::test]
+async fn playback_capacity_reclaims_expired_sessions_without_losing_history() -> TestResult {
+    let (store, owner) = store_with_profiles().await?;
+    let expiry = now()? + Duration::hours(6);
+    store
+        .create_playback(&owner, "first", allocation("original")?)
+        .await?;
+    let mut grace = allocation("in_grace")?;
+    grace.expires_at += Duration::seconds(1);
+    if let Some(ready) = &mut grace.ready {
+        ready.expires_at = grace.expires_at;
+    }
+    store.create_playback(&owner, "first", grace).await?;
+    store
+        .update_progress_at(&owner, "first", update("original", 1, 50.0, 50.0), expiry)
+        .await?;
+    store
+        .database()
+        .call(|connection| {
+            connection.execute(
+            "WITH RECURSIVE seq(n) AS (VALUES(1) UNION ALL SELECT n + 1 FROM seq WHERE n < 4094)
+             INSERT INTO playbacks(id,profile,request,ready,expires,created,idem,fingerprint)
+             SELECT 'expired_' || n, profile, request, ready, expires, created,
+                    'expired_idem_' || n, fingerprint
+             FROM playbacks CROSS JOIN seq WHERE id='original'",
+            [],
+        )?;
+            Ok(())
+        })
+        .await?;
+
+    let mut next = allocation("new_playback")?;
+    next.created_at = expiry + Duration::seconds(300);
+    next.expires_at = next.created_at + Duration::hours(6);
+    if let Some(ready) = &mut next.ready {
+        ready.expires_at = next.expires_at;
+    }
+    assert!(matches!(
+        store.create_playback(&owner, "first", next.clone()).await,
+        Err(StorageError::Conflict("playback_limit"))
+    ));
+
+    next.created_at += Duration::seconds(1);
+    let created = store.create_playback(&owner, "first", next).await?;
+    assert_eq!(created.id, "new_playback");
+    assert!(matches!(
+        store.get_playback(&owner, "first", "original").await,
+        Err(StorageError::NotFound)
+    ));
+    assert!(
+        store
+            .get_playback(&owner, "first", "in_grace")
+            .await
+            .is_ok()
+    );
+    let saved = store
+        .get_progress(&owner, "first", request()?.target)
+        .await?;
+    assert_eq!(saved.map(|progress| progress.position_seconds), Some(50.0));
+    Ok(())
+}
