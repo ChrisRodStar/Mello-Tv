@@ -18,7 +18,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     cargo build --release --locked -p stream-server && \
     cp target/release/stream-server /usr/local/bin/stream-server
 
-FROM debian:trixie-slim@sha256:f6b08b09a05725f9431502d3b5714f5c4576e82c1a84fa1debe0c24a7e0c3ec4 AS runtime
+FROM debian:trixie-slim@sha256:a72b4433de1cf7d6bae0c4cee74d0547f58601a643b3375f070c51600d63b6b2 AS runtime
 LABEL org.opencontainers.image.title="Mello TV" \
       org.opencontainers.image.source="https://github.com/ChrisRodStar/Mello-Tv" \
       org.opencontainers.image.description="Self-hosted Mello TV server and web player"
