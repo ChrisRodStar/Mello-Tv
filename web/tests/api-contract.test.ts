@@ -165,3 +165,44 @@ test('sign-out cleanup preserves reference-app browser storage', () => {
     });
   }
 });
+
+test('playback advertises HEVC only when both MP4 and the browser HLS pipeline support it', () =>
+  browser(async () => {
+    const descriptors = {
+      document: Object.getOwnPropertyDescriptor(globalThis, 'document'),
+      MediaSource: Object.getOwnPropertyDescriptor(globalThis, 'MediaSource'),
+    };
+    const original = globalThis.fetch;
+    const codecs: string[][] = [];
+    globalThis.fetch = (async (_path: unknown, options: RequestInit) => {
+      codecs.push(JSON.parse(options.body as string).device.codecs);
+      return Response.json(reply);
+    }) as typeof fetch;
+    Object.defineProperty(globalThis, 'document', {
+      configurable: true,
+      value: {
+        createElement: () => ({
+          canPlayType: (type: string) => (type.includes('hvc1') || type.includes('hev1') ? 'probably' : ''),
+        }),
+      },
+    });
+    try {
+      Object.defineProperty(globalThis, 'MediaSource', {
+        configurable: true,
+        value: { isTypeSupported: (type: string) => type.includes('hvc1') },
+      });
+      await apiPlaybackResolver(request, new AbortController().signal);
+      Object.defineProperty(globalThis, 'MediaSource', {
+        configurable: true,
+        value: { isTypeSupported: () => false },
+      });
+      await apiPlaybackResolver({ ...request }, new AbortController().signal);
+      expect(codecs).toEqual([['avc1', 'mp4a', 'hvc1'], ['avc1', 'mp4a']]);
+    } finally {
+      globalThis.fetch = original;
+      for (const [key, descriptor] of Object.entries(descriptors)) {
+        if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+        else Reflect.deleteProperty(globalThis, key);
+      }
+    }
+  }));
