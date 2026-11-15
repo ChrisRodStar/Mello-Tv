@@ -14,6 +14,7 @@ use url::Url;
 
 struct ColdPlaylists {
     stalled: bool,
+    long_rendition: bool,
 }
 #[async_trait]
 impl ProbeTransport for ColdPlaylists {
@@ -35,9 +36,19 @@ impl ProbeTransport for ColdPlaylists {
             }
             "/1080.m3u8" => {
                 tokio::time::sleep(Duration::from_millis(3500)).await;
-                Bytes::from_static(
-                    b"#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXTINF:6,\nsegment.ts\n#EXT-X-ENDLIST\n",
-                )
+                let mut playlist = String::from("#EXTM3U\n#EXT-X-TARGETDURATION:6\n");
+                if self.long_rendition {
+                    let query = "a".repeat(340);
+                    for segment in 0..1_800 {
+                        use std::fmt::Write;
+                        writeln!(playlist, "#EXTINF:6,\nsegment-{segment}.ts?token={query}")
+                            .map_err(|_| TransportError::InvalidConfig)?;
+                    }
+                } else {
+                    playlist.push_str("#EXTINF:6,\nsegment.ts\n");
+                }
+                playlist.push_str("#EXT-X-ENDLIST\n");
+                Bytes::from(playlist)
             }
             _ => {
                 let mut bytes = vec![0; 188 * 10];
@@ -50,6 +61,9 @@ impl ProbeTransport for ColdPlaylists {
                 Bytes::from(bytes)
             }
         };
+        if body.len() > request.max_response_bytes {
+            return Err(TransportError::ResponseLimit);
+        }
         Ok(FetchResponse {
             url,
             status: StatusCode::OK,
@@ -76,7 +90,10 @@ fn candidate() -> Result<CandidateStream, serde_json::Error> {
 async fn cold_playlists_reach_media_samples_within_default_budget()
 -> Result<(), Box<dyn std::error::Error>> {
     let prober = StreamProber::new(
-        Arc::new(ColdPlaylists { stalled: false }),
+        Arc::new(ColdPlaylists {
+            stalled: false,
+            long_rendition: false,
+        }),
         ProbeLimits::default(),
     )?;
     let streams = prober
@@ -96,7 +113,13 @@ async fn stalled_playlist_still_stops_at_the_source_deadline()
 -> Result<(), Box<dyn std::error::Error>> {
     let limits = ProbeLimits::default();
     let deadline = limits.source_timeout;
-    let prober = StreamProber::new(Arc::new(ColdPlaylists { stalled: true }), limits)?;
+    let prober = StreamProber::new(
+        Arc::new(ColdPlaylists {
+            stalled: true,
+            long_rendition: false,
+        }),
+        limits,
+    )?;
     let started = tokio::time::Instant::now();
     let streams = prober
         .probe_all(vec![candidate()?], &CancellationToken::new())
@@ -106,5 +129,24 @@ async fn stalled_playlist_still_stops_at_the_source_deadline()
         Some(ErrorCategory::Timeout)
     );
     assert_eq!(started.elapsed(), deadline);
+    Ok(())
+}
+
+#[tokio::test(start_paused = true)]
+async fn long_signed_movie_playlist_reaches_media_sampling()
+-> Result<(), Box<dyn std::error::Error>> {
+    let prober = StreamProber::new(
+        Arc::new(ColdPlaylists {
+            stalled: false,
+            long_rendition: true,
+        }),
+        ProbeLimits::default(),
+    )?;
+    let streams = prober
+        .probe_all(vec![candidate()?], &CancellationToken::new())
+        .await?;
+    let stream = streams.first().ok_or("missing result")?;
+    assert!(stream.observation.accessible);
+    assert!(stream.observation.sample_bytes > 0);
     Ok(())
 }

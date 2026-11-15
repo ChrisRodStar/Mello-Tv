@@ -19,8 +19,9 @@ observations and resolver-result caches are not changed by health checks.
 A batch has at most five concurrent checks. Each provider has two attempts of up
 to 18 seconds, including shared provider/probe admission waits. Each attempt probes
 at most two candidates, one variant each, with one media sample per variant, a
-2 MiB total sample budget and 512 KiB playlist budget. Probe admission is shared
-with normal playback. Dropping the batch cancels its provider and probe work.
+2 MiB total sample budget, a 2 MiB total playlist budget, and a 1 MiB limit per
+playlist. Probe admission is shared with normal playback. Dropping the batch
+cancels its provider and probe work.
 
 Concurrent callers share a cached batch for 60 seconds. The cache includes the
 provider IDs, versions and generations. Responses contain only provider identity,
