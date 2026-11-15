@@ -12,7 +12,10 @@ use stream_core::providers::{FetchContext, ProbedStream, Selection, StreamFormat
 use thiserror::Error;
 use url::Url;
 
-use super::hls::HlsManifestRewriter;
+use super::{
+    hls::HlsManifestRewriter,
+    range::{open_range_start, relay_open_range},
+};
 use crate::selection::normalize_quality_height;
 
 const DEFAULT_USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36";
@@ -36,7 +39,7 @@ impl ActivityState {
     }
 }
 
-struct ActivityGuard {
+pub(super) struct ActivityGuard {
     activity: PlaybackActivity,
     session_id: String,
 }
@@ -146,6 +149,7 @@ fn source_info(active: &ProbedStream) -> (StreamFormat, Vec<i64>) {
 pub struct MediaRelay {
     sessions: Mutex<BTreeMap<String, SessionState>>,
     client: reqwest::Client,
+    range_client: Option<reqwest::Client>,
     activity: PlaybackActivity,
 }
 
@@ -157,20 +161,19 @@ impl Default for MediaRelay {
 
 impl MediaRelay {
     pub fn new() -> Self {
-        let client = reqwest::Client::builder()
+        let client = relay_client_builder()
             .redirect(reqwest::redirect::Policy::limited(5))
-            .tcp_nodelay(true)
-            .tcp_keepalive(Duration::from_secs(60))
-            .pool_max_idle_per_host(32)
-            .pool_idle_timeout(Duration::from_secs(90))
-            .connect_timeout(Duration::from_secs(6))
-            .read_timeout(Duration::from_secs(20))
             .build()
             .unwrap_or_else(|_| reqwest::Client::new());
+        let range_client = relay_client_builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .ok();
 
         Self {
             sessions: Mutex::new(BTreeMap::new()),
             client,
+            range_client,
             activity: Arc::new(Mutex::new(BTreeMap::new())),
         }
     }
@@ -407,7 +410,7 @@ impl MediaRelay {
             .await
     }
 
-    async fn proxy_url(
+    pub(super) async fn proxy_url(
         &self,
         session_id: &str,
         token: &str,
@@ -439,16 +442,22 @@ impl MediaRelay {
         }
 
         let is_likely_manifest = upstream_url.contains(".m3u8");
-        if let Some(range) = range_header
-            && !is_likely_manifest
-        {
+        let range_header = range_header.filter(|_| !is_likely_manifest);
+        if let Some(range) = range_header {
             req = req.header("Range", range);
         }
-
-        let res = req
-            .send()
-            .await
-            .map_err(|e| RelayError::Upstream(e.to_string()))?;
+        let res = req.send().await.map_err(upstream_error)?;
+        // Some origins require explicit ranges. Keep the player's open range
+        // continuous while requesting one bounded slice from the origin at a time.
+        if res.status() == reqwest::StatusCode::PRECONDITION_REQUIRED
+            && let Some(start) = range_header.and_then(open_range_start)
+        {
+            let client = self.range_client.clone().ok_or_else(|| {
+                RelayError::Upstream("bounded range transport unavailable".into())
+            })?;
+            return relay_open_range(client, res.url().clone(), context.clone(), start, activity)
+                .await;
+        }
 
         let status = res.status().as_u16();
         if !res.status().is_success() {
@@ -546,6 +555,20 @@ impl MediaRelay {
             stream: Box::pin(combined),
         })
     }
+}
+
+fn relay_client_builder() -> reqwest::ClientBuilder {
+    reqwest::Client::builder()
+        .tcp_nodelay(true)
+        .tcp_keepalive(Duration::from_secs(60))
+        .pool_max_idle_per_host(32)
+        .pool_idle_timeout(Duration::from_secs(90))
+        .connect_timeout(Duration::from_secs(6))
+        .read_timeout(Duration::from_secs(20))
+}
+
+pub(super) fn upstream_error(error: reqwest::Error) -> RelayError {
+    RelayError::Upstream(error.without_url().to_string())
 }
 
 fn looks_like_hls_manifest(bytes: &[u8]) -> bool {

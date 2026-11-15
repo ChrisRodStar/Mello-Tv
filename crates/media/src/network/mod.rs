@@ -10,6 +10,7 @@ pub use client::{
     EgressMode, FetchMetrics, FetchRequest, FetchResponse, HttpClient, ProxyEndpoint, ResponseBody,
     StreamingResponse, TransportConfig, TransportError,
 };
+pub(crate) use context::request_headers;
 pub use destination::{parse_destination_url, public_ip, validate_destination_url};
 pub use reqwest::{Method, StatusCode};
 

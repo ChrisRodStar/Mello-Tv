@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use stream_core::providers::FetchContext;
 use url::Url;
 
-pub(super) fn request_headers(
+pub(crate) fn request_headers(
     context: &FetchContext,
     target: &Url,
     internal: &BTreeMap<String, String>,
