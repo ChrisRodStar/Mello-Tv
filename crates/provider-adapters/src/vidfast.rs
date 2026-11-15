@@ -469,7 +469,9 @@ fn parse_bootstrap(body: &[u8], title: &ProviderTitle) -> Result<(String, String
         .captures(html)
         .and_then(|c| c.get(1))
         .map(|m| m.as_str().to_owned())
-        .ok_or(AdapterError::Protocol("VidFast player script missing"))?;
+        .ok_or(AdapterError::Unavailable(
+            "VidFast protocol v15 migration pending",
+        ))?;
 
     Ok((token, script_cap))
 }
