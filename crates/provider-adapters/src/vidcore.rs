@@ -29,11 +29,6 @@ fn protocol_cache() -> &'static RwLock<BTreeMap<String, (Protocol, Instant)>> {
     CACHE.get_or_init(|| RwLock::new(BTreeMap::new()))
 }
 
-fn latest_protocol() -> &'static RwLock<Option<(Protocol, Instant)>> {
-    static PROTO: OnceLock<RwLock<Option<(Protocol, Instant)>>> = OnceLock::new();
-    PROTO.get_or_init(|| RwLock::new(None))
-}
-
 fn candidate_chunks(chunks: &[String]) -> Vec<&str> {
     let mut prioritized = Vec::new();
     let mut framework = Vec::new();
@@ -136,25 +131,14 @@ fn resolve_with(
 
     let ordered_chunks = candidate_chunks(&chunks);
     let now = Instant::now();
-    let mut recognized = latest_protocol().read().ok().and_then(|cached| {
-        cached
-            .as_ref()
-            .filter(|(_, expires_at)| *expires_at > now)
-            .map(|(protocol, _)| protocol.clone())
+    let mut recognized = protocol_cache().read().ok().and_then(|cache| {
+        ordered_chunks.iter().find_map(|chunk| {
+            cache
+                .get(&format!("{ORIGIN}{chunk}"))
+                .filter(|(_, expires_at)| *expires_at > now)
+                .map(|(protocol, _)| protocol.clone())
+        })
     });
-
-    if recognized.is_none() {
-        let cache_guard = protocol_cache().read();
-        if let Ok(cache) = &cache_guard {
-            for chunk in &ordered_chunks {
-                let chunk_url = format!("{ORIGIN}{chunk}");
-                if let Some((proto, _)) = cache.get(&chunk_url).filter(|(_, exp)| *exp > now) {
-                    recognized = Some(proto.clone());
-                    break;
-                }
-            }
-        }
-    }
 
     if recognized.is_none() {
         for chunk in &ordered_chunks {
@@ -174,9 +158,6 @@ fn resolve_with(
                         chunk_url,
                         (proto.clone(), now + Duration::from_secs(3600 * 24)),
                     );
-                }
-                if let Ok(mut guard) = latest_protocol().write() {
-                    *guard = Some((proto.clone(), now + Duration::from_secs(3600 * 24)));
                 }
                 recognized = Some(proto);
                 break;

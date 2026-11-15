@@ -1,4 +1,4 @@
-//! Native translations of the three fingerprinted VidCore player protocols.
+//! Native translations of fingerprinted VidCore player protocols.
 //!
 //! No JavaScript or bytecode is executed. [`Protocol::from_source`] verifies
 //! material and decoded instruction fingerprints before reading known constants.
@@ -45,6 +45,7 @@ pub enum ProtocolVersion {
     V3,
     V4,
     V5,
+    V6,
 }
 
 /// Dimensions are fixed by the known translated protocol. Prefixes may differ
