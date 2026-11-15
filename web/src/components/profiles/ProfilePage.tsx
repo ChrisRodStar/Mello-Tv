@@ -3,6 +3,8 @@ import { useMemo, useState, type CSSProperties } from 'react';
 import type { Profile, Title, WatchProgress } from '../../model';
 
 import { useProfileLibrary } from '../../hooks/useProfileLibrary';
+import { continueWatchingItems } from '../../lib/library';
+import { ContinueWatchingActions } from '../catalog/ContinueWatching';
 import { Icon } from '../common/Icon';
 import { BUY_ME_A_COFFEE_URL } from '../../config/links';
 import { ProfileAvatar } from './ProfileAvatar';
@@ -182,15 +184,7 @@ export function ProfilePage({
   const [tab, setTab] = useState<ProfileTab>('continue');
   const [resolvingKey, setResolvingKey] = useState<string | null>(null);
 
-  const continueItems = useMemo(() => {
-    const seen = new Set<string>();
-    return library.progress.filter((item) => {
-      const key = `${item.title.type}:${item.title.id}`;
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return item.position >= 10 && (!item.completed || item.title.type === 'tv');
-    });
-  }, [library.progress]);
+  const continueItems = useMemo(() => continueWatchingItems(library.progress), [library.progress]);
 
   const historyDays = useMemo(() => groupHistoryByDay(library.progress), [library.progress]);
 
@@ -366,56 +360,66 @@ export function ProfilePage({
             <div className="personal-poster-shelf">
               {continueItems.map((item) => {
                 const key = `${item.title.type}-${item.title.id}-${item.season}-${item.episode}`;
-                const fraction = getProfileFraction(item);
+                const fraction = item.completed ? 1 : getProfileFraction(item);
                 const remaining = getContinueRemaining(item, fraction);
                 const posterSrc = item.title.posterUrl ?? item.title.backdropUrl;
                 const isPreparing = resolvingKey === key;
 
                 return (
-                  <button
+                  <div
+                    className="profile-continue-poster-group"
                     key={`${item.title.type}-${item.title.id}`}
-                    type="button"
-                    className="profile-continue-poster-card"
-                    disabled={resolvingKey !== null}
-                    onClick={() => void handlePlay(item)}
-                    aria-label={`${item.completed ? 'Play' : 'Resume'} ${item.title.title}`}
                   >
-                    <span className="profile-continue-poster-art">
-                      {posterSrc ? (
-                        <img src={posterSrc} alt="" decoding="async" />
-                      ) : (
-                        <ArtworkFallback title={item.title.title} type={item.title.type} />
-                      )}
-                      <BrandTVWatermark />
-                      <span className="profile-continue-poster-frost" aria-hidden="true" />
-                      <span className="profile-continue-poster-shade" aria-hidden="true" />
-                      <span className="profile-continue-poster-meta">
-                        {item.title.type === 'tv' && (
-                          <span className="profile-continue-poster-episode">
-                            S{item.season}, E{item.episode}
-                          </span>
+                    <button
+                      type="button"
+                      className="profile-continue-poster-card"
+                      disabled={resolvingKey !== null}
+                      onClick={() => void handlePlay(item)}
+                      aria-label={`${item.completed ? 'Play' : 'Resume'} ${item.title.title}`}
+                    >
+                      <span className="profile-continue-poster-art">
+                        {posterSrc ? (
+                          <img src={posterSrc} alt="" decoding="async" />
+                        ) : (
+                          <ArtworkFallback title={item.title.title} type={item.title.type} />
                         )}
-                        <span className="profile-continue-poster-status">
-                          <span className="profile-continue-poster-play" aria-hidden="true">
-                            {isPreparing ? (
-                              <span className="profile-inline-spinner" />
-                            ) : (
-                              <Icon name="play" />
-                            )}
-                          </span>
-                          {fraction !== null && (
-                            <span className="profile-continue-capsule-track" aria-hidden="true">
-                              <span
-                                className="profile-continue-capsule-fill"
-                                style={{ width: `${Math.round(fraction * 100)}%` }}
-                              />
+                        <BrandTVWatermark />
+                        <span className="profile-continue-poster-frost" aria-hidden="true" />
+                        <span className="profile-continue-poster-shade" aria-hidden="true" />
+                        <span className="profile-continue-poster-meta">
+                          {item.title.type === 'tv' && (
+                            <span className="profile-continue-poster-episode">
+                              S{item.season}, E{item.episode}
                             </span>
                           )}
-                          <span className="profile-continue-remaining">{remaining}</span>
+                          <span className="profile-continue-poster-status">
+                            <span className="profile-continue-poster-play" aria-hidden="true">
+                              {isPreparing ? (
+                                <span className="profile-inline-spinner" />
+                              ) : (
+                                <Icon name="play" />
+                              )}
+                            </span>
+                            {fraction !== null && (
+                              <span className="profile-continue-capsule-track" aria-hidden="true">
+                                <span
+                                  className="profile-continue-capsule-fill"
+                                  style={{ width: `${Math.round(fraction * 100)}%` }}
+                                />
+                              </span>
+                            )}
+                            <span className="profile-continue-remaining">{remaining}</span>
+                          </span>
                         </span>
                       </span>
-                    </span>
-                  </button>
+                    </button>
+                    <ContinueWatchingActions
+                      item={item}
+                      disabled={resolvingKey !== null}
+                      onInfo={() => onSelect(item.title)}
+                      onUpdate={library.updateContinueWatching}
+                    />
+                  </div>
                 );
               })}
             </div>

@@ -573,6 +573,43 @@ async fn playback_lifecycle_and_progress_parity() -> TestResult {
     assert_eq!(hist["offset"], 0);
     assert_eq!(hist["limit"], 100);
 
+    let res = client
+        .delete(format!(
+            "{base}/api/v1/profiles/{pid}/continue-watching/movie/501"
+        ))
+        .send()
+        .await?;
+    assert_eq!(res.status(), reqwest::StatusCode::NO_CONTENT);
+    let history: Value = client
+        .get(format!("{base}/api/v1/profiles/{pid}/history"))
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+    assert!(history["records"][0]["continue_watching_removed_at"].is_i64());
+    assert_eq!(history["records"][0]["position_seconds"], 28.0);
+    assert_eq!(history["records"][0]["watched_seconds"], 25.0);
+
+    let res = client
+        .put(format!("{base}/api/v1/profiles/{pid}/watched/tv/501"))
+        .json(&json!({ "season": 1, "episode": 2 }))
+        .send()
+        .await?;
+    assert_eq!(res.status(), reqwest::StatusCode::NO_CONTENT);
+    let episode: Value = client
+        .get(format!(
+            "{base}/api/v1/profiles/{pid}/resume?type=tv&id=501&season=1&episode=2"
+        ))
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+    assert_eq!(episode["completed"], true);
+    assert_eq!(episode["manually_completed"], true);
+    assert_eq!(episode["watched_seconds"], 0.0);
+
     // 7. Lease Renewal (renew)
     let res = client
         .post(format!(

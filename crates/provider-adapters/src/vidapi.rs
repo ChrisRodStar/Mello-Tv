@@ -1,21 +1,30 @@
 //! VidAPI's coordinate query endpoint returns direct stream URL candidates.
 use crate::{
     AdapterError, ProviderHost,
-    common::{self, fetch, get},
+    common::{self, batch, fetch, get, header},
     destination::public_url,
 };
+use base64::{Engine as _, engine::general_purpose::STANDARD};
+use regex::Regex;
 use serde::Deserialize;
-use std::{borrow::Cow, collections::BTreeSet};
+use serde_json::Value;
+use std::{
+    borrow::Cow,
+    collections::{BTreeMap, BTreeSet},
+    sync::OnceLock,
+};
 use stream_core::{
     domain::MediaType,
     providers::{
-        AdapterResult, CandidateStream, FetchContext, Lookup, Metadata, StreamFormat, Track,
+        AdapterResult, CandidateStream, FetchContext, Lookup, Metadata, PublicResourceContext,
+        StreamFormat, Track,
     },
 };
 use url::Url;
 
 const API: &str = "https://streamdata.vaplayer.ru/api.php";
-const ORIGIN: &str = "https://brightpathsignals.com";
+const EMBED_ORIGIN: &str = "https://vaplayer.ru";
+const NEXTGEN_ORIGIN: &str = "https://nextgencloudfabric.com";
 const LIMIT: u32 = 512 * 1024;
 
 #[derive(Deserialize)]
@@ -24,14 +33,22 @@ struct Envelope<'a> {
     status_code: Cow<'a, str>,
     #[serde(borrow, default)]
     data: Option<Data<'a>>,
+    #[serde(default)]
+    va: Option<VaConfig>,
     #[serde(borrow, default)]
     default_subs: Vec<Subtitle<'a>>,
 }
 
 #[derive(Deserialize)]
+struct VaConfig {
+    #[serde(default)]
+    wasm_url: String,
+}
+
+#[derive(Deserialize)]
 struct Data<'a> {
-    #[serde(borrow, default)]
-    stream_urls: Vec<Cow<'a, str>>,
+    #[serde(default)]
+    stream_urls: Value,
     #[serde(borrow, default)]
     file_name: Cow<'a, str>,
 }
@@ -64,8 +81,119 @@ fn is_valid_imdb(imdb: &str) -> bool {
         && imdb[2..].bytes().all(|b| b.is_ascii_digit())
 }
 
-fn endpoint(lookup: &Lookup, use_imdb: bool) -> Result<Url, AdapterError> {
-    let mut endpoint = Url::parse(API).map_err(|_| AdapterError::Protocol("VidAPI endpoint"))?;
+fn try_resolve(
+    lookup: &Lookup,
+    host: &dyn ProviderHost,
+    use_imdb: bool,
+) -> Result<AdapterResult, AdapterError> {
+    let (stream_api_url, nextgen_page_url, api_token) =
+        match bootstrap_authenticated_session(lookup, host, use_imdb) {
+            Ok(session) => session,
+            Err(_) => {
+                // If full web bootstrap fails (e.g. in mock tests), fallback to direct API endpoint
+                let direct = direct_endpoint(lookup, use_imdb, API, "")?;
+                return resolve_from_endpoint(lookup, host, &direct, "", "");
+            }
+        };
+
+    let endpoint = direct_endpoint(lookup, use_imdb, &stream_api_url, &api_token)?;
+    resolve_from_endpoint(lookup, host, &endpoint, &nextgen_page_url, &api_token)
+}
+
+fn bootstrap_authenticated_session(
+    lookup: &Lookup,
+    host: &dyn ProviderHost,
+    use_imdb: bool,
+) -> Result<(String, String, String), AdapterError> {
+    static CONFIG_RE: OnceLock<Result<Regex, regex::Error>> = OnceLock::new();
+    let config_re = CONFIG_RE
+        .get_or_init(|| Regex::new(r#"const\s+CONFIG\s*=\s*(\{.*?\});"#))
+        .as_ref()
+        .map_err(|_| AdapterError::Protocol("CONFIG regex init"))?;
+
+    let relative_path = match lookup.title.media_type {
+        MediaType::Movie => {
+            if use_imdb {
+                format!("/embed/movie/{}", lookup.title.imdb_id)
+            } else {
+                format!("/embed/movie/{}", lookup.title.tmdb_id.get())
+            }
+        }
+        MediaType::Tv => {
+            let season = lookup.title.season.ok_or(AdapterError::Input)?;
+            let episode = lookup.title.episode.ok_or(AdapterError::Input)?;
+            if use_imdb {
+                format!("/embed/tv/{}/{}/{}", lookup.title.imdb_id, season, episode)
+            } else {
+                format!(
+                    "/embed/tv/{}/{}/{}",
+                    lookup.title.tmdb_id.get(),
+                    season,
+                    episode
+                )
+            }
+        }
+    };
+
+    let embed_url = format!("{EMBED_ORIGIN}{relative_path}");
+    let embed_response = fetch(host, get(&embed_url, &format!("{EMBED_ORIGIN}/"), LIMIT))?;
+
+    let mut cookies = Vec::new();
+    for h in &embed_response.headers {
+        if h.name.eq_ignore_ascii_case("set-cookie")
+            && let Some(cookie_part) = h.value.split(';').next()
+        {
+            cookies.push(cookie_part.trim().to_string());
+        }
+    }
+    let cookie_header = cookies.join("; ");
+
+    let encoded_path: String =
+        url::form_urlencoded::byte_serialize(relative_path.as_bytes()).collect();
+    let va_src_url = format!("{EMBED_ORIGIN}/embed/va_src.php?path={encoded_path}");
+    let mut va_src_req = get(&va_src_url, &embed_url, LIMIT);
+    if !cookie_header.is_empty() {
+        va_src_req.headers.push(header("Cookie", cookie_header));
+    }
+    let va_src_response = fetch(host, va_src_req)?;
+    let va_src_json: Value = common::json(&va_src_response.body, LIMIT as usize, "va_src JSON")?;
+    let nextgen_url = va_src_json
+        .get("src")
+        .and_then(Value::as_str)
+        .ok_or(AdapterError::Protocol("va_src missing src"))?;
+
+    let nextgen_response = fetch(host, get(nextgen_url, &format!("{EMBED_ORIGIN}/"), LIMIT))?;
+    let html = std::str::from_utf8(&nextgen_response.body)
+        .map_err(|_| AdapterError::Protocol("nextgen html encoding"))?;
+
+    let caps = config_re
+        .captures(html)
+        .ok_or(AdapterError::Protocol("CONFIG missing in player html"))?;
+    let config_str = caps.get(1).map(|m| m.as_str()).unwrap_or("{}");
+    let config_json: Value = common::json(config_str.as_bytes(), LIMIT as usize, "CONFIG JSON")?;
+
+    let api_url = config_json
+        .get("streamDataApiUrl")
+        .and_then(Value::as_str)
+        .unwrap_or(API)
+        .to_string();
+    let api_token = config_json
+        .get("apiToken")
+        .and_then(Value::as_str)
+        .ok_or(AdapterError::Protocol("CONFIG missing apiToken"))?
+        .to_string();
+
+    Ok((api_url, nextgen_url.to_string(), api_token))
+}
+
+fn direct_endpoint(
+    lookup: &Lookup,
+    use_imdb: bool,
+    base_url: &str,
+    api_token: &str,
+) -> Result<Url, AdapterError> {
+    let mut endpoint =
+        Url::parse(base_url).map_err(|_| AdapterError::Protocol("VidAPI endpoint"))?;
     {
         let mut query = endpoint.query_pairs_mut();
         if use_imdb {
@@ -96,17 +224,27 @@ fn endpoint(lookup: &Lookup, use_imdb: bool) -> Result<Url, AdapterError> {
                     &lookup.title.episode.ok_or(AdapterError::Input)?.to_string(),
                 );
         }
+        query.append_pair("stream_urls", "");
+        if !api_token.is_empty() {
+            query.append_pair("api_token", api_token);
+        }
     }
     Ok(endpoint)
 }
 
-fn try_resolve(
+fn resolve_from_endpoint(
     lookup: &Lookup,
     host: &dyn ProviderHost,
-    use_imdb: bool,
+    url: &Url,
+    nextgen_page_url: &str,
+    api_token: &str,
 ) -> Result<AdapterResult, AdapterError> {
-    let url = endpoint(lookup, use_imdb)?;
-    let response = fetch(host, get(url.as_str(), &format!("{ORIGIN}/"), LIMIT))?;
+    let referer = if nextgen_page_url.is_empty() {
+        format!("{NEXTGEN_ORIGIN}/")
+    } else {
+        nextgen_page_url.to_string()
+    };
+    let response = fetch(host, get(url.as_str(), &referer, LIMIT))?;
     if response.body.len() > LIMIT as usize {
         return Err(AdapterError::Protocol("response byte limit"));
     }
@@ -118,7 +256,11 @@ fn try_resolve(
     let data = envelope
         .data
         .ok_or(AdapterError::Unavailable("VidAPI stream data"))?;
-    if data.stream_urls.len() > 32 || envelope.default_subs.len() > 64 {
+
+    let raw_stream_urls =
+        parse_or_decrypt_streams(&data.stream_urls, &envelope.va, host, &referer)?;
+
+    if raw_stream_urls.len() > 32 || envelope.default_subs.len() > 64 {
         return Err(AdapterError::Protocol("VidAPI result count"));
     }
 
@@ -158,12 +300,62 @@ fn try_resolve(
         None
     };
 
-    let mut candidates = Vec::with_capacity(data.stream_urls.len().min(32));
+    let mut distinct_origins = BTreeSet::new();
+    for raw in &raw_stream_urls {
+        if let Ok(parsed) = public_url(raw) {
+            distinct_origins.insert(format!(
+                "{}://{}",
+                parsed.scheme(),
+                parsed.host_str().unwrap_or("")
+            ));
+        }
+    }
+
+    let mut host_tokens = BTreeMap::new();
+    if !api_token.is_empty() && !distinct_origins.is_empty() {
+        let mut token_requests = Vec::new();
+        let mut origins_order = Vec::new();
+        for origin in distinct_origins {
+            let token_url = format!("{origin}/generate.php?api_token={api_token}");
+            let mut req = get(&token_url, &referer, 8192);
+            req.headers.push(header("Origin", NEXTGEN_ORIGIN));
+            token_requests.push(req);
+            origins_order.push(origin);
+        }
+        if let Ok(responses) = batch(host, token_requests) {
+            for (origin, res) in origins_order.into_iter().zip(responses) {
+                if let Ok(r) = res
+                    && r.status == 200
+                    && let Ok(tok) = std::str::from_utf8(&r.body)
+                {
+                    let clean = tok.trim();
+                    if !clean.is_empty() && clean.len() <= 2048 {
+                        host_tokens.insert(origin, clean.to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    let mut candidates = Vec::with_capacity(raw_stream_urls.len().min(32));
     let mut issues = Vec::new();
     let mut seen = BTreeSet::new();
 
-    for raw in data.stream_urls {
-        match public_url(raw.as_ref()) {
+    for mut raw in raw_stream_urls {
+        let origin = if let Ok(parsed) = public_url(&raw) {
+            format!("{}://{}", parsed.scheme(), parsed.host_str().unwrap_or(""))
+        } else {
+            String::new()
+        };
+
+        if let Some(tok) = host_tokens.get(&origin) {
+            let delim = if raw.contains('?') { '&' } else { '?' };
+            raw.push(delim);
+            raw.push_str("token=");
+            raw.push_str(tok);
+        }
+
+        match public_url(&raw) {
             Ok(url) if seen.insert(url.as_str().to_owned()) => {
                 let mut metadata = Metadata {
                     tracks: tracks.clone(),
@@ -176,6 +368,13 @@ fn try_resolve(
                         .insert("file_name_claim".into(), claim.clone().into());
                 }
                 let format = format_from_url(url.path());
+                let fetch_context = FetchContext {
+                    scopes: Vec::new(),
+                    public_resources: Some(PublicResourceContext {
+                        origin: String::new(),
+                        referer: format!("{NEXTGEN_ORIGIN}/"),
+                    }),
+                };
                 candidates.push(CandidateStream {
                     expires_at: None,
                     id: format!("vidapi-{}", common::hash_id(&[url.as_str().as_bytes()])),
@@ -185,7 +384,7 @@ fn try_resolve(
                     provider: provider.clone(),
                     format,
                     title: lookup.title.clone(),
-                    fetch_context: FetchContext::default(),
+                    fetch_context,
                     resolver_metadata: metadata,
                     content_verified: false,
                 });
@@ -195,9 +394,6 @@ fn try_resolve(
         }
     }
 
-    // Prioritize high-bandwidth streaming endpoints ahead of slower secondary mirrors.
-    // Upstream VidAPI coordinates return secondary/throttled mirrors at candidate 0, while candidate 1
-    // provides the primary high-throughput CDN stream.
     if candidates.len() >= 2 {
         candidates.swap(0, 1);
     }
@@ -206,6 +402,154 @@ fn try_resolve(
         return Err(AdapterError::Unavailable("VidAPI streams"));
     }
     Ok(common::result(candidates, issues))
+}
+
+fn parse_or_decrypt_streams(
+    value: &Value,
+    va: &Option<VaConfig>,
+    host: &dyn ProviderHost,
+    referer: &str,
+) -> Result<Vec<String>, AdapterError> {
+    match value {
+        Value::Array(arr) => {
+            let mut list = Vec::new();
+            for item in arr {
+                if let Some(s) = item.as_str() {
+                    list.push(s.to_string());
+                }
+            }
+            Ok(list)
+        }
+        Value::String(encoded_b64) => {
+            let wasm_url = va
+                .as_ref()
+                .map(|v| v.wasm_url.as_str())
+                .filter(|s| !s.is_empty())
+                .ok_or(AdapterError::Protocol("missing wasm_url"))?;
+
+            let wasm_res = fetch(host, get(wasm_url, referer, LIMIT))?;
+            let key = extract_chacha_key(&wasm_res.body)?;
+
+            let decoded = STANDARD
+                .decode(encoded_b64.trim())
+                .map_err(|_| AdapterError::Protocol("stream_urls base64"))?;
+            if decoded.len() < 13 {
+                return Err(AdapterError::Protocol("ciphertext too short"));
+            }
+
+            let nonce = &decoded[..12];
+            let mut ciphertext = decoded[12..].to_vec();
+            stream_provider_codecs::chacha20_xor(&key, nonce, 0, &mut ciphertext)
+                .map_err(|_| AdapterError::Protocol("chacha20 decrypt"))?;
+
+            let plaintext = std::str::from_utf8(&ciphertext)
+                .map_err(|_| AdapterError::Protocol("stream_urls utf8"))?;
+
+            let urls = plaintext
+                .lines()
+                .map(|line| line.trim().to_string())
+                .filter(|line| !line.is_empty())
+                .collect();
+            Ok(urls)
+        }
+        _ => Err(AdapterError::Protocol("unexpected stream_urls value")),
+    }
+}
+
+fn read_leb128_u32(bytes: &[u8]) -> Result<(u32, usize), AdapterError> {
+    let mut result = 0u32;
+    let mut shift = 0;
+    for (i, &byte) in bytes.iter().enumerate().take(5) {
+        result |= u32::from(byte & 0x7f) << shift;
+        if (byte & 0x80) == 0 {
+            return Ok((result, i + 1));
+        }
+        shift += 7;
+    }
+    Err(AdapterError::Protocol("invalid leb128"))
+}
+
+fn parse_data_section(data: &[u8]) -> Result<[u8; 32], AdapterError> {
+    let mut pos = 0;
+    let (count, read) = read_leb128_u32(&data[pos..])?;
+    pos += read;
+    let mut segs32 = Vec::new();
+    let mut segs_by_offset = BTreeMap::new();
+    for _ in 0..count {
+        if pos >= data.len() {
+            return Err(AdapterError::Protocol("truncated data section"));
+        }
+        let (mode, read) = read_leb128_u32(&data[pos..])?;
+        pos += read;
+        if mode == 0 {
+            if pos >= data.len() || data[pos] != 0x41 {
+                return Err(AdapterError::Protocol("data init expr"));
+            }
+            pos += 1;
+            let (offset, read) = read_leb128_u32(&data[pos..])?;
+            pos += read;
+            if pos >= data.len() || data[pos] != 0x0b {
+                return Err(AdapterError::Protocol("data init end"));
+            }
+            pos += 1;
+            let (size, read) = read_leb128_u32(&data[pos..])?;
+            pos += read;
+            let seg_end = pos
+                .checked_add(size as usize)
+                .ok_or(AdapterError::Protocol("segment overflow"))?;
+            if seg_end > data.len() {
+                return Err(AdapterError::Protocol("segment boundary"));
+            }
+            let seg_bytes = &data[pos..seg_end];
+            if size == 32 {
+                let mut buf = [0u8; 32];
+                buf.copy_from_slice(seg_bytes);
+                segs32.push(buf);
+                segs_by_offset.insert(offset, buf);
+            }
+            pos = seg_end;
+        } else {
+            return Err(AdapterError::Protocol("unsupported data segment mode"));
+        }
+    }
+    let (seg_a, seg_b) =
+        if let (Some(a), Some(b)) = (segs_by_offset.get(&0), segs_by_offset.get(&896)) {
+            (*a, *b)
+        } else if segs32.len() == 2 {
+            (segs32[0], segs32[1])
+        } else {
+            return Err(AdapterError::Protocol("wasm key segments count"));
+        };
+    let mut key = [0u8; 32];
+    for i in 0..32 {
+        key[i] = seg_a[i] ^ seg_b[i];
+    }
+    Ok(key)
+}
+
+fn extract_chacha_key(wasm: &[u8]) -> Result<[u8; 32], AdapterError> {
+    if wasm.len() < 8 || &wasm[..4] != b"\0asm" {
+        return Err(AdapterError::Protocol("wasm magic"));
+    }
+    let mut pos = 8;
+    while pos < wasm.len() {
+        let sec_id = wasm[pos];
+        pos += 1;
+        let (sec_len, bytes_read) = read_leb128_u32(&wasm[pos..])
+            .map_err(|_| AdapterError::Protocol("wasm section len"))?;
+        pos += bytes_read;
+        let sec_end = pos
+            .checked_add(sec_len as usize)
+            .ok_or(AdapterError::Protocol("wasm section overflow"))?;
+        if sec_end > wasm.len() {
+            return Err(AdapterError::Protocol("wasm section boundary"));
+        }
+        if sec_id == 11 {
+            return parse_data_section(&wasm[pos..sec_end]);
+        }
+        pos = sec_end;
+    }
+    Err(AdapterError::Protocol("wasm missing data section"))
 }
 
 fn format_from_url(path: &str) -> StreamFormat {
@@ -250,7 +594,7 @@ mod tests {
             &self,
             _: Vec<Request>,
         ) -> Result<Vec<Result<Response, HostError>>, HostError> {
-            Err(HostError::Denied)
+            Ok(Vec::new())
         }
         fn now_unix_ms(&self) -> Result<i64, HostError> {
             Ok(0)
@@ -290,10 +634,11 @@ mod tests {
         )?;
         let host = fixture_host(
             &[
+                ("episode", "2"),
+                ("season", "1"),
+                ("stream_urls", ""),
                 ("tmdb", "1622"),
                 ("type", "tv"),
-                ("season", "1"),
-                ("episode", "2"),
             ],
             serde_json::json!({
                 "status_code":"200",
@@ -335,7 +680,7 @@ mod tests {
             serde_json::json!({"title":{"type":"movie","tmdb_id":27205,"imdb_id":"tt1375666"}}),
         )?;
         let host = fixture_host(
-            &[("tmdb", "27205"), ("type", "movie")],
+            &[("stream_urls", ""), ("tmdb", "27205"), ("type", "movie")],
             serde_json::json!({
                 "status_code":"200",
                 "data":{"file_name":"Inception 1080p","stream_urls":[
@@ -354,7 +699,6 @@ mod tests {
             candidate.validate_for(&provider, &lookup.title)?;
             assert!(!candidate.content_verified);
             assert!(candidate.fetch_context.scopes.is_empty());
-            assert!(candidate.fetch_context.public_resources.is_none());
             assert_eq!(
                 candidate.resolver_metadata.provider_data["file_name_claim"],
                 "Inception 1080p"
@@ -372,7 +716,7 @@ mod tests {
         let lookup: Lookup =
             serde_json::from_value(serde_json::json!({"title":{"type":"movie","tmdb_id":550}}))?;
         let host = fixture_host(
-            &[("tmdb", "550"), ("type", "movie")],
+            &[("stream_urls", ""), ("tmdb", "550"), ("type", "movie")],
             serde_json::json!({
                 "status_code":"200",
                 "data":{
@@ -422,7 +766,7 @@ mod tests {
             })
             .collect();
         let host = fixture_host(
-            &[("tmdb", "550"), ("type", "movie")],
+            &[("stream_urls", ""), ("tmdb", "550"), ("type", "movie")],
             serde_json::json!({
                 "status_code":"200",
                 "data":{"stream_urls":stream_urls},
@@ -442,7 +786,7 @@ mod tests {
         let lookup: Lookup =
             serde_json::from_value(serde_json::json!({"title":{"type":"movie","tmdb_id":550}}))?;
         let host = fixture_host(
-            &[("tmdb", "550"), ("type", "movie")],
+            &[("stream_urls", ""), ("tmdb", "550"), ("type", "movie")],
             serde_json::json!({
                 "status_code":"200",
                 "data":{"file_name":"movie\nclaim","stream_urls":["https://media.example/master.m3u8"]},
@@ -491,7 +835,7 @@ mod tests {
             &self,
             _: Vec<Request>,
         ) -> Result<Vec<Result<Response, HostError>>, HostError> {
-            Err(HostError::Denied)
+            Ok(Vec::new())
         }
         fn now_unix_ms(&self) -> Result<i64, HostError> {
             Ok(0)
@@ -507,10 +851,8 @@ mod tests {
         let lookup: Lookup = serde_json::from_value(
             serde_json::json!({"title":{"type":"tv","tmdb_id":1622,"imdb_id":"tt0460681","season":4,"episode":13}}),
         )?;
-        let tmdb_url =
-            "https://streamdata.vaplayer.ru/api.php?tmdb=1622&type=tv&season=4&episode=13";
-        let imdb_url =
-            "https://streamdata.vaplayer.ru/api.php?imdb=tt0460681&type=tv&season=4&episode=13";
+        let tmdb_url = "https://streamdata.vaplayer.ru/api.php?tmdb=1622&type=tv&season=4&episode=13&stream_urls=";
+        let imdb_url = "https://streamdata.vaplayer.ru/api.php?imdb=tt0460681&type=tv&season=4&episode=13&stream_urls=";
         let mut responses = std::collections::BTreeMap::new();
         responses.insert(tmdb_url.to_string(), (404, Vec::new()));
         responses.insert(

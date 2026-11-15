@@ -415,6 +415,10 @@ pub struct Progress {
     #[serde(serialize_with = "serialize_finite_nonnegative")]
     pub watched_seconds: f64,
     pub completed: bool,
+    #[serde(default)]
+    pub manually_completed: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub continue_watching_removed_at: Option<i64>,
     pub updated_at: DateTime<Utc>,
 }
 

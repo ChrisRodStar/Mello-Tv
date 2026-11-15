@@ -181,9 +181,11 @@ struct ContinueWatchingCard: View {
     let isPlaybackDisabled: Bool
     let onPlay: () -> Void
     let onInfo: () -> Void
+    let onUpdate: (ContinueWatchingAction) -> Void
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     private var fraction: Double? {
+        if item.completed { return 1 }
         guard item.position.isFinite, item.duration.isFinite, item.duration > 0 else { return nil }
         return min(1, max(0, item.position / item.duration))
     }
@@ -267,13 +269,13 @@ struct ContinueWatchingCard: View {
                 .accessibilityValue(isPreparingPlayback ? "Preparing playback" : status)
 
                 if showsDetailsButton {
-                    Button(action: onInfo) {
+                    ContinueWatchingMenu(
+                        item: item, isDisabled: isPlaybackDisabled, onInfo: onInfo, onUpdate: onUpdate
+                    ) {
                         CardDetailsGlyph()
                     }
-                    .buttonStyle(.plain)
                     .padding(.trailing, 12)
                     .padding(.bottom, 2)
-                    .accessibilityLabel("Details for \(item.title.title)")
                 }
             }
             .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))

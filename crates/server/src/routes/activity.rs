@@ -79,7 +79,7 @@ async fn update(
         || activity
             .device
             .as_deref()
-            .is_some_and(|device| !["iPhone", "iPad", "iOS"].contains(&device))
+            .is_some_and(|device| !["iPhone", "iPad", "iOS", "Apple TV", "tvOS"].contains(&device))
         || !activity.position_seconds.is_finite()
         || activity.position_seconds < 0.0
         || activity

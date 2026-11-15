@@ -412,7 +412,7 @@ pub fn string_constant(code: &[u8], offset: usize) -> Result<&str, ProtocolError
         .ok_or(ProtocolError::Invalid("constant header"))?;
     if !matches!(
         (header[0], header[1]),
-        (103, 188) | (89, 4) | (72, 105) | (121, 225) | (109, 176)
+        (103, 188) | (89, 4) | (72, 105) | (121, 225) | (109, 176) | (155, 35)
     ) {
         return Err(ProtocolError::Invalid("constant opcode"));
     }
@@ -446,7 +446,26 @@ struct Layout {
     rc4_keys: [usize; 5],
 }
 
-const LAYOUTS: [Layout; 5] = [
+const LAYOUTS: [Layout; 6] = [
+    Layout {
+        version: ProtocolVersion::V6,
+        material: "36b9cf6981994e5bbae0ca34fc35c145354ac1a07e410a89e53260d3c93ed6d7",
+        list: "94290cfdf09ea408624c187b93363c57ce0e12e5e866ab0601b54939eaba379a",
+        unlock: "7158e6f921745e990eefa2dcf023969b6cd9eaa32825102c2b0e31563b164384",
+        list_parts: 3,
+        unlock_parts: 4,
+        bases: [45626, 51221],
+        actions: [45702, 51297],
+        key: 36925,
+        iv: 37051,
+        seed: 37145,
+        response_seed: 47890,
+        response_numbers: [48299, 48401],
+        stage_keys: [29973, 31275, 32643, 34070, 35508],
+        prefixes: [30056, 31358, 32726, 34153, 35591],
+        // Indexed by stage. The program runs stages 0, 4, 1, 2, 3.
+        rc4_keys: [46593, 47109, 47367, 47625, 46851],
+    },
     Layout {
         version: ProtocolVersion::V5,
         material: "af5b79acb8485ed9d8eabedd02ba9168b01b7885f0764c8d9c38ce7a401adaac",

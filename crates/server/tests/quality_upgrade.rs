@@ -366,3 +366,125 @@ async fn backup_can_use_same_url_with_a_different_fetch_context() -> TestResult 
     assert_ne!(relay.token_for(id), previous);
     Ok(())
 }
+
+#[tokio::test]
+async fn rejected_source_changes_leave_the_committed_relay_untouched() -> TestResult {
+    let mut first = selection(720);
+    first.backups = Some(vec![selection(480).selected.unwrap()]);
+    let (base, _, relay) = server_with_selections(VecDeque::from([first, selection(1080)])).await?;
+    let initial = create(&base).await?;
+    let id = initial["id"].as_str().unwrap();
+    let url = format!("{base}/api/playback/{id}");
+    let client = reqwest::Client::new();
+    let renewed: Value = client
+        .post(format!("{url}/renew"))
+        .header("Idempotency-Key", "operation-key")
+        .json(&json!({"expected_revision": initial["revision"]}))
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+    let original_token = relay.token_for(id);
+    for kind in ["refresh", "backup"] {
+        let rejected = client
+            .post(format!("{url}/{kind}"))
+            .header("Idempotency-Key", "operation-key")
+            .json(&json!({"expected_revision": renewed["revision"]}))
+            .send()
+            .await?;
+        assert_eq!(rejected.status(), reqwest::StatusCode::CONFLICT);
+        assert_eq!(relay.active_height(id), Some(720));
+        assert_eq!(relay.token_for(id), original_token);
+        let current: Value = client
+            .get(&url)
+            .send()
+            .await?
+            .error_for_status()?
+            .json()
+            .await?;
+        assert_eq!(current["revision"], renewed["revision"]);
+        assert_eq!(current["source_generation"], renewed["source_generation"]);
+    }
+
+    for _ in 0..2 {
+        let backed_up: Value = client
+            .post(format!("{url}/backup"))
+            .header("Idempotency-Key", "new-backup-operation")
+            .json(&json!({"expected_revision": renewed["revision"]}))
+            .send()
+            .await?
+            .error_for_status()?
+            .json()
+            .await?;
+        assert_eq!(backed_up["revision"], 3);
+        assert_eq!(backed_up["source_generation"], 2);
+        assert_eq!(backed_up["reload_required"], true);
+        assert_eq!(relay.active_height(id), Some(480));
+        assert_ne!(relay.token_for(id), original_token);
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn manifest_finishing_after_refresh_cannot_publish_old_resources() -> TestResult {
+    use axum::{Router, routing::get};
+    use tokio::sync::Notify;
+
+    let request_arrived = Arc::new(Notify::new());
+    let release_manifest = Arc::new(Notify::new());
+    let upstream = Router::new().route(
+        "/old.m3u8",
+        get({
+            let request_arrived = request_arrived.clone();
+            let release_manifest = release_manifest.clone();
+            move || async move {
+                request_arrived.notify_one();
+                release_manifest.notified().await;
+                (
+                    [("content-type", "application/vnd.apple.mpegurl")],
+                    "#EXTM3U\n#EXT-X-TARGETDURATION:10\n#EXTINF:10,\nold.ts\n#EXT-X-ENDLIST\n",
+                )
+            }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    let origin = format!("http://{}", listener.local_addr()?);
+    let upstream_task = tokio::spawn(async move { axum::serve(listener, upstream).await });
+    let mut first = selection(720);
+    first.selected.as_mut().unwrap().candidate.source.url = format!("{origin}/old.m3u8");
+    let (base, _, relay) = server_with_selections(VecDeque::from([first, selection(1080)])).await?;
+    let initial = create(&base).await?;
+    let id = initial["id"].as_str().unwrap();
+    let client = reqwest::Client::new();
+    let old_url = format!("{base}{}", initial["url"].as_str().unwrap());
+    let old_request = tokio::spawn({
+        let client = client.clone();
+        async move { client.get(old_url).send().await }
+    });
+    tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        request_arrived.notified(),
+    )
+    .await?;
+    let _: Value = client
+        .post(format!("{base}/api/playback/{id}/refresh"))
+        .json(&json!({"expected_revision":initial["revision"]}))
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+    release_manifest.notify_one();
+    let old_response = old_request.await??;
+    assert_eq!(old_response.status(), reqwest::StatusCode::FORBIDDEN);
+    let resource = stream_media::MediaRelay::resource_id(&format!("{origin}/old.ts"));
+    assert!(matches!(
+        relay
+            .fetch_resource(id, &resource, &relay.token_for(id), None)
+            .await,
+        Err(stream_media::RelayError::ResourceNotFound)
+    ));
+    upstream_task.abort();
+    Ok(())
+}

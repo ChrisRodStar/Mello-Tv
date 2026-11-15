@@ -75,6 +75,8 @@ impl Default for ProbeLimits {
 #[error("probe limits exceed supported bounds")]
 pub struct ProbeConfigError;
 
+// Movie playlists with signed segment URLs can exceed 512 KiB.
+const MAX_PROBE_PLAYLIST_BYTES: usize = 1024 * 1024;
 pub const MAX_ROUND_CANDIDATES: usize = 1024;
 pub const MAX_ROUND_RESULTS: usize = MAX_ROUND_CANDIDATES * 6;
 
@@ -362,7 +364,10 @@ impl StreamProber {
         round: &Round,
         cancel: &CancellationToken,
     ) -> ProbeResult<Playlist> {
-        let reservation = round.playlists.reserve(512 * 1024, false, cancel).await?;
+        let reservation = round
+            .playlists
+            .reserve(MAX_PROBE_PLAYLIST_BYTES, false, cancel)
+            .await?;
         let mut request = FetchRequest::get(url);
         request.context = candidate.fetch_context.clone();
         request.max_response_bytes = reservation.bytes;

@@ -23,8 +23,8 @@ use stream_core::{
         DeviceCapabilities, Lookup, ProviderTitle, QualityPreference, StreamFormat, TmdbId,
     },
 };
-use stream_media::{MediaRelay, RelayError, RelayResponse};
-use stream_storage::accounts::NewPlayback;
+use stream_media::{RelayError, RelayResponse, relay::stream::PreparedRelaySource};
+use stream_storage::accounts::{NewPlayback, StoredPlayback};
 
 use crate::{error::AppError, state::AppState};
 
@@ -318,10 +318,10 @@ async fn handle_create_playback(
     enrich_from_catalog(&state, mt, body.id, &mut imdb_id, &mut mal_id).await;
 
     let request = PlaybackRequest {
-        target: target.clone(),
-        device: body.device.clone(),
-        preferences: body.preferences.clone(),
-        imdb_id: imdb_id.clone(),
+        target,
+        device: body.device,
+        preferences: body.preferences,
+        imdb_id,
         mal_id,
     };
     request.validate()?;
@@ -353,24 +353,11 @@ async fn handle_create_playback(
         let _ = write!(fingerprint, "{b:02x}");
     }
 
-    let token = MediaRelay::generate_token();
-    if let Some(selection) = &resolved_selection {
-        state
-            .relay
-            .register_session(playback_id.clone(), token.clone(), selection.clone());
-    }
-
-    let (format, available_heights) = state
-        .relay
-        .active_info(&playback_id)
-        .map(|(fmt, heights)| {
-            let pf = match fmt {
-                StreamFormat::Mp4 => PlaybackFormat::Mp4,
-                _ => PlaybackFormat::Hls,
-            };
-            (pf, heights)
-        })
-        .unwrap_or_else(|| (PlaybackFormat::Hls, Vec::new()));
+    let source = resolved_selection.and_then(PreparedRelaySource::from_selection);
+    let (format, available_heights) = source
+        .as_ref()
+        .map(|source| playback_source_info(source.info()))
+        .unwrap_or((PlaybackFormat::Hls, Vec::new()));
 
     let ready = RelayReady {
         available_heights,
@@ -388,8 +375,8 @@ async fn handle_create_playback(
 
     let new_playback = NewPlayback {
         id: playback_id.clone(),
-        request: request.clone(),
-        ready: Some(ready.clone()),
+        request,
+        ready: Some(ready),
         created_at: now,
         expires_at,
         idempotency_key,
@@ -401,40 +388,19 @@ async fn handle_create_playback(
         .create_playback(&state.household_account_id, &profile_id, new_playback)
         .await?;
 
-    if stored.id != playback_id {
-        state.relay.revoke_session(&playback_id);
-        if !state.relay.has_session(&stored.id)
-            && let Some(selection) = resolved_selection
-        {
-            state
-                .relay
-                .register_session(stored.id.clone(), token, selection);
-        }
+    let _guard = state.playback_mutation_lock(&stored.id).lock_owned().await;
+    let stored = state
+        .accounts
+        .get_playback(&state.household_account_id, &profile_id, &stored.id)
+        .await?;
+    active_playback(&stored)?;
+    if !state.relay.has_session(&stored.id)
+        && let Some(source) = source
+    {
+        state.relay.replace_source(&stored.id, source);
     }
 
-    let resume_seconds = state
-        .accounts
-        .get_progress(&state.household_account_id, &profile_id, target)
-        .await?
-        .map(|p| p.position_seconds)
-        .unwrap_or(0.0);
-
-    let active_ready = stored.ready.unwrap_or(ready);
-    let session_token = state.relay.token_for(&stored.id);
-
-    let reply = AuthorizedPlayback {
-        id: stored.id.clone(),
-        title: stored.request.target,
-        url: format!("/stream/{}/entry?st={}", stored.id, session_token),
-        format: active_ready.format,
-        available_heights: active_ready.available_heights,
-        expires_at: active_ready.expires_at,
-        revision: active_ready.revision,
-        source_generation: active_ready.source_generation,
-        reload_required: active_ready.resume_required,
-        resume_seconds,
-    };
-
+    let reply = playback_reply(&state, &profile_id, stored).await?;
     Ok((StatusCode::OK, Json(reply)))
 }
 
@@ -446,45 +412,16 @@ async fn handle_get_playback(
     if !is_safe_identifier(&profile_id) || !is_safe_identifier(&playback_id) {
         return Err(AppError::BadRequest("invalid identifier".into()));
     }
+    let _guard = state
+        .playback_mutation_lock(&playback_id)
+        .lock_owned()
+        .await;
     let stored = state
         .accounts
         .get_playback(&state.household_account_id, &profile_id, &playback_id)
         .await?;
-    if stored.revoked {
-        return Err(AppError::Conflict("revoked".into()));
-    }
-    let ready = stored
-        .ready
-        .ok_or_else(|| AppError::Conflict("setup_pending".into()))?;
-    let now: DateTime<Utc> = SystemTime::now().into();
-    if now > ready.expires_at {
-        return Err(AppError::Conflict("session_expired".into()));
-    }
-    let resume_seconds = state
-        .accounts
-        .get_progress(
-            &state.household_account_id,
-            &profile_id,
-            stored.request.target.clone(),
-        )
-        .await?
-        .map(|p| p.position_seconds)
-        .unwrap_or(0.0);
-
-    let session_token = state.relay.token_for(&stored.id);
-
-    Ok(Json(AuthorizedPlayback {
-        id: stored.id.clone(),
-        title: stored.request.target,
-        url: format!("/stream/{}/entry?st={}", stored.id, session_token),
-        format: ready.format,
-        available_heights: ready.available_heights,
-        expires_at: ready.expires_at,
-        revision: ready.revision,
-        source_generation: ready.source_generation,
-        reload_required: ready.resume_required,
-        resume_seconds,
-    }))
+    active_playback(&stored)?;
+    Ok(Json(playback_reply(&state, &profile_id, stored).await?))
 }
 
 async fn handle_revoke_playback(
@@ -495,13 +432,21 @@ async fn handle_revoke_playback(
     if !is_safe_identifier(&profile_id) || !is_safe_identifier(&playback_id) {
         return Err(AppError::BadRequest("invalid identifier".into()));
     }
-    let mutation_lock = state.playback_mutation_lock(&playback_id);
-    let _mutation_guard = mutation_lock.lock().await;
-    state.relay.revoke_session(&playback_id);
-    state
-        .accounts
-        .revoke_playback(&state.household_account_id, &profile_id, &playback_id)
-        .await?;
+    let guard = state
+        .playback_mutation_lock(&playback_id)
+        .lock_owned()
+        .await;
+    tokio::spawn(async move {
+        let _guard = guard;
+        state
+            .accounts
+            .revoke_playback(&state.household_account_id, &profile_id, &playback_id)
+            .await?;
+        state.relay.revoke_session(&playback_id);
+        Ok::<_, AppError>(())
+    })
+    .await
+    .map_err(|error| AppError::Internal(format!("playback revoke task: {error}")))??;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -524,273 +469,183 @@ async fn mutate_session(
             "expected_revision must be positive".into(),
         ));
     }
-    let mutation_lock = state.playback_mutation_lock(&id);
-    let _mutation_guard = mutation_lock.lock().await;
+    let guard = state.playback_mutation_lock(&id).lock_owned().await;
     let stored = state
         .accounts
         .get_playback(&state.household_account_id, &profile_id, &id)
         .await?;
+    let current = active_playback(&stored)?;
+    let idempotency_key = extract_idempotency_key(&headers);
+    let source = if current.revision != expected_revision {
+        if kind == "upgrade" && expected_revision.checked_add(1) != Some(current.revision) {
+            return Err(AppError::Conflict("revision_mismatch".into()));
+        }
+        // The store distinguishes a lost response from an unrelated stale call.
+        None
+    } else {
+        match kind {
+            "backup" => Some(
+                state
+                    .relay
+                    .prepare_backup(&id)
+                    .map_err(|error| match error {
+                        RelayError::NoBackupAvailable | RelayError::SessionNotFound => {
+                            AppError::Unprocessable("source_refresh_required".into())
+                        }
+                        _ => AppError::Internal(error.to_string()),
+                    })?,
+            ),
+            "refresh" | "upgrade" => {
+                let upgrade = kind == "upgrade";
+                let mut lookup = build_lookup_from_request(&profile_id, &stored.request, !upgrade)?;
+                lookup.wait_for_complete = upgrade;
+                let selection =
+                    state
+                        .media
+                        .resolve_stream(&lookup)
+                        .await
+                        .map_err(|error| match error {
+                            DomainError::NotFound(_) => AppError::Unprocessable("no_source".into()),
+                            _ if upgrade => AppError::Unprocessable("quality_unavailable".into()),
+                            _ => AppError::Domain(error),
+                        })?;
+                let source = PreparedRelaySource::from_selection(selection).ok_or_else(|| {
+                    AppError::Unprocessable(
+                        if upgrade {
+                            "quality_unavailable"
+                        } else {
+                            "no_source"
+                        }
+                        .into(),
+                    )
+                })?;
+                if DateTime::<Utc>::from(SystemTime::now()) > current.expires_at {
+                    return Err(AppError::Conflict("session_expired".into()));
+                }
+                if upgrade {
+                    let proposed = source
+                        .height()
+                        .ok_or_else(|| AppError::Unprocessable("quality_unavailable".into()))?;
+                    let active = state
+                        .relay
+                        .active_height(&id)
+                        .ok_or_else(|| AppError::Conflict("active_quality_unknown".into()))?;
+                    if proposed <= active {
+                        let mut reply = playback_reply(&state, &profile_id, stored).await?;
+                        reply.reload_required = false;
+                        return Ok(Json(reply));
+                    }
+                }
+                Some(source)
+            }
+            "renew" => None,
+            _ => return Err(AppError::BadRequest("invalid mutation kind".into())),
+        }
+    };
+
+    let mut next = current.clone();
+    if current.revision == expected_revision {
+        next.revision += 1;
+        next.resume_required = source.is_some();
+        if let Some(source) = &source {
+            (next.format, next.available_heights) = playback_source_info(source.info());
+            next.source_generation += 1;
+        } else {
+            next.expires_at = DateTime::<Utc>::from(SystemTime::now()) + Duration::hours(6);
+        }
+    }
+    let kind = kind.to_owned();
+    // An admitted database write can outlive its HTTP request. Keep the lock
+    // through both the durable commit and the matching relay swap.
+    let reply = tokio::spawn(async move {
+        let _guard = guard;
+        let stored = state
+            .accounts
+            .mutate_playback(
+                &state.household_account_id,
+                &profile_id,
+                &id,
+                &idempotency_key,
+                &kind,
+                expected_revision,
+                next,
+            )
+            .await?;
+        if let Some(source) = source
+            && state.relay.replace_source(&id, source).is_none()
+        {
+            return Err(AppError::Internal(
+                "could not install committed relay source".into(),
+            ));
+        }
+        state.relay.note_playback_activity(&id);
+        playback_reply(&state, &profile_id, stored).await
+    })
+    .await
+    .map_err(|error| AppError::Internal(format!("playback mutation task: {error}")))??;
+    Ok(Json(reply))
+}
+
+fn playback_source_info((format, heights): (StreamFormat, Vec<i64>)) -> (PlaybackFormat, Vec<i64>) {
+    let format = match format {
+        StreamFormat::Mp4 => PlaybackFormat::Mp4,
+        _ => PlaybackFormat::Hls,
+    };
+    (format, heights)
+}
+
+fn active_playback(stored: &StoredPlayback) -> Result<&RelayReady, AppError> {
     if stored.revoked {
         return Err(AppError::Conflict("revoked".into()));
     }
-    let current_ready = stored
+    let ready = stored
         .ready
+        .as_ref()
         .ok_or_else(|| AppError::Conflict("setup_pending".into()))?;
-    let idempotency_key = extract_idempotency_key(&headers);
-    if kind == "upgrade" && current_ready.revision != expected_revision {
-        if expected_revision.checked_add(1) == Some(current_ready.revision) {
-            let replayed = state
-                .accounts
-                .mutate_playback(
-                    &state.household_account_id,
-                    &profile_id,
-                    &id,
-                    &idempotency_key,
-                    kind,
-                    expected_revision,
-                    current_ready.clone(),
-                )
-                .await?;
-            let ready = replayed
-                .ready
-                .ok_or_else(|| AppError::Internal("missing replayed ready state".into()))?;
-            let resume_seconds = state
-                .accounts
-                .get_progress(
-                    &state.household_account_id,
-                    &profile_id,
-                    replayed.request.target.clone(),
-                )
-                .await?
-                .map(|p| p.position_seconds)
-                .unwrap_or(0.0);
-            let session_token = state.relay.token_for(&replayed.id);
-            return Ok(Json(AuthorizedPlayback {
-                id: replayed.id.clone(),
-                title: replayed.request.target,
-                url: format!("/stream/{}/entry?st={}", replayed.id, session_token),
-                format: ready.format,
-                available_heights: ready.available_heights,
-                expires_at: ready.expires_at,
-                revision: ready.revision,
-                source_generation: ready.source_generation,
-                reload_required: ready.resume_required,
-                resume_seconds,
-            }));
-        }
-        return Err(AppError::Conflict("revision_mismatch".into()));
-    }
-    let now: DateTime<Utc> = SystemTime::now().into();
-    if now > current_ready.expires_at {
+    if DateTime::<Utc>::from(SystemTime::now()) > ready.expires_at {
         return Err(AppError::Conflict("session_expired".into()));
     }
-    let mut staged_upgrade = None;
-    if current_ready.revision == expected_revision {
-        match kind {
-            "backup" if state.relay.has_session(&id) => {
-                if let Err(RelayError::NoBackupAvailable) = state.relay.activate_backup(&id) {
-                    return Err(AppError::Unprocessable("source_refresh_required".into()));
-                }
-            }
-            "refresh" => {
-                let lookup = build_lookup_from_request(&profile_id, &stored.request, true)?;
-                match state.media.resolve_stream(&lookup).await {
-                    Ok(selection) => {
-                        if state.relay.replace_selection(&id, selection).is_none() {
-                            return Err(AppError::Internal(
-                                "playback refresh could not replace relay selection".into(),
-                            ));
-                        }
-                    }
-                    Err(DomainError::NotFound(_)) => {
-                        return Err(AppError::Unprocessable("no_source".into()));
-                    }
-                    Err(error) => return Err(AppError::Domain(error)),
-                }
-            }
-            "upgrade" => {
-                let mut lookup = build_lookup_from_request(&profile_id, &stored.request, false)?;
-                lookup.wait_for_complete = true;
-                let selection = match state.media.resolve_stream(&lookup).await {
-                    Ok(selection) => selection,
-                    Err(DomainError::NotFound(_)) => {
-                        return Err(AppError::Unprocessable("no_source".into()));
-                    }
-                    Err(_) => {
-                        return Err(AppError::Unprocessable("quality_unavailable".into()));
-                    }
-                };
-                let (_, _, selected_height) = MediaRelay::selection_info(&selection)
-                    .ok_or_else(|| AppError::Unprocessable("quality_unavailable".into()))?;
-                let active_height = state
-                    .relay
-                    .active_height(&id)
-                    .ok_or_else(|| AppError::Conflict("active_quality_unknown".into()))?;
-                if selected_height <= active_height {
-                    let current = state
-                        .accounts
-                        .get_playback(&state.household_account_id, &profile_id, &id)
-                        .await?;
-                    let current_ready = current
-                        .ready
-                        .ok_or_else(|| AppError::Conflict("setup_pending".into()))?;
-                    if current.revoked || current_ready.revision != expected_revision {
-                        return Err(AppError::Conflict("revision_mismatch".into()));
-                    }
-                    let checked_at: DateTime<Utc> = SystemTime::now().into();
-                    if checked_at > current_ready.expires_at {
-                        return Err(AppError::Conflict("session_expired".into()));
-                    }
-                    let resume_seconds = state
-                        .accounts
-                        .get_progress(
-                            &state.household_account_id,
-                            &profile_id,
-                            stored.request.target.clone(),
-                        )
-                        .await?
-                        .map(|p| p.position_seconds)
-                        .unwrap_or(0.0);
-                    let session_token = state.relay.token_for(&stored.id);
-                    return Ok(Json(AuthorizedPlayback {
-                        id: stored.id.clone(),
-                        title: stored.request.target,
-                        url: format!("/stream/{}/entry?st={}", stored.id, session_token),
-                        format: current_ready.format,
-                        available_heights: current_ready.available_heights,
-                        expires_at: current_ready.expires_at,
-                        revision: current_ready.revision,
-                        source_generation: current_ready.source_generation,
-                        reload_required: false,
-                        resume_seconds,
-                    }));
-                }
-                staged_upgrade = Some(selection);
-            }
-            _ => {}
-        }
-    }
+    Ok(ready)
+}
 
-    let (format, available_heights) = if let Some(selection) = &staged_upgrade {
-        let (format, heights, _) = MediaRelay::selection_info(selection)
-            .ok_or_else(|| AppError::Unprocessable("quality_unavailable".into()))?;
-        let format = match format {
-            StreamFormat::Mp4 => PlaybackFormat::Mp4,
-            _ => PlaybackFormat::Hls,
-        };
-        (format, heights)
-    } else {
-        state
-            .relay
-            .active_info(&id)
-            .map(|(fmt, heights)| {
-                let pf = match fmt {
-                    StreamFormat::Mp4 => PlaybackFormat::Mp4,
-                    _ => PlaybackFormat::Hls,
-                };
-                (pf, heights)
-            })
-            .unwrap_or_else(|| {
-                (
-                    current_ready.format,
-                    current_ready.available_heights.clone(),
-                )
-            })
-    };
-
-    let (new_ready, reload_required) = match kind {
-        "renew" => {
-            let new_expires = now + Duration::hours(6);
-            (
-                RelayReady {
-                    available_heights,
-                    contract_version: current_ready.contract_version.clone(),
-                    session_id: current_ready.session_id.clone(),
-                    entry_path: current_ready.entry_path.clone(),
-                    format,
-                    expires_at: new_expires,
-                    revision: expected_revision + 1,
-                    auth_revision: current_ready.auth_revision,
-                    source_generation: current_ready.source_generation,
-                    state: RelayState::Active,
-                    resume_required: false,
-                },
-                false,
-            )
-        }
-        "backup" | "refresh" | "upgrade" => (
-            RelayReady {
-                available_heights,
-                contract_version: current_ready.contract_version.clone(),
-                session_id: current_ready.session_id.clone(),
-                entry_path: current_ready.entry_path.clone(),
-                format,
-                expires_at: current_ready.expires_at,
-                revision: expected_revision + 1,
-                auth_revision: current_ready.auth_revision,
-                source_generation: current_ready.source_generation + 1,
-                state: RelayState::Active,
-                resume_required: true,
-            },
-            true,
-        ),
-        _ => return Err(AppError::BadRequest("invalid mutation kind".into())),
-    };
-
-    let mutated = state
-        .accounts
-        .mutate_playback(
-            &state.household_account_id,
-            &profile_id,
-            &id,
-            &idempotency_key,
-            kind,
-            expected_revision,
-            new_ready,
-        )
-        .await?;
-
-    if let Some(selection) = staged_upgrade
-        && state.relay.replace_selection(&id, selection).is_none()
-    {
-        return Err(AppError::Internal(
-            "playback quality upgrade could not replace relay selection".into(),
-        ));
-    }
-
-    state.relay.note_playback_activity(&id);
-    let ready = mutated
+async fn playback_reply(
+    state: &AppState,
+    profile_id: &str,
+    stored: StoredPlayback,
+) -> Result<AuthorizedPlayback, AppError> {
+    let ready = stored
         .ready
-        .ok_or_else(|| AppError::Internal("missing ready state after mutation".into()))?;
-
+        .ok_or_else(|| AppError::Conflict("setup_pending".into()))?;
     let resume_seconds = state
         .accounts
         .get_progress(
             &state.household_account_id,
-            &profile_id,
-            mutated.request.target.clone(),
+            profile_id,
+            stored.request.target.clone(),
         )
         .await?
-        .map(|p| p.position_seconds)
+        .map(|progress| progress.position_seconds)
         .unwrap_or(0.0);
-
-    let session_token = state.relay.token_for(&mutated.id);
-
-    Ok(Json(AuthorizedPlayback {
-        id: mutated.id.clone(),
-        title: mutated.request.target,
-        url: format!("/stream/{}/entry?st={}", mutated.id, session_token),
+    let token = state.relay.token_for(&stored.id);
+    Ok(AuthorizedPlayback {
+        url: format!("/stream/{}/entry?st={token}", stored.id),
+        id: stored.id,
+        title: stored.request.target,
         format: ready.format,
         available_heights: ready.available_heights,
         expires_at: ready.expires_at,
         revision: ready.revision,
         source_generation: ready.source_generation,
-        reload_required,
+        reload_required: ready.resume_required,
         resume_seconds,
-    }))
+    })
 }
 
 async fn ensure_session_loaded(state: &AppState, session_id: &str, token: &str) {
+    if state.relay.has_session(session_id) {
+        return;
+    }
+    let _guard = state.playback_mutation_lock(session_id).lock_owned().await;
     if state.relay.has_session(session_id) {
         return;
     }
@@ -807,11 +662,12 @@ async fn ensure_session_loaded(state: &AppState, session_id: &str, token: &str) 
             .get_playback(&state.household_account_id, &p.id, session_id)
             .await
         {
-            if stored.revoked {
+            if active_playback(&stored).is_err() {
                 return;
             }
             if let Ok(lookup) = build_lookup_from_request(&p.id, &stored.request, false)
                 && let Ok(selection) = state.media.resolve_stream(&lookup).await
+                && active_playback(&stored).is_ok()
             {
                 state
                     .relay

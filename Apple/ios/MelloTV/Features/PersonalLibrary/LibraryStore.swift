@@ -2,6 +2,11 @@ import Foundation
 import SwiftUI
 import MelloKit
 
+enum ContinueWatchingAction {
+    case remove
+    case watched
+}
+
 @MainActor
 @Observable
 final class LibraryStore {
@@ -11,6 +16,7 @@ final class LibraryStore {
     var isLoading = false
     var isSaving = false
     var errorMessage: String?
+    var continueWatchingError = false
     private var activeProfileID: String?
     private var loadTask: Task<ProfileLibrary, Error>?
     private var loadGeneration = UUID()
@@ -44,7 +50,9 @@ final class LibraryStore {
         if hasManualWatchedMark(profileID: profileID, title: title, season: season, episode: episode) { return true }
         guard let progress = library.progress.first(where: {
             $0.title.tmdbID == title.tmdbID && $0.title.type == title.type && $0.season == season && $0.episode == episode
-        }), progress.position.isFinite, progress.duration.isFinite, progress.duration > 0 else { return false }
+        }) else { return false }
+        if progress.manuallyCompleted == true { return true }
+        guard progress.position.isFinite, progress.duration.isFinite, progress.duration > 0 else { return false }
         // Exactly 95% is still Watching. The API's completed flag uses a
         // different rule, so detail-screen status follows the actual position.
         return progress.position / progress.duration > 0.95
@@ -86,6 +94,7 @@ final class LibraryStore {
         } else {
             loadTask?.cancel()
             library = .empty
+            continueWatchingError = false
         }
         activeProfileID = profileID
         let generation = UUID()
@@ -137,6 +146,39 @@ final class LibraryStore {
         library.list.contains { $0.tmdbID == title.tmdbID && $0.type == title.type }
     }
 
+    func updateContinueWatching(_ action: ContinueWatchingAction, item: WatchProgress, profileID: String) async {
+        guard activeProfileID == profileID, !isSaving else { return }
+        isSaving = true
+        defer { isSaving = false }
+        let journal = PlaybackProgressJournal.shared
+        await journal.flush().value
+
+        do {
+            switch action {
+            case .remove:
+                try await api.removeFromContinueWatching(profileID: profileID, title: item.title)
+            case .watched:
+                try await api.markWatched(profileID: profileID, item: item)
+            }
+            journal.discardProgress(for: item, profileID: profileID, entireTitle: action == .remove)
+            guard activeProfileID == profileID else { return }
+            loadTask?.cancel()
+            loadTask = nil
+            loadGeneration = UUID()
+            isLoading = false
+            for index in library.progress.indices where library.progress[index].title.id == item.title.id {
+                if action == .remove {
+                    library.progress[index].continueWatchingRemovedAt = Int(Date().timeIntervalSince1970)
+                } else if library.progress[index].season == item.season && library.progress[index].episode == item.episode {
+                    library.progress[index].completed = true
+                    library.progress[index].manuallyCompleted = true
+                }
+            }
+        } catch {
+            if activeProfileID == profileID { continueWatchingError = true }
+        }
+    }
+
     func savedProgress(for title: MediaTitle) -> WatchProgress? {
         library.progress.first { $0.title.tmdbID == title.tmdbID && $0.title.type == title.type }
     }
@@ -144,6 +186,7 @@ final class LibraryStore {
     func continueWatching(filter: MediaType? = nil) -> [WatchProgress] {
         var seen = Set<String>()
         return library.progress.filter { item in
+            guard item.continueWatchingRemovedAt == nil else { return false }
             let key = "\(item.title.type.rawValue):\(item.title.tmdbID)"
             if seen.contains(key) { return false }
             seen.insert(key)
@@ -152,7 +195,7 @@ final class LibraryStore {
                 return false
             }
 
-            return item.position >= 10 && (!item.completed || item.title.type == .tv)
+            return item.completed ? item.title.type == .tv : item.position >= 10
         }
     }
 

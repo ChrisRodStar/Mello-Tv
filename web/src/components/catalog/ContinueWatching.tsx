@@ -1,15 +1,90 @@
-import { useRef, useState } from 'react';
+import { useId, useRef, useState } from 'react';
 
 import type { Title, WatchProgress } from '../../model';
 
 import { useProfileLibrary } from '../../hooks/useProfileLibrary';
+import { continueWatchingItems, type ContinueWatchingAction } from '../../lib/library';
 import type { Category } from '../../types';
 import { Icon } from '../common/Icon';
 import { BrandTVMark, CardDetailsGlyph, MediaPlaceholderIcon } from './TitleCard';
 
 export { BrandTVMark, CardDetailsGlyph };
 
+export function ContinueWatchingActions({
+  item,
+  disabled,
+  onInfo,
+  onUpdate,
+}: {
+  item: WatchProgress;
+  disabled: boolean;
+  onInfo: () => void;
+  onUpdate: (item: WatchProgress, action: ContinueWatchingAction) => Promise<void>;
+}) {
+  const dialog = useRef<HTMLDialogElement>(null);
+  const heading = useId();
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  async function update(action: ContinueWatchingAction) {
+    setSaving(true);
+    setError('');
+    try {
+      await onUpdate(item, action);
+      dialog.current?.close();
+    } catch {
+      setError('Couldn’t update Continue Watching. Try again.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <>
+      <button
+        type="button"
+        className="continue-info continue-options"
+        aria-label={`Options for ${item.title.title}`}
+        aria-haspopup="dialog"
+        disabled={disabled || saving}
+        onClick={() => {
+          setError('');
+          dialog.current?.showModal();
+        }}
+      >
+        <CardDetailsGlyph />
+      </button>
+      <dialog ref={dialog} className="continue-actions" aria-labelledby={heading}>
+        <h2 id={heading}>{item.title.title}</h2>
+        <button
+          type="button"
+          disabled={saving}
+          onClick={() => {
+            dialog.current?.close();
+            onInfo();
+          }}
+        >
+          Title details
+        </button>
+        {!item.completed && (
+          <button type="button" disabled={saving} onClick={() => void update('watched')}>
+            {item.title.type === 'tv' ? 'Mark episode as watched' : 'Mark as watched'}
+          </button>
+        )}
+        <button type="button" disabled={saving} onClick={() => void update('remove')}>
+          Remove from Continue Watching
+        </button>
+        <button type="button" onClick={() => dialog.current?.close()}>
+          Close
+        </button>
+        {error && <p role="alert">{error}</p>}
+      </dialog>
+    </>
+  );
+}
+
 function computeFraction(item: WatchProgress): number | null {
+  if (item.completed) return 1;
   if (
     !Number.isFinite(item.position) ||
     !Number.isFinite(item.duration) ||
@@ -43,6 +118,7 @@ export type ContinueWatchingCardProps = {
   onResume?: (item: WatchProgress) => void | Promise<void>;
   onInfo?: () => void;
   onSelect?: (title: Title) => void;
+  onUpdate?: (item: WatchProgress, action: ContinueWatchingAction) => Promise<void>;
 };
 
 export function ContinueWatchingCard({
@@ -55,6 +131,7 @@ export function ContinueWatchingCard({
   onResume,
   onInfo,
   onSelect,
+  onUpdate,
 }: ContinueWatchingCardProps) {
   const [internalLoading, setInternalLoading] = useState(false);
   const loading = isPreparingPlayback || internalLoading;
@@ -168,15 +245,24 @@ export function ContinueWatchingCard({
         </span>
       </button>
       {showsDetailsButton && (
-        <button
-          type="button"
-          className="continue-info"
-          onClick={handleInfo}
-          aria-label={`Details for ${item.title.title}`}
-          title="Title details"
-        >
-          <CardDetailsGlyph />
-        </button>
+        onUpdate ? (
+          <ContinueWatchingActions
+            item={item}
+            disabled={disabled}
+            onInfo={handleInfo}
+            onUpdate={onUpdate}
+          />
+        ) : (
+          <button
+            type="button"
+            className="continue-info"
+            onClick={handleInfo}
+            aria-label={`Details for ${item.title.title}`}
+            title="Title details"
+          >
+            <CardDetailsGlyph />
+          </button>
+        )
       )}
     </div>
   );
@@ -221,17 +307,7 @@ export function ContinueWatching({
 
   const library = useProfileLibrary(profileId);
   const track = useRef<HTMLDivElement>(null);
-  const seen = new Set<string>();
-  const items = (progress ?? library.progress).filter((item) => {
-    const key = `${item.title.type}:${item.title.id}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return (
-      (filter === 'all' || item.title.type === filter) &&
-      item.position >= 10 &&
-      (!item.completed || item.title.type === 'tv')
-    );
-  });
+  const items = continueWatchingItems(progress ?? library.progress, filter);
 
   const scroll = (direction: number) =>
     track.current?.scrollBy({
@@ -293,6 +369,7 @@ export function ContinueWatching({
                 isPlaybackDisabled={playing !== null}
                 onPlay={() => void play(item)}
                 onInfo={() => onSelect(item.title)}
+                onUpdate={library.updateContinueWatching}
               />
             );
           })}

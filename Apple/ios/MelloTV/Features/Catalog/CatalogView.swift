@@ -83,6 +83,7 @@ struct CatalogView: View {
         }
         .background { CatalogPageSurface(heroOffset: heroScrollOffset).ignoresSafeArea() }
         .toolbar(.hidden, for: .navigationBar)
+        .continueWatchingErrorAlert(libraryStore)
         .task(id: foregroundRefreshGeneration) {
             let generation = foregroundRefreshGeneration
             let refreshing = generation > completedForegroundRefreshGeneration
@@ -248,16 +249,20 @@ struct CatalogView: View {
     private var curatedHomeSections: some View {
         // Continue Watching Shelf
         let continueItems = libraryStore.continueWatching(filter: store.category.mediaTypeFilter)
-        if !continueItems.isEmpty {
+        if let profileID, !continueItems.isEmpty {
             ContinueWatchingShelf(
                 items: continueItems,
                 resolvingTitleID: resolvingTitleID,
+                isUpdating: libraryStore.isSaving,
                 onPlay: { item in
                     resumeItem(item)
                 },
                 onInfo: { title in
                     preloadTask?.cancel()
                     selectedTitle = title
+                },
+                onUpdate: { item, action in
+                    Task { await libraryStore.updateContinueWatching(action, item: item, profileID: profileID) }
                 }
             )
             .onAppear {

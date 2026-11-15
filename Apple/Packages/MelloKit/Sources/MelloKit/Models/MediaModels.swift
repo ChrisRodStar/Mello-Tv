@@ -195,3 +195,48 @@ public struct Episode: Codable, Hashable, Identifiable, Sendable {
     }
 }
 
+public struct SeasonDetails: Codable, Sendable {
+    public let seasonNumber: Int
+    public let episodes: [Episode]
+
+    public init(seasonNumber: Int, episodes: [Episode] = []) {
+        self.seasonNumber = seasonNumber
+        self.episodes = episodes
+    }
+}
+
+public struct BrowseRecord<Value: Codable & Sendable>: Codable, Sendable {
+    public let data: Value
+    public let status: CatalogGenerationStatus.State?
+    public let reason: String?
+
+    public init(data: Value, status: CatalogGenerationStatus.State? = nil, reason: String? = nil) {
+        self.data = data
+        self.status = status
+        self.reason = reason
+    }
+}
+
+public struct BrowseReply: Codable, Sendable {
+    public let records: [BrowseRecord<CatalogSection>]
+    public let status: CatalogGenerationStatus.State?
+    public let reason: String?
+
+    public init(records: [BrowseRecord<CatalogSection>] = [], status: CatalogGenerationStatus.State? = nil, reason: String? = nil) {
+        self.records = records
+        self.status = status
+        self.reason = reason
+    }
+}
+
+public struct HomePageReply: Codable, Sendable {
+    public let sections: [CatalogSection]
+    public let featured: [MediaTitle]
+
+    public init(sections: [CatalogSection] = [], featured: [MediaTitle] = []) {
+        self.sections = sections
+        self.featured = featured
+    }
+}
+
+

@@ -628,7 +628,8 @@ private struct TitleDetailContent: View {
                 type: .movie,
                 title: title.title,
                 profileID: profileID,
-                catalogTitle: title
+                catalogTitle: title,
+                startFromBeginning: savedProgress?.manuallyCompleted == true
             )
             let timed = req.traced(.play)
             onClose()

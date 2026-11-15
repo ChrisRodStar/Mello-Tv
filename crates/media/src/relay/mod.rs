@@ -1,4 +1,5 @@
 pub mod hls;
+mod range;
 pub mod stream;
 
 pub use hls::{HlsManifestRewriter, HlsRewriteError};

@@ -619,13 +619,32 @@ final class PlaybackProgressJournal {
         for entry in state.checkpoints where entry.household == household() && entry.profileID == profileID
             && entry.savedAt.timeIntervalSinceNow > -86_400 {
             let update = entry.update
-            result.progress.removeAll { $0.title.id == update.title.id && $0.season == update.season && $0.episode == update.episode }
+            let index = result.progress.firstIndex {
+                $0.title.id == update.title.id && $0.season == update.season && $0.episode == update.episode
+            }
+            if let index {
+                let saved = result.progress[index]
+                if saved.continueWatchingRemovedAt != nil || saved.manuallyCompleted == true { continue }
+                result.progress.remove(at: index)
+            }
             result.progress.append(WatchProgress(title: update.title, season: update.season, episode: update.episode,
                 episodeTitle: update.episodeTitle, position: update.position, duration: update.duration,
                 watchedSeconds: update.watchedSeconds, completed: false, updatedAt: entry.savedAt.timeIntervalSince1970))
         }
         result.progress.sort { $0.updatedAt > $1.updatedAt }
         return result
+    }
+
+    func discardProgress(for item: WatchProgress, profileID: String, entireTitle: Bool) {
+        let householdID = household()
+        let matches: (Entry) -> Bool = { entry in
+            entry.household == householdID && entry.profileID == profileID &&
+                entry.update.title.id == item.title.id &&
+                (entireTitle || (entry.update.season == item.season && entry.update.episode == item.episode))
+        }
+        state.pending.removeAll(where: matches)
+        state.checkpoints.removeAll(where: matches)
+        persist()
     }
 
     // Return true when revocation must wait for an unsent final sample.

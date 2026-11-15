@@ -5,8 +5,10 @@ struct LibraryProgressPages: View {
     let items: [WatchProgress]
     let resolvingItem: LibraryProgressID?
     var showsDates = false
+    var isUpdating = false
     var onPlay: (WatchProgress) -> Void
     var onInfo: (MediaTitle) -> Void
+    var onUpdate: ((WatchProgress, ContinueWatchingAction) -> Void)? = nil
 
     @ScaledMetric(relativeTo: .body) private var rowHeight = 100
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -24,9 +26,10 @@ struct LibraryProgressPages: View {
                 item: item,
                 showsDate: showsDates,
                 isPreparingPlayback: resolvingItem == item.libraryID,
-                isPlaybackDisabled: resolvingItem != nil,
+                isPlaybackDisabled: resolvingItem != nil || isUpdating,
                 onPlay: { onPlay(item) },
-                onInfo: { onInfo(item.title) }
+                onInfo: { onInfo(item.title) },
+                onUpdate: onUpdate.map { update in { update(item, $0) } }
             )
         }
     }

@@ -5,7 +5,8 @@ let package = Package(
     name: "MelloKit",
     platforms: [
         .macOS(.v13),
-        .iOS(.v17)
+        .iOS(.v17),
+        .tvOS(.v17)
     ],
     products: [
         .library(

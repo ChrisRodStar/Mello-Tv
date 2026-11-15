@@ -9,8 +9,10 @@ struct LibraryProgressRow: View {
     let isPlaybackDisabled: Bool
     var onPlay: () -> Void
     var onInfo: () -> Void
+    var onUpdate: ((ContinueWatchingAction) -> Void)? = nil
 
     private var fraction: Double? {
+        if item.completed, !showsDate { return 1 }
         guard item.duration.isFinite, item.position.isFinite, item.duration > 0 else { return nil }
         return min(1, max(0, item.position / item.duration))
     }
@@ -67,18 +69,26 @@ struct LibraryProgressRow: View {
             .accessibilityLabel("\(item.completed ? "Play" : "Resume") \(item.title.title)")
             .accessibilityValue(isPreparingPlayback ? "Preparing playback" : detail)
 
-            Button(action: onInfo) {
-                Image(systemName: "ellipsis")
-                    .font(.body.weight(.medium))
-                    .foregroundStyle(MelloTVTheme.textSecondary)
-                    .frame(width: 44, height: 44)
-                    .contentShape(Rectangle())
+            if let onUpdate {
+                ContinueWatchingMenu(item: item, isDisabled: isPlaybackDisabled, onInfo: onInfo, onUpdate: onUpdate) {
+                    optionsIcon
+                }
+            } else {
+                Button(action: onInfo) { optionsIcon }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Details for \(item.title.title)")
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Details for \(item.title.title)")
         }
         .padding(12)
         .appleNeumorphic(cornerRadius: 16, elevation: .subtle)
+    }
+
+    private var optionsIcon: some View {
+        Image(systemName: "ellipsis")
+            .font(.body.weight(.medium))
+            .foregroundStyle(MelloTVTheme.textSecondary)
+            .frame(width: 44, height: 44)
+            .contentShape(Rectangle())
     }
 
     private var thumbnail: some View {

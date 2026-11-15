@@ -50,9 +50,19 @@ export const apiPlaybackResolver: PlaybackResolver = async (request, signal) => 
     key = requestID();
     createKeys.set(request, key);
   }
-  const nativeHLS =
-    typeof document !== 'undefined' &&
-    !!document.createElement('video').canPlayType('application/vnd.apple.mpegurl');
+  const video = typeof document !== 'undefined' ? document.createElement('video') : undefined;
+  const nativeHLS = !!video?.canPlayType('application/vnd.apple.mpegurl');
+  const mediaSource = typeof MediaSource !== 'undefined' ? MediaSource : undefined;
+  const codecs = ['avc1', 'mp4a'];
+  for (const family of ['hvc1', 'hev1']) {
+    const type = `video/mp4; codecs="${family}.1.6.L120.B0"`;
+    if (
+      video?.canPlayType(type) === 'probably' &&
+      (mediaSource ? mediaSource.isTypeSupported(type) : nativeHLS)
+    ) {
+      codecs.push(family);
+    }
+  }
   const reply = await apiJSON(`${profilePath(request.profileId)}/playback`, playbackWire, {
     method: 'POST',
     signal,
@@ -65,8 +75,8 @@ export const apiPlaybackResolver: PlaybackResolver = async (request, signal) => 
       ...(request.catalogTitle?.malId ? { mal_id: request.catalogTitle.malId } : {}),
       device: {
         formats: ['hls', 'mp4'],
-        codecs: ['avc1', 'mp4a'],
-        supports_encrypted_hls: nativeHLS || typeof MediaSource !== 'undefined',
+        codecs,
+        supports_encrypted_hls: nativeHLS || !!mediaSource,
         allow_unknown_codecs: false,
         allow_unknown_resolution: false,
       },

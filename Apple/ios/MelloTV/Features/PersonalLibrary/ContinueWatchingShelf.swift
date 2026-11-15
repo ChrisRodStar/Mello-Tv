@@ -5,8 +5,10 @@ struct ContinueWatchingShelf: View {
     let items: [WatchProgress]
     var showsHeading = true
     var resolvingTitleID: String? = nil
+    var isUpdating = false
     var onPlay: (WatchProgress) -> Void
     var onInfo: (MediaTitle) -> Void
+    var onUpdate: (WatchProgress, ContinueWatchingAction) -> Void
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
@@ -26,9 +28,10 @@ struct ContinueWatchingShelf: View {
                             ContinueWatchingCard(
                                 item: item,
                                 isPreparingPlayback: resolvingTitleID == item.title.id,
-                                isPlaybackDisabled: resolvingTitleID != nil,
+                                isPlaybackDisabled: resolvingTitleID != nil || isUpdating,
                                 onPlay: { onPlay(item) },
-                                onInfo: { onInfo(item.title) }
+                                onInfo: { onInfo(item.title) },
+                                onUpdate: { onUpdate(item, $0) }
                             )
                             .containerRelativeFrame(.horizontal) { width, _ in
                                 min(360, max(220, width * 0.72))
@@ -42,6 +45,49 @@ struct ContinueWatchingShelf: View {
                 .scrollTargetBehavior(.viewAligned)
                 .scrollClipDisabled()
             }
+        }
+    }
+}
+
+struct ContinueWatchingMenu<Content: View>: View {
+    let item: WatchProgress
+    let isDisabled: Bool
+    let onInfo: () -> Void
+    let onUpdate: (ContinueWatchingAction) -> Void
+    @ViewBuilder let label: () -> Content
+
+    var body: some View {
+        Menu {
+            Button(action: onInfo) {
+                Label("Title details", systemImage: "info.circle")
+            }
+            if !item.completed {
+                Button { onUpdate(.watched) } label: {
+                    Label(
+                        item.title.type == .tv ? "Mark episode as watched" : "Mark as watched",
+                        systemImage: "checkmark.circle"
+                    )
+                }
+            }
+            Button { onUpdate(.remove) } label: {
+                Label("Remove from Continue Watching", systemImage: "minus.circle")
+            }
+        } label: {
+            label()
+        }
+        .buttonStyle(.plain)
+        .disabled(isDisabled)
+        .accessibilityLabel("Options for \(item.title.title)")
+    }
+}
+
+extension View {
+    func continueWatchingErrorAlert(_ libraryStore: LibraryStore) -> some View {
+        @Bindable var libraryStore = libraryStore
+        return alert("Couldn’t update Continue Watching", isPresented: $libraryStore.continueWatchingError) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("Try again in a moment.")
         }
     }
 }

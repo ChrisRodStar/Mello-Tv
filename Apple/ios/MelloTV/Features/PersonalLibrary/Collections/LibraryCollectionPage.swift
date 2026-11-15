@@ -53,6 +53,7 @@ struct LibraryCollectionPage: View {
         .background { CatalogPageSurface().ignoresSafeArea() }
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.visible, for: .navigationBar)
+        .continueWatchingErrorAlert(libraryStore)
         .task(id: profileID) { await libraryStore.loadLibrary(for: profileID) }
         .onDisappear {
             resumeTask?.cancel()
@@ -84,8 +85,12 @@ struct LibraryCollectionPage: View {
             LibraryProgressPages(
                 items: libraryStore.continueWatching(),
                 resolvingItem: resolvingItem,
+                isUpdating: libraryStore.isSaving,
                 onPlay: resume,
-                onInfo: { selectedTitle = $0 }
+                onInfo: { selectedTitle = $0 },
+                onUpdate: { item, action in
+                    Task { await libraryStore.updateContinueWatching(action, item: item, profileID: profileID) }
+                }
             )
         case .myList:
             LibrarySavedPages(titles: libraryStore.library.list, onSelect: { selectedTitle = $0 })
