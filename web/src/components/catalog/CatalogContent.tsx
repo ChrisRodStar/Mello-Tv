@@ -1,4 +1,4 @@
-import { Fragment, memo, useMemo } from 'react';
+import { Fragment, memo, useMemo, useState } from 'react';
 
 import type { Catalog, ServiceHealth, Title, WatchProgress } from '../../model';
 
@@ -6,6 +6,7 @@ import type { Category } from '../../types';
 import { ServiceUnavailable } from '../common/ServiceUnavailable';
 import { ContinueWatching } from './ContinueWatching';
 import { FeaturedCarousel } from './FeaturedCarousel';
+import { CategoryDialog } from './CategoryDialog';
 import {
   EditorialSpotlightCard,
   NumberedShelf,
@@ -40,6 +41,8 @@ export const CatalogContent = memo(function CatalogContent({
   onSelect,
   onPlay,
 }: CatalogContentProps) {
+  const [openShelf, setOpenShelf] = useState<{ id: string; heading: string } | null>(null);
+
   const movieTitles = useMemo(() => titles.filter((title) => title.type === 'movie'), [titles]);
 
   const tvTitles = useMemo(() => titles.filter((title) => title.type === 'tv'), [titles]);
@@ -125,13 +128,27 @@ export const CatalogContent = memo(function CatalogContent({
               : Shelf;
         return (
           <Fragment key={section.id}>
-            <Row heading={section.heading} titles={section.titles} onSelect={onSelect} />
+            <Row
+              heading={section.heading}
+              titles={section.titles}
+              onSelect={onSelect}
+              onViewMore={profileId && catalog.sections?.length ? () => setOpenShelf(section) : undefined}
+            />
             {index === 1 && spotlightPick && (
               <EditorialSpotlightCard title={spotlightPick} onSelect={onSelect} onPlay={onPlay} />
             )}
           </Fragment>
         );
       })}
+      {openShelf && profileId && (
+        <CategoryDialog
+          profileId={profileId}
+          category={filter}
+          shelf={openShelf}
+          onClose={() => setOpenShelf(null)}
+          onSelect={onSelect}
+        />
+      )}
     </>
   );
 });

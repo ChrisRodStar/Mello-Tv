@@ -62,6 +62,8 @@ pub struct HomeQuery {
     pub media_type: Option<String>,
     pub topic: Option<String>,
     pub shelf: Option<String>,
+    #[serde(default)]
+    pub expand: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1346,6 +1348,15 @@ async fn get_home(
                     || !(shelf.id.starts_with("onboarding-") || shelf.id.starts_with("favorites-"))
             })
     }));
+
+    if params.expand
+        && let Some(target) = shelf_filter
+        && !hidden_topics.contains(target)
+        && let Some(shelf) = candidates.iter_mut().find(|shelf| shelf.id == target)
+        && let Some(worker) = state.catalog_worker.as_ref()
+    {
+        shelf.titles.extend(worker.shelf_expansion(shelf).await);
+    }
 
     let mut shelf_ids = HashSet::new();
     let media_prefix = format!("{media}:");

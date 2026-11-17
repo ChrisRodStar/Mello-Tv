@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { apiJSON } from '../src/lib/api';
-import { loadBrowse, loadCatalog, waitForCatalogReady } from '../src/lib/catalog';
+import { loadBrowse, loadCatalog, loadShelf, waitForCatalogReady } from '../src/lib/catalog';
 import { awaitMetadata } from '../src/lib/await-metadata';
 import { z } from 'zod';
 
@@ -72,6 +72,25 @@ describe('catalog readiness', () => {
     }));
     expect(catalog.featured?.map((title) => title.id)).toEqual([9102]);
     expect(catalog.titles.map((title) => title.id)).toEqual([9102, 9101]);
+  });
+
+  test('opens the requested category with its expanded titles', async () => {
+    globalThis.fetch = async (input) => {
+      expect(String(input)).toBe('/api/v1/profiles/profile-test/home?type=movie&shelf=taste-movie-action&expand=true');
+      return response(200, {
+        sections: [{
+          id: 'taste-movie-action',
+          heading: 'Action & adventure movies',
+          titles: Array.from({ length: 25 }, (_, index) => ({
+            id: index + 1, type: 'movie', title: `Movie ${index + 1}`, overview: '', rating: 8, details: false,
+          })),
+        }],
+      });
+    };
+
+    const titles = await loadShelf('profile-test', 'movie', 'taste-movie-action', AbortSignal.timeout(5000));
+    expect(titles).toHaveLength(25);
+    expect(titles.at(-1)?.id).toBe(25);
   });
 
   test('retries HTTP 202 metadata responses until the saved record is ready', async () => {

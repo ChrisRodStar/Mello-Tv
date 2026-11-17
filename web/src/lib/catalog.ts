@@ -121,6 +121,22 @@ export async function loadCatalog(
   }
   return { configured: true, titles: [...all.values()], sections, featured };
 }
+export async function loadShelf(
+  profileID: string,
+  category: Category,
+  shelfID: string,
+  signal: AbortSignal,
+): Promise<Title[]> {
+  const query = new URLSearchParams({ type: category, shelf: shelfID, expand: 'true' });
+  const { sections } = await apiJSON(
+    `${profilePath(profileID)}/home?${query}`,
+    z.object({ sections: z.array(shelfWire) }),
+    { signal },
+  );
+  return (sections.find((section) => section.id === shelfID)?.titles ?? [])
+    .map((title) => rememberTitle(viewTitle(title)));
+}
+
 export async function loadRelated(
   type: Title['type'],
   id: number,

@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useRef, useState } from 'react';
+import { memo, useEffect, useState } from 'react';
 
 import type { Title } from '../../model';
 
@@ -10,56 +10,43 @@ import {
   TitleCard,
 } from './TitleCard';
 
-function useHorizontalShelfScroll() {
-  const track = useRef<HTMLDivElement>(null);
-  const scroll = useCallback((direction: number) => {
-    const element = track.current;
-    if (!element) return;
-    element.scrollBy({
-      left: direction * element.clientWidth * 0.85,
-      behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches
-        ? 'instant'
-        : 'smooth',
-    });
-  }, []);
-  return { track, scroll };
+type ShelfProps = {
+  heading: string;
+  titles: Title[];
+  onSelect: (title: Title) => void;
+  onViewMore?: () => void;
+};
+
+function ShelfHeading({ heading, onViewMore }: Pick<ShelfProps, 'heading' | 'onViewMore'>) {
+  return (
+    <div className="shelf-heading">
+      <h2>{heading}</h2>
+      {onViewMore && (
+        <button
+          type="button"
+          className="shelf-view-more"
+          aria-label={`View more ${heading}`}
+          onClick={onViewMore}
+        >
+          View more <Icon name="right" />
+        </button>
+      )}
+    </div>
+  );
 }
 
 export const Shelf = memo(function Shelf({
   heading,
   titles,
   onSelect,
-}: {
-  heading: string;
-  titles: Title[];
-  onSelect: (title: Title) => void;
-}) {
-  const { track, scroll } = useHorizontalShelfScroll();
-
+  onViewMore,
+}: ShelfProps) {
   if (!titles.length) return null;
 
   return (
     <section className="shelf" aria-label={heading}>
-      <div className="shelf-heading">
-        <h2>{heading}</h2>
-        <div className="shelf-controls">
-          <button
-            type="button"
-            aria-label={`Previous titles in ${heading}`}
-            onClick={() => scroll(-1)}
-          >
-            <Icon name="left" />
-          </button>
-          <button
-            type="button"
-            aria-label={`Next titles in ${heading}`}
-            onClick={() => scroll(1)}
-          >
-            <Icon name="right" />
-          </button>
-        </div>
-      </div>
-      <div className="shelf-track" ref={track}>
+      <ShelfHeading heading={heading} onViewMore={onViewMore} />
+      <div className="shelf-track">
         {titles.map((title) => (
           <TitleCard
             key={`${title.type}-${title.id}`}
@@ -95,38 +82,16 @@ export const NumberedShelf = memo(function NumberedShelf({
   heading,
   titles,
   onSelect,
-}: {
-  heading: string;
-  titles: Title[];
-  onSelect: (title: Title) => void;
-}) {
-  const { track, scroll } = useHorizontalShelfScroll();
+  onViewMore,
+}: ShelfProps) {
   const topTen = titles.slice(0, 10);
 
   if (!topTen.length) return null;
 
   return (
     <section className="shelf numbered-shelf" aria-label={heading}>
-      <div className="shelf-heading">
-        <h2>{heading}</h2>
-        <div className="shelf-controls">
-          <button
-            type="button"
-            aria-label={`Previous titles in ${heading}`}
-            onClick={() => scroll(-1)}
-          >
-            <Icon name="left" />
-          </button>
-          <button
-            type="button"
-            aria-label={`Next titles in ${heading}`}
-            onClick={() => scroll(1)}
-          >
-            <Icon name="right" />
-          </button>
-        </div>
-      </div>
-      <div className="numbered-shelf-track" ref={track}>
+      <ShelfHeading heading={heading} onViewMore={onViewMore} />
+      <div className="numbered-shelf-track">
         {topTen.map((title, index) => (
           <NumberedPosterTile
             key={`${title.type}-${title.id}`}
@@ -194,37 +159,14 @@ export const PanoramicShelf = memo(function PanoramicShelf({
   heading,
   titles,
   onSelect,
-}: {
-  heading: string;
-  titles: Title[];
-  onSelect: (title: Title) => void;
-}) {
-  const { track, scroll } = useHorizontalShelfScroll();
-
+  onViewMore,
+}: ShelfProps) {
   if (!titles.length) return null;
 
   return (
     <section className="shelf panoramic-shelf" aria-label={heading}>
-      <div className="shelf-heading">
-        <h2>{heading}</h2>
-        <div className="shelf-controls">
-          <button
-            type="button"
-            aria-label={`Previous titles in ${heading}`}
-            onClick={() => scroll(-1)}
-          >
-            <Icon name="left" />
-          </button>
-          <button
-            type="button"
-            aria-label={`Next titles in ${heading}`}
-            onClick={() => scroll(1)}
-          >
-            <Icon name="right" />
-          </button>
-        </div>
-      </div>
-      <div className="panoramic-shelf-track" ref={track}>
+      <ShelfHeading heading={heading} onViewMore={onViewMore} />
+      <div className="panoramic-shelf-track">
         {titles.map((title) => (
           <PanoramicCard
             key={`${title.type}-${title.id}`}

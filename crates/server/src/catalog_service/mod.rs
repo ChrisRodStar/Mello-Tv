@@ -1,6 +1,7 @@
 //! Bounded TMDB catalog population and profile-keyed recommendations.
 
 mod related;
+mod shelf_expansion;
 
 use std::{collections::HashSet, env, fmt, sync::Arc, time::Duration};
 
@@ -126,7 +127,7 @@ struct HomeShelf {
 enum DiscoverOrder {
     Popular,
     Recent,
-    Rated { page: i64 },
+    Rated { page: Option<i64> },
 }
 
 struct RateLimit {
@@ -406,7 +407,9 @@ impl CatalogWorker {
                     "sort_by=vote_average.desc".into(),
                     "vote_count.gte=50".into(),
                 ]);
-                filters.push(format!("page={page}"));
+                if let Some(page) = page {
+                    filters.push(format!("page={page}"));
+                }
             }
         }
         Ok(format!("/discover/{media}?{}", filters.join("&")))
@@ -1053,7 +1056,7 @@ impl CatalogWorker {
                 let (kind, order) = if index % 2 == 0 {
                     ("recent", DiscoverOrder::Recent)
                 } else {
-                    ("discover", DiscoverOrder::Rated { page })
+                    ("discover", DiscoverOrder::Rated { page: Some(page) })
                 };
                 let worker = self.clone();
                 // The catalog worker's semaphore and rate limiter bound concurrent requests.

@@ -198,6 +198,19 @@ async fn mock_tmdb(State(state): State<MockState>, uri: Uri) -> Response {
                 .collect();
             return Json(json!({"results":results})).into_response();
         }
+        if !is_tv
+            && query.contains("with_genres=35")
+            && let Some(page) = query
+                .split('&')
+                .find_map(|param| param.strip_prefix("page="))
+                .and_then(|page| page.parse::<i64>().ok())
+        {
+            let first = 50_000 + (page - 1) * 20;
+            let results: Vec<_> = (first..first + 20)
+                .map(|id| tmdb_title(id, "Comedy Shelf Pick", "movie"))
+                .collect();
+            return Json(json!({"results":results,"total_pages":4})).into_response();
+        }
         let (id, name, media) = if is_tv {
             (3001, "Discover TV", "tv")
         } else {
@@ -539,6 +552,33 @@ async fn cold_install_onboarding_profile_recommendations_and_restart_cache() -> 
         "the direct shelf should apply the profile exclusion"
     );
     assert!(titles.iter().all(|title| title["id"] != hidden_id));
+    let expanded_url = format!("{home_url}?type=movie&shelf=taste-movie-comedy&expand=true");
+    let expanded: Value = client
+        .get(&expanded_url)
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+    let titles = expanded["sections"][0]["titles"].as_array().unwrap();
+    assert_eq!(
+        titles.len(),
+        81,
+        "include saved titles and four pages of the same genre"
+    );
+    assert_eq!(titles[1]["id"], 50_000);
+    assert_eq!(titles[80]["id"], 50_079);
+    assert!(titles.iter().all(|title| title["type"] == "movie"));
+    let calls_after_expansion = calls.load(Ordering::SeqCst);
+    let cached: Value = client
+        .get(&expanded_url)
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+    assert_eq!(cached["sections"], expanded["sections"]);
+    assert_eq!(calls.load(Ordering::SeqCst), calls_after_expansion);
     let old_fingerprint = catalog
         .get(
             "recommendations",

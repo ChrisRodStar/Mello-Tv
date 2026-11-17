@@ -216,6 +216,7 @@ export function App({ resolvePlayback }: { resolvePlayback?: PlaybackResolver } 
           <SearchResults query={query.trim()} onSelect={handleSelect} />
         ) : (
           <CatalogContent
+            key={`${activeProfile?.id ?? ''}:${filter}`}
             catalog={catalog}
             profileId={activeProfile?.id}
             onResume={handleResume}
