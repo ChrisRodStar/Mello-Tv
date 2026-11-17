@@ -1399,11 +1399,13 @@ fn home_shelf_order(shelf: &Shelf) -> u8 {
     if is_anime_shelf(shelf) {
         return 6;
     }
+    if matches!(shelf.id.as_str(), "movie-popular" | "tv-popular") {
+        return 4;
+    }
     match shelf.kind.as_str() {
         "because" if shelf.reason == "watched" => 2,
         "because" | "taste" => 3,
-        "recent" | "discover" => 5,
-        _ => 4,
+        _ => 5,
     }
 }
 
@@ -1440,11 +1442,12 @@ fn compose_home(
 
     for shelf in &candidates {
         let anime_shelf = is_anime_shelf(shelf);
-        let limit = match shelf.kind.as_str() {
-            "because" | "taste" => 3,
-            _ => MAX_ROWS,
+        let (group, limit) = match shelf.kind.as_str() {
+            "because" | "taste" => (shelf.kind.as_str(), 3),
+            "recent" | "discover" | "personal" | "trending" => (shelf.kind.as_str(), MAX_ROWS),
+            _ => ("shared", 6),
         };
-        let count = topic_counts.entry(shelf.kind.as_str()).or_insert(0);
+        let count = topic_counts.entry(group).or_insert(0);
         if (anime_shelf && has_anime_shelf) || (!anime_shelf && *count >= limit) {
             continue;
         }
@@ -1950,21 +1953,38 @@ mod home_tests {
             candidates.push(shelf(&format!("{kind}-{index}"), kind, first, first + 19)?);
         }
 
+        for index in 0..22 {
+            let kind = if index % 2 == 0 { "browse" } else { "topic" };
+            let first = 1000 + index * 20;
+            candidates.push(shelf(&format!("legacy-{index}"), kind, first, first + 19)?);
+        }
+
         let (today, featured) = compose_home(candidates.clone(), "test", 20_000);
         let (tomorrow, _) = compose_home(candidates, "test", 20_001);
-        assert_eq!(today.len(), 19);
+        assert_eq!(today.len(), 25);
         assert_eq!(today[0].id, "personalized-test");
         assert_eq!(today[1].id, "trending");
         assert_eq!(
-            today[2..18]
-                .iter()
-                .filter(|shelf| shelf.kind == "recent")
-                .count(),
+            today.iter().filter(|shelf| shelf.kind == "recent").count(),
             8
         );
         assert_ne!(today[2].id, tomorrow[2].id);
-        assert!(is_anime_shelf(&today[18]));
-        assert_eq!(today[18].titles.len(), 6);
+        assert_eq!(
+            today
+                .iter()
+                .filter(|shelf| shelf.kind == "discover")
+                .count(),
+            8
+        );
+        assert_eq!(
+            today
+                .iter()
+                .filter(|shelf| shelf.id.starts_with("legacy-"))
+                .count(),
+            6
+        );
+        assert!(is_anime_shelf(&today[24]));
+        assert_eq!(today[24].titles.len(), 6);
         assert!(
             today[0]
                 .titles
