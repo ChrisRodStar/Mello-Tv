@@ -1,6 +1,6 @@
 //! Bounded TMDB catalog population and profile-keyed recommendations.
 
-use std::{env, fmt, sync::Arc, time::Duration};
+use std::{collections::HashSet, env, fmt, sync::Arc, time::Duration};
 
 use chrono::{DateTime, Utc};
 use reqwest::{Client, StatusCode};
@@ -9,8 +9,8 @@ use sha2::{Digest, Sha256};
 use stream_core::{
     accounts::Profile,
     catalog::{
-        CatalogRecord, RecommendationInputs, Recommendations, Season, SeasonSummary, Title,
-        TitleIdentity,
+        CANONICAL_GENRES, CatalogRecord, ContentPreference, RecommendationInputs, Recommendations,
+        Season, SeasonSummary, Shelf, Title, TitleIdentity,
     },
 };
 use stream_storage::{CatalogStore, catalog::CatalogWrite};
@@ -108,6 +108,15 @@ pub struct CatalogWorker {
     permits: Arc<Semaphore>,
     warm_lock: Arc<Mutex<()>>,
     rate: Arc<Mutex<RateLimit>>,
+}
+
+struct HomeShelf {
+    id: &'static str,
+    heading: &'static str,
+    path: &'static str,
+    kind: &'static str,
+    source: &'static str,
+    ttl: chrono::Duration,
 }
 
 struct RateLimit {
@@ -502,48 +511,59 @@ impl CatalogWorker {
                 }
             }
         }
-        // Refresh each home shelf independently so one fresh shelf cannot mask missing data.
-        self.refresh_home_shelf(
-            "trending",
-            "Trending this week",
-            "/trending/all/week?page=1",
-            "trending",
-            "tmdb-weekly",
-        )
-        .await?;
-        self.refresh_home_shelf(
-            "movie-popular",
-            "Popular movies",
-            "/movie/popular?page=1&language=en-US",
-            "browse",
-            "tmdb-popular",
-        )
-        .await?;
-        self.refresh_home_shelf(
-            "tv-popular",
-            "Popular TV shows",
-            "/tv/popular?page=1&language=en-US",
-            "browse",
-            "tmdb-popular",
-        )
-        .await?;
-        Ok(())
+        self.refresh_home_shelves().await
     }
 
-    async fn refresh_home_shelf(
-        &self,
-        id: &str,
-        heading: &str,
-        path: &str,
-        kind: &str,
-        source: &str,
-    ) -> Result<(), CatalogServiceError> {
+    async fn refresh_home_shelves(&self) -> Result<(), CatalogServiceError> {
+        let mut result = Ok(());
+        for shelf in [
+            HomeShelf {
+                id: "trending",
+                heading: "Trending this week",
+                path: "/trending/all/week?page=1",
+                kind: "trending",
+                source: "tmdb-weekly",
+                ttl: chrono::Duration::days(1),
+            },
+            HomeShelf {
+                id: "movie-popular",
+                heading: "Popular movies",
+                path: "/movie/popular?page=1&language=en-US",
+                kind: "browse",
+                source: "tmdb-popular",
+                ttl: chrono::Duration::days(7),
+            },
+            HomeShelf {
+                id: "tv-popular",
+                heading: "Popular TV shows",
+                path: "/tv/popular?page=1&language=en-US",
+                kind: "browse",
+                source: "tmdb-popular",
+                ttl: chrono::Duration::days(7),
+            },
+        ] {
+            if let Err(error) = self.refresh_home_shelf(shelf).await {
+                result = Err(error);
+            }
+        }
+        result
+    }
+
+    async fn refresh_home_shelf(&self, shelf: HomeShelf) -> Result<(), CatalogServiceError> {
+        let HomeShelf {
+            id,
+            heading,
+            path,
+            kind,
+            source,
+            ttl,
+        } = shelf;
         let now: DateTime<Utc> = std::time::SystemTime::now().into();
         if self
             .store
             .get("shelf", id, now)
             .await
-            .is_ok_and(|record| cache_ttl_acceptable(&record) && record.expires_at > now)
+            .is_ok_and(|record| record.expires_at > now && record.updated_at + ttl > now)
         {
             return Ok(());
         }
@@ -570,7 +590,7 @@ impl CatalogWorker {
             reason: String::new(),
             titles,
         };
-        self.save("shelf", id, &shelf, META_TTL).await?;
+        self.save("shelf", id, &shelf, ttl).await?;
         Ok(())
     }
 
@@ -842,87 +862,79 @@ impl CatalogWorker {
         let mut contributions: Vec<(Vec<Title>, f64)> = Vec::new();
         let mut sections = Vec::new();
         let seeds = recommendation_seeds(&inputs, now);
-        let mut excluded: std::collections::HashSet<String> = seeds
+        let mut excluded: HashSet<_> = inputs
+            .favorites
             .iter()
-            .map(|(favorite, _)| favorite.identity.key())
+            .map(|favorite| favorite.identity.key())
             .collect();
         excluded.extend(
             inputs
-                .favorites
+                .signals
                 .iter()
-                .map(|favorite| favorite.identity.key()),
+                .filter(|signal| signal.completed || signal_qualifies(signal))
+                .map(|signal| signal.identity.key()),
         );
+        let media_types: &[&str] = match inputs.format {
+            ContentPreference::Movie => &["movie"],
+            ContentPreference::Tv => &["tv"],
+            ContentPreference::Both => &["movie", "tv"],
+        };
         if self.available() {
-            for genre in inputs.genres.iter().take(9) {
-                let media_types: &[&str] = match inputs.format {
-                    stream_core::catalog::ContentPreference::Movie => &["movie"],
-                    stream_core::catalog::ContentPreference::Tv => &["tv"],
-                    stream_core::catalog::ContentPreference::Both => &["movie", "tv"],
-                };
+            for genre in &inputs.genres {
                 for media in media_types {
                     if let Ok(path) = self.discover_path(genre, media).await
                         && let Ok(payload) = self.get_json(&path).await
                     {
-                        let mut titles = Vec::new();
-                        if let Some(results) = payload.get("results").and_then(Value::as_array) {
-                            for raw in results.iter().take(12) {
-                                if let Some(title) = normalize_title(raw) {
-                                    titles.push(title);
-                                }
-                            }
-                        }
+                        let titles = recommendation_candidates(&payload, media, &excluded);
                         if !titles.is_empty() {
                             contributions.push((titles.clone(), 2.0));
-                            let cleaned = clean_candidates(&titles, &excluded, 20);
-                            sections.push(stream_core::catalog::Shelf {
-                                id: format!("taste-{media}-{genre}"),
-                                heading: format!(
-                                    "{} {}",
-                                    genre_label(genre),
-                                    if *media == "tv" { "series" } else { "movies" }
-                                ),
-                                kind: "taste".into(),
-                                source: "tmdb-discover".into(),
-                                reason: String::new(),
-                                titles: cleaned,
-                            });
+                            sections.push(genre_shelf("taste", media, genre, titles));
                         }
                     }
                 }
             }
             for (seed, weight) in seeds.iter().take(20) {
-                let path = format!(
-                    "/{}/{}/recommendations?page=1",
-                    media_path(seed.identity),
-                    seed.identity.id()
-                );
-                if let Ok(payload) = self.get_json(&path).await
-                    && let Some(results) = payload.get("results").and_then(Value::as_array)
-                {
-                    let mut titles = Vec::new();
-                    for raw in results.iter().take(10) {
-                        if let Some(title) = normalize_title(raw) {
-                            titles.push(title);
-                        }
-                    }
+                let media = media_path(seed.identity);
+                let path = format!("/{media}/{}/recommendations?page=1", seed.identity.id());
+                if let Ok(payload) = self.get_json(&path).await {
+                    let titles = recommendation_candidates(&payload, media, &excluded);
                     if !titles.is_empty() {
                         contributions.push((titles.clone(), *weight));
-                        let cleaned = clean_candidates(&titles, &excluded, 20);
-                        if !seed.title.trim().is_empty() && !cleaned.is_empty() {
+                        if !seed.title.trim().is_empty() {
                             let favorite =
                                 inputs.favorites.iter().any(|f| f.identity == seed.identity);
-                            sections.push(stream_core::catalog::Shelf {
+                            let action = if favorite { "liked" } else { "watched" };
+                            sections.push(Shelf {
                                 id: format!("like-{}", seed.identity.key()),
-                                heading: if favorite {
-                                    format!("Because you liked {}", seed.title)
-                                } else {
-                                    format!("Because you watched {}", seed.title)
-                                },
+                                heading: format!("Because you {action} {}", seed.title),
                                 kind: "because".into(),
                                 source: "tmdb-recommendations".into(),
-                                reason: if favorite { "liked" } else { "watched" }.into(),
-                                titles: cleaned,
+                                reason: action.into(),
+                                titles,
                             });
+                        }
+                    }
+                }
+            }
+            // Prefer genres outside the profile's usual choices. Alternate deeper
+            // pages and use rating instead of popularity to give older titles a chance.
+            let mut genres: Vec<_> = CANONICAL_GENRES.iter().map(|(genre, _)| *genre).collect();
+            genres.sort_by_key(|genre| {
+                (
+                    inputs.genres.iter().any(|selected| selected == genre),
+                    rotation_key(profile_id, rotation_day(now), genre),
+                )
+            });
+            let page = 2 + rotation_day(now).rem_euclid(3);
+            for (index, media) in media_types.iter().enumerate() {
+                for genre in genres.iter().skip(index * 2).take(2) {
+                    if let Ok(path) = self.discover_path(genre, media).await {
+                        let path = path.replace("popularity.desc", "vote_average.desc");
+                        if let Ok(payload) = self.get_json(&format!("{path}&page={page}")).await {
+                            let titles = recommendation_candidates(&payload, media, &excluded);
+                            if !titles.is_empty() {
+                                sections.push(genre_shelf("discover", media, genre, titles));
+                            }
                         }
                     }
                 }
@@ -930,16 +942,26 @@ impl CatalogWorker {
         }
         let fingerprint = input_fingerprint(profile_id, &inputs)?;
         let mut pool = rank_contributions(&contributions, &excluded);
-        if pool.is_empty() {
+        let mut saved = HashSet::new();
+        pool = diversify(pool, 50);
+        if pool.is_empty() && sections.is_empty() {
             return Err(CatalogServiceError::Upstream);
         }
-        pool = diversify(pool, 50);
-        for title in &pool {
-            self.save_title(title).await?;
+        for title in pool
+            .iter()
+            .chain(sections.iter().flat_map(|shelf| &shelf.titles))
+        {
+            if saved.insert(title.identity.key()) {
+                self.save_title(title).await?;
+            }
+        }
+        if let Ok(_guard) = self.warm_lock.try_lock() {
+            // A shared-shelf outage should not discard usable recommendations.
+            let _ = self.refresh_home_shelves().await;
         }
         sections.insert(
             0,
-            stream_core::catalog::Shelf {
+            Shelf {
                 id: format!("personalized-{profile_id}"),
                 heading: "Picked for you".into(),
                 kind: "personal".into(),
@@ -950,7 +972,7 @@ impl CatalogWorker {
         );
         let data = Recommendations {
             fingerprint,
-            pool: pool.clone(),
+            pool,
             sections,
         };
         self.save(
@@ -1230,15 +1252,8 @@ fn recommendation_seeds(
             continue;
         }
         let watched = signal.watched_seconds;
-        let qualifies = if signal.identity.media_type() == stream_core::MediaType::Tv {
-            watched >= 1200.0 && (signal.meaningful_episodes >= 2 || watched >= 2700.0)
-        } else {
-            watched >= 600.0
-                && (signal.completed
-                    || (signal.duration_seconds > 0.0 && watched >= signal.duration_seconds * 0.2))
-        };
         let age_days = (now - signal.updated_at).num_seconds().max(0) as f64 / 86_400.0;
-        if qualifies && age_days <= 60.0 {
+        if signal_qualifies(signal) && age_days <= 60.0 {
             let base = if signal.identity.media_type() == stream_core::MediaType::Tv {
                 (signal.meaningful_episodes + 1) as f64
             } else {
@@ -1339,17 +1354,61 @@ pub fn profile_generation_fingerprint(profile: &Profile) -> Result<String, Catal
         .collect())
 }
 
-fn clean_candidates(
-    titles: &[Title],
-    excluded: &std::collections::HashSet<String>,
-    limit: usize,
+fn recommendation_candidates(
+    payload: &Value,
+    media: &str,
+    excluded: &HashSet<String>,
 ) -> Vec<Title> {
-    titles
-        .iter()
-        .filter(|title| !excluded.contains(&title.identity.key()))
-        .take(limit)
-        .cloned()
+    let mut seen = HashSet::new();
+    payload
+        .get("results")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .take(20)
+        .filter_map(normalize_title)
+        .filter(|title| {
+            media_path(title.identity) == media
+                && !title.poster.is_empty()
+                && !excluded.contains(&title.identity.key())
+                && seen.insert(title.identity.key())
+        })
         .collect()
+}
+
+fn genre_shelf(kind: &str, media: &str, genre: &str, titles: Vec<Title>) -> Shelf {
+    let format = if media == "tv" { "series" } else { "movies" };
+    let category = if genre == "documentary" {
+        "Documentary"
+    } else {
+        genre_label(genre)
+    };
+    let heading = format!("{category} {format}");
+    Shelf {
+        id: format!("{kind}-{media}-{genre}"),
+        heading: if kind == "discover" {
+            format!("Discover {heading}")
+        } else {
+            heading
+        },
+        kind: kind.into(),
+        source: "tmdb-discover".into(),
+        reason: String::new(),
+        titles,
+    }
+}
+
+pub(crate) fn rotation_day(now: DateTime<Utc>) -> i64 {
+    now.timestamp().div_euclid(86_400)
+}
+
+pub(crate) fn rotation_key(profile_id: &str, day: i64, key: &str) -> [u8; 32] {
+    let mut hash = Sha256::new();
+    hash.update(day.to_be_bytes());
+    hash.update(profile_id.as_bytes());
+    hash.update([0]);
+    hash.update(key.as_bytes());
+    hash.finalize().into()
 }
 
 fn rank_contributions(
@@ -1367,15 +1426,16 @@ fn rank_contributions(
             }
             let score = *weight / ((index + 1) as f64).sqrt();
             let entry = scores.entry(key).or_insert_with(|| (title.clone(), 0.0, 0));
-            entry.1 += score;
+            entry.1 = entry.1.max(score);
             entry.2 += 1;
         }
     }
     let mut ranked: Vec<_> = scores
         .into_iter()
         .map(|(key, (title, score, matches))| {
-            let score =
-                score + ((matches + 1) as f64).log2() * 1.5 + (title.rating - 5.0).max(0.0) * 0.15;
+            let score = score
+                + (matches.saturating_sub(1).min(3) as f64) * 0.2
+                + (title.rating - 5.0).max(0.0) * 0.15;
             (key, title, score)
         })
         .collect();
@@ -1962,10 +2022,8 @@ mod tests {
         let genre_only = movie(11, "Genre adjacent");
         let favorite_similar = favorite_similar.ok_or("favorite fixture has invalid identity")?;
         let genre_only = genre_only.ok_or("genre fixture has invalid identity")?;
-        let contributions = vec![
-            (vec![favorite_similar.clone()], 5.0),
-            (vec![genre_only.clone()], 2.0),
-        ];
+        let mut contributions = vec![(vec![genre_only.clone()], 2.0); 9];
+        contributions.push((vec![favorite_similar.clone()], 5.0));
         let ranked = rank_contributions(&contributions, &std::collections::HashSet::new());
         assert!(
             ranked

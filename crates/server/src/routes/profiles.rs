@@ -1,4 +1,4 @@
-use std::time::SystemTime;
+use std::{collections::HashSet, time::SystemTime};
 
 use axum::{
     Json, Router,
@@ -16,13 +16,14 @@ use stream_core::{
         is_safe_identifier,
     },
     catalog::{
-        ContentPreference, Favorite, MediaType, RecommendationInputs, Title, TitleIdentity,
+        ContentPreference, Favorite, MediaType, RecommendationInputs, Shelf, Title, TitleIdentity,
         ViewingSignal,
     },
 };
 use stream_storage::accounts::ListKind;
 
 use crate::{
+    catalog_service::{rotation_day, rotation_key},
     error::AppError,
     routes::browse::normalize_artwork_url,
     state::{AppState, CATALOG_CONFIG_GUIDANCE, CatalogGenerationStatus},
@@ -1318,138 +1319,184 @@ async fn get_home(
         .get_recommendation_exclusions(&state.household_account_id, &id)
         .await?;
     let now: DateTime<Utc> = SystemTime::now().into();
-    let records = state.catalog.list("shelf", 1000, now).await?;
-    let media_filter = params.media_type.as_deref().unwrap_or("all");
+    let media = params.media_type.as_deref().unwrap_or("all");
     let shelf_filter = params.shelf.as_deref();
+    let mut candidates = Vec::<Shelf>::new();
 
-    let mut sections = Vec::new();
-    let mut featured = Vec::new();
-
-    for record in records {
-        let mut shelf_data = record.data;
-        normalize_artwork_url(&mut shelf_data);
-        let shelf_id = shelf_data
-            .get("id")
-            .and_then(|v| v.as_str())
-            .unwrap_or_default();
-        if hidden_topics.contains(shelf_id) {
-            continue;
-        }
-        if shelf_filter.is_none()
-            && (shelf_id.starts_with("onboarding-") || shelf_id.starts_with("favorites-"))
-        {
-            continue;
-        }
-        if shelf_filter.is_some_and(|target_shelf| shelf_id != target_shelf) {
-            continue;
-        }
-        let heading = shelf_data
-            .get("heading")
-            .and_then(|v| v.as_str())
-            .unwrap_or_default();
-        let raw_titles = shelf_data
-            .get("titles")
-            .and_then(|v| v.as_array())
-            .cloned()
-            .unwrap_or_default();
-
-        let mut filtered_titles = Vec::new();
-        for t in raw_titles {
-            let t_type = t.get("type").and_then(|v| v.as_str()).unwrap_or_default();
-            let t_id = t.get("id").and_then(|v| v.as_i64()).unwrap_or(0);
-            let t_key = format!("{t_type}:{t_id}");
-            if (media_filter != "all" && t_type != media_filter) || excluded_titles.contains(&t_key)
-            {
-                continue;
-            }
-            if t.get("poster")
-                .and_then(|v| v.as_str())
-                .is_some_and(|p| p.is_empty())
-            {
-                continue;
-            }
-            filtered_titles.push(t);
-        }
-
-        if !filtered_titles.is_empty() {
-            if featured.is_empty() && shelf_filter.is_none() {
-                featured.extend(filtered_titles.iter().take(5).cloned());
-            }
-            sections.push(json!({
-                "id": shelf_id,
-                "heading": heading,
-                "titles": filtered_titles,
-            }));
-        }
-    }
-
-    // Recommendations are keyed by profile; never read another profile's row or
-    // infer personalized content from globally shared browse shelves.
-    if let Ok(recommendations) = state.catalog.get("recommendations", &id, now).await
-        && let Some(personal_sections) = recommendations
+    // Keep exact-seed recommendations available to title details. Home composition
+    // works on a copy of the same cached shelves and applies page-wide constraints.
+    if let Ok(record) = state.catalog.get("recommendations", &id, now).await
+        && let Some(sections) = record
             .data
             .get("sections")
             .and_then(|value| value.as_array())
     {
-        for section in personal_sections {
-            let shelf_id = section
-                .get("id")
-                .and_then(|v| v.as_str())
-                .unwrap_or_default();
-            if hidden_topics.contains(shelf_id) {
-                continue;
+        candidates.extend(
+            sections
+                .iter()
+                .filter_map(|section| serde_json::from_value(section.clone()).ok()),
+        );
+    }
+    let records = state.catalog.list("shelf", 1000, now).await?;
+    candidates.extend(records.into_iter().filter_map(|record| {
+        serde_json::from_value::<Shelf>(record.data)
+            .ok()
+            .filter(|shelf| {
+                shelf_filter.is_some()
+                    || !(shelf.id.starts_with("onboarding-") || shelf.id.starts_with("favorites-"))
+            })
+    }));
+
+    let mut shelf_ids = HashSet::new();
+    let media_prefix = format!("{media}:");
+    candidates.retain_mut(|shelf| {
+        if hidden_topics.contains(&shelf.id)
+            || shelf_filter.is_some_and(|target| shelf.id != target)
+        {
+            return false;
+        }
+        let mut seen = HashSet::new();
+        shelf.titles.retain(|title| {
+            let key = title.identity.key();
+            (media == "all" || key.starts_with(&media_prefix))
+                && !excluded_titles.contains(&key)
+                && seen.insert(key)
+        });
+        !shelf.titles.is_empty() && shelf_ids.insert(shelf.id.clone())
+    });
+
+    let (sections, featured) = if shelf_filter.is_some() {
+        (candidates, Vec::new())
+    } else {
+        compose_home(candidates, &format!("{id}:{media}"), rotation_day(now))
+    };
+    let mut payload = json!({
+        "sections": sections,
+        "featured": featured,
+        "catalog_state": state.catalog_generation(&id),
+    });
+    normalize_artwork_url(&mut payload);
+    let digest = Sha256::digest(payload["sections"].to_string() + &payload["featured"].to_string());
+    let page_version: String = digest[..8]
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    payload["page_version"] = json!(page_version);
+    Ok(Json(payload))
+}
+
+fn home_shelf_order(shelf: &Shelf) -> u8 {
+    if shelf.id.starts_with("personalized-") {
+        return 0;
+    }
+    if shelf.id == "trending" {
+        return 2;
+    }
+    match shelf.kind.as_str() {
+        "discover" => 1,
+        "because" | "taste" => 3,
+        _ => 4,
+    }
+}
+
+fn compose_home(
+    mut candidates: Vec<Shelf>,
+    profile_id: &str,
+    day: i64,
+) -> (Vec<Shelf>, Vec<Title>) {
+    const ROW_SIZE: usize = 12;
+    const MAX_ROWS: usize = 10;
+    candidates.sort_by_cached_key(|shelf| {
+        (
+            home_shelf_order(shelf),
+            rotation_key(profile_id, day, &shelf.id),
+        )
+    });
+
+    let mut used_titles = HashSet::new();
+    let mut sections = Vec::new();
+    let mut topic_counts = std::collections::HashMap::new();
+
+    for shelf in &candidates {
+        let mut unique: Vec<_> = shelf
+            .titles
+            .iter()
+            .filter(|title| !used_titles.contains(&title.identity.key()))
+            .collect();
+        if unique.is_empty() || (unique.len() < 3 && home_shelf_order(shelf) >= 3) {
+            continue;
+        }
+        let count = topic_counts.entry(shelf.kind.as_str()).or_insert(0);
+        if (*count >= 2 && matches!(shelf.kind.as_str(), "because" | "discover"))
+            || (*count >= 4 && shelf.kind == "taste")
+        {
+            continue;
+        }
+        if home_shelf_order(shelf) == 0 {
+            // Keep four leading matches, then sample from the next best
+            // candidates and from deeper in the same ranked pool.
+            let deeper = unique.len().min(20);
+            if let Some(nearby) = unique.get_mut(4..deeper) {
+                nearby.sort_by_cached_key(|title| {
+                    rotation_key(profile_id, day, &title.identity.key())
+                });
             }
-            let raw_titles = section
-                .get("titles")
-                .and_then(|v| v.as_array())
-                .cloned()
-                .unwrap_or_default();
-            let titles: Vec<_> = raw_titles
-                .into_iter()
-                .filter(|title| {
-                    let t_type = title
-                        .get("type")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or_default();
-                    let t_id = title.get("id").and_then(|v| v.as_i64()).unwrap_or(0);
-                    let key = format!("{t_type}:{t_id}");
-                    (media_filter == "all" || t_type == media_filter)
-                        && !excluded_titles.contains(&key)
-                })
-                .collect();
-            if !titles.is_empty() {
-                if featured.is_empty() && shelf_filter.is_none() {
-                    featured.extend(titles.iter().take(5).cloned());
-                }
-                if shelf_filter.is_none() || shelf_filter == Some(shelf_id) {
-                    sections.push(json!({ "id": shelf_id, "heading": section.get("heading").and_then(|v| v.as_str()).unwrap_or("Recommended for you"), "reason": section.get("reason").and_then(|v| v.as_str()).unwrap_or(""), "titles": titles }));
-                }
+            if unique.len() > deeper {
+                let mut tail = unique.split_off(deeper);
+                tail.sort_by_cached_key(|title| {
+                    rotation_key(profile_id, day, &title.identity.key())
+                });
+                unique.splice(8..8, tail.into_iter().take(4));
             }
+        } else if matches!(shelf.kind.as_str(), "discover" | "taste") {
+            unique.sort_by_cached_key(|title| rotation_key(profile_id, day, &title.identity.key()));
+        }
+        let titles: Vec<_> = unique.into_iter().take(ROW_SIZE).cloned().collect();
+        used_titles.extend(titles.iter().map(|title| title.identity.key()));
+        sections.push(Shelf {
+            titles,
+            ..shelf.clone()
+        });
+        *count += 1;
+        if sections.len() == MAX_ROWS {
+            break;
         }
     }
 
-    use std::fmt::Write;
-    let mut hasher = Sha256::new();
-    if let Ok(bytes) = serde_json::to_vec(&sections) {
-        hasher.update(&bytes);
+    // Sparse or offline catalogs should still show what is available.
+    if sections.is_empty()
+        && let Some(shelf) = candidates.first()
+    {
+        used_titles.extend(shelf.titles.iter().map(|title| title.identity.key()));
+        sections.push(shelf.clone());
     }
-    let hash = hasher.finalize();
-    let mut digest = String::with_capacity(64);
-    for byte in &hash {
-        let _ = write!(digest, "{byte:02x}");
-    }
-    let page_version = if digest.len() >= 16 {
-        &digest[..16]
-    } else {
-        &digest
-    };
 
-    Ok(Json(json!({
-        "sections": sections,
-        "featured": featured,
-        "page_version": page_version,
-        "catalog_state": state.catalog_generation(&id),
-    })))
+    let mut featured = Vec::new();
+    // Draw at most one title per row per pass to mix topics in the carousel.
+    let mut remaining: Vec<_> = candidates
+        .into_iter()
+        .map(|shelf| {
+            shelf
+                .titles
+                .into_iter()
+                .filter(|title| !title.backdrop.is_empty())
+        })
+        .collect();
+    while featured.len() < 5 {
+        let start = featured.len();
+        for titles in &mut remaining {
+            if let Some(title) = titles.find(|title| used_titles.insert(title.identity.key())) {
+                featured.push(title);
+            }
+            if featured.len() == 5 {
+                break;
+            }
+        }
+        if featured.len() == start {
+            break;
+        }
+    }
+    (sections, featured)
 }
 
 async fn get_recommendations(
@@ -1779,5 +1826,63 @@ async fn load_or_create_title(state: &AppState, identity: TitleIdentity) -> Titl
         genres: Vec::new(),
         seasons: Vec::new(),
         details: false,
+    }
+}
+
+#[cfg(test)]
+mod home_tests {
+    use super::*;
+
+    #[test]
+    fn home_keeps_leading_matches_and_rotates_unique_discovery() -> Result<(), serde_json::Error> {
+        let shelf = |id: &str, kind: &str, first: i64, last: i64| {
+            let titles: Vec<_> = (first..=last)
+                .map(|id| {
+                    json!({
+                        "id": id, "type": "movie", "title": format!("Title {id}"),
+                        "overview": "", "rating": 7.5, "details": false,
+                        "backdrop": "https://example.com/backdrop.jpg"
+                    })
+                })
+                .collect();
+            serde_json::from_value::<Shelf>(json!({
+                "id": id, "heading": id, "kind": kind, "titles": titles
+            }))
+        };
+        let candidates = vec![
+            shelf("personalized-test", "personal", 1, 50)?,
+            shelf("discover-movie-crime", "discover", 1, 16)?,
+            shelf("taste-movie-action", "taste", 40, 64)?,
+            shelf("redundant", "because", 1, 4)?,
+        ];
+        let (today, featured) = compose_home(candidates.clone(), "test", 20_000);
+        assert_eq!(
+            (today.clone(), featured.clone()),
+            compose_home(candidates.clone(), "test", 20_000)
+        );
+        let (tomorrow, _) = compose_home(candidates, "test", 20_001);
+        assert_eq!(today[0].id, "personalized-test");
+        assert_eq!(today[0].titles[..4], tomorrow[0].titles[..4]);
+        let today_picks: HashSet<_> = today[0].titles[4..]
+            .iter()
+            .map(|title| title.identity.id())
+            .collect();
+        let tomorrow_picks: HashSet<_> = tomorrow[0].titles[4..]
+            .iter()
+            .map(|title| title.identity.id())
+            .collect();
+        assert_ne!(today_picks, tomorrow_picks);
+        assert!(today.iter().any(|shelf| shelf.id == "discover-movie-crime"));
+        assert!(today.iter().all(|shelf| shelf.id != "redundant"));
+        assert_eq!(featured.len(), 5);
+        let mut ids = HashSet::new();
+        assert!(
+            today
+                .iter()
+                .flat_map(|shelf| &shelf.titles)
+                .chain(&featured)
+                .all(|title| ids.insert(title.identity.key()))
+        );
+        Ok(())
     }
 }

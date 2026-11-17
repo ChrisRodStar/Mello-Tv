@@ -42,7 +42,7 @@ describe('catalog readiness', () => {
     await expect(loadBrowse(AbortSignal.timeout(5000))).resolves.toMatchObject({ status: 'ready', records: [] });
   });
 
-  test('loads personalized shelves from the full recommendations record envelope', async () => {
+  test('loads server-composed shelves and featured titles from profile home', async () => {
     const title = {
       id: 9101,
       type: 'movie',
@@ -56,33 +56,22 @@ describe('catalog readiness', () => {
       const path = String(input);
       if (path.endsWith('/catalog-status'))
         return response(200, { status: 'ready', updated_at: null, reason: null });
-      if (path === '/api/v1/browse')
-        return response(200, { records: [], status: 'ready', reason: null });
-      if (path.includes('/recommendations?type=all'))
+      if (path === '/api/v1/profiles/profile-test/home?type=movie')
         return response(200, {
-          kind: 'recommendations',
-          key: 'profile-test:all',
-          data: {
-            fingerprint: 'profile-fingerprint',
-            pool: [title],
-            sections: [{ id: 'personalized-for-you', heading: 'Picked for You', titles: [title] }],
-          },
-          state: 'fresh',
-          revision: 1,
-          updated_at: '2026-10-27T00:00:00Z',
-          expires_at: '2026-10-28T00:00:00Z',
-          status: 'ready',
-          reason: null,
+          sections: [{ id: 'personalized-for-you', heading: 'Picked for You', titles: [title] }],
+          featured: [{ ...title, id: 9102, title: 'Featured Pick' }],
         });
       throw new Error(`Unexpected catalog request: ${path}`);
     };
 
-    const catalog = await loadCatalog('profile-test', 'all', AbortSignal.timeout(5000));
+    const catalog = await loadCatalog('profile-test', 'movie', AbortSignal.timeout(5000));
     expect(catalog.sections).toContainEqual(expect.objectContaining({
       id: 'personalized-for-you',
       heading: 'Picked for You',
       titles: [expect.objectContaining({ id: 9101, title: 'Personalized Pick' })],
     }));
+    expect(catalog.featured?.map((title) => title.id)).toEqual([9102]);
+    expect(catalog.titles.map((title) => title.id)).toEqual([9102, 9101]);
   });
 
   test('retries HTTP 202 metadata responses until the saved record is ready', async () => {

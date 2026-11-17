@@ -7,6 +7,7 @@ import MelloKit
 public struct CatalogView: View {
     public let category: CatalogCategory
 
+    @Environment(\.scenePhase) private var scenePhase
     @State private var featuredTitles: [MediaTitle] = []
     @State private var sections: [CatalogSection] = []
     @State private var continueWatchingItems: [WatchProgress] = []
@@ -71,7 +72,8 @@ public struct CatalogView: View {
         }
         .edgesIgnoringSafeArea(.top)
         .background(MelloTVTheme.background.ignoresSafeArea())
-        .task(id: category) {
+        .task(id: scenePhase == .active ? category : nil) {
+            guard scenePhase == .active else { return }
             await loadContent()
         }
         .onChange(of: profileStore.activeProfileID) { _, _ in
@@ -121,11 +123,10 @@ public struct CatalogView: View {
     private var curatedShelves: some View {
         VStack(alignment: .leading, spacing: 44) {
             ForEach(Array(sections.enumerated()), id: \.element.id) { index, section in
-                if index == 0 && section.titles.count >= 4 {
-                    // First shelf: Numbered Top 10 Ranking
+                if section.id == "trending" && section.titles.count >= 4 {
                     NumberedShelf(
                         section: section,
-                        eyebrow: category == .tv ? "Top Shows Today" : "Top 10 Today",
+                        eyebrow: section.heading,
                         onSelect: { selectedTitle = $0 }
                     )
                 } else if index == 1 || (index > 2 && index % 3 == 1) {
@@ -254,39 +255,18 @@ public struct CatalogView: View {
         defer { isLoading = false }
 
         do {
+            try await MelloTVAPI.shared.waitForCatalogReady(profileID: pid)
             let response: CatalogResponse
             if let filter = category.mediaTypeFilter {
                 response = try await MelloTVAPI.shared.recommendationPage(category: filter, profileID: pid)
             } else {
                 response = try await MelloTVAPI.shared.home(profileID: pid)
             }
-            var loadedSections = response.sections ?? []
-
-            // Apply category media type filter to sections if not already filtered
-            if let filter = category.mediaTypeFilter {
-                loadedSections = loadedSections.compactMap { sec in
-                    let filtered = sec.titles.filter { $0.type == filter }
-                    return filtered.isEmpty ? nil : CatalogSection(id: sec.id, heading: sec.heading, titles: filtered, reason: sec.reason)
-                }
-            }
-
-            var featured = response.featured ?? []
-            if let filter = category.mediaTypeFilter {
-                featured = featured.filter { $0.type == filter }
-            }
-
-            // Fallback: if featured is empty, pick leading titles from first populated section or response.titles
-            if featured.isEmpty {
-                if let firstShelf = loadedSections.first(where: { !$0.titles.isEmpty }) {
-                    featured = Array(firstShelf.titles.prefix(6))
-                } else {
-                    featured = Array(response.titles.prefix(6))
-                }
-            }
-
-            self.sections = loadedSections
-            self.featuredTitles = featured
+            guard !Task.isCancelled, pid == profileStore.activeProfileID else { return }
+            self.sections = response.sections ?? []
+            self.featuredTitles = response.featured ?? []
         } catch {
+            guard !Task.isCancelled, pid == profileStore.activeProfileID else { return }
             if sections.isEmpty {
                 self.errorMessage = error.localizedDescription
             }

@@ -35,11 +35,6 @@ export const shelfWire = z.object({
   heading: z.string(),
   titles: z.array(titleWire),
 });
-export const recommendationsWire = z.object({
-  fingerprint: z.string(),
-  pool: z.array(titleWire),
-  sections: z.array(shelfWire),
-});
 export const recordWire = <T extends z.ZodType>(data: T) =>
   z.object({
     kind: z.string(),

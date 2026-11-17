@@ -51,7 +51,7 @@ struct CatalogView: View {
                             // Featured Carousel (Showroom Hero Stage)
                             if !store.featuredTitles.isEmpty {
                                 FeaturedCarouselView(
-                                    titles: store.featuredTitles,
+                                    titles: spotlightPick == nil ? store.featuredTitles : Array(store.featuredTitles.dropLast()),
                                     viewportSize: viewport.size,
                                     onSelect: { title in
                                         selectedTitle = title
@@ -273,27 +273,22 @@ struct CatalogView: View {
             }
         }
 
-        // Dynamic Curated Shelves
-        // SwiftUI may finish updating outgoing rows after a profile change
-        // clears the store. Capture each section instead of retaining its index.
+        // Capture sections by ID so outgoing rows survive a profile change.
         ForEach(Array(store.sections.enumerated()), id: \.element.id) { index, section in
-            if index == 0 && section.titles.count >= 4 {
-                // Section 0: Numbered Top 10 Charts
-                NumberedShelf(
-                    section: section,
-                    eyebrow: store.category == .tv ? "Top Shows Today" : "Top 10 Today",
-                    onSelect: { selectedTitle = $0 }
-                )
-            } else if index == 1 {
-                // Section 1: Panoramic 16:9 Cinema Shelf
-                PanoramicShelf(
-                    section: section,
-                    eyebrow: "Cinematic Premieres",
-                    onSelect: { selectedTitle = $0 }
-                )
+            VStack(spacing: 16) {
+                if section.id == "trending" && section.titles.count >= 4 {
+                    NumberedShelf(
+                        section: section,
+                        eyebrow: section.heading,
+                        onSelect: { selectedTitle = $0 }
+                    )
+                } else if index % 2 == 1 {
+                    PanoramicShelf(section: section, onSelect: { selectedTitle = $0 })
+                } else {
+                    CatalogShelf(section: section, onSelect: { selectedTitle = $0 })
+                }
 
-                // Editorial Spotlight Card Break
-                if let spotlightPick = store.featuredTitles.dropFirst().first {
+                if index == 1, let spotlightPick {
                     EditorialSpotlightCard(
                         title: spotlightPick,
                         onSelect: { selectedTitle = spotlightPick },
@@ -301,20 +296,13 @@ struct CatalogView: View {
                     )
                     .padding(.vertical, 4)
                 }
-            } else if index % 2 == 1 {
-                // Alternating: Panoramic 16:9
-                PanoramicShelf(
-                    section: section,
-                    onSelect: { selectedTitle = $0 }
-                )
-            } else {
-                // Alternating: Classic 2:3 Posters
-                CatalogShelf(
-                    section: section,
-                    onSelect: { selectedTitle = $0 }
-                )
             }
         }
+    }
+
+    private var spotlightPick: MediaTitle? {
+        guard store.sections.count > 1, store.featuredTitles.count >= 5 else { return nil }
+        return store.featuredTitles.last
     }
 }
 

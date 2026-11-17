@@ -78,15 +78,8 @@ final class CatalogStore {
                     return
                 }
 
-                let loadedSections = response.sections ?? []
-                self.sections = loadedSections
-
-                // Keep the existing multi-card showroom and editorial spotlight.
-                // The server's reserved pick leads, followed by the first ranked row.
-                var featuredIDs = Set<String>()
-                let candidates = (response.featured ?? []) +
-                    (loadedSections.first(where: { !$0.titles.isEmpty })?.titles ?? response.titles)
-                self.featuredTitles = candidates.filter { featuredIDs.insert($0.id).inserted }
+                self.sections = response.sections ?? []
+                self.featuredTitles = response.featured ?? []
 
                 self.hasLoaded = true
             } catch is CancellationError {

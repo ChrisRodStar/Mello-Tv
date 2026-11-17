@@ -1,9 +1,8 @@
 import { z } from 'zod';
-import { apiJSON, isMissing, profilePath, publicArtwork } from './api';
+import { apiJSON, profilePath, publicArtwork } from './api';
 import {
   recordWire,
   shelfWire,
-  recommendationsWire,
   titleWire,
   seasonWire,
   viewTitle,
@@ -106,55 +105,21 @@ export async function loadCatalog(
   signal: AbortSignal,
 ): Promise<Catalog> {
   await waitForCatalogReady(profileID, signal);
-  const browse = await loadBrowse(signal);
-  let personalized: z.infer<typeof recommendationsWire> | undefined;
-  try {
-    const r = await apiJSON(
-      `${profilePath(profileID)}/recommendations?type=${category}`,
-      recordWire(recommendationsWire),
-      { signal },
-    );
-    personalized = r.data;
-  } catch (error) {
-    if (!isMissing(error)) {
-      signal.throwIfAborted(); /* General browsing remains usable if a personalized result fails. */
-    }
+  const page = await apiJSON(
+    `${profilePath(profileID)}/home?type=${category}`,
+    z.object({ sections: z.array(shelfWire), featured: z.array(titleWire) }),
+    { signal },
+  );
+  const featured = page.featured.map((title) => rememberTitle(viewTitle(title)));
+  const sections = page.sections.map((section) => ({
+    ...section,
+    titles: section.titles.map((title) => rememberTitle(viewTitle(title))),
+  }));
+  const all = new Map<string, Title>();
+  for (const title of [...featured, ...sections.flatMap((section) => section.titles)]) {
+    all.set(`${title.type}:${title.id}`, title);
   }
-  const seenShelves = new Set<string>();
-  const shelves = [
-    ...(personalized?.sections ?? []).filter(
-      (s) => !browse.records.some((r) => r.data.id === s.id),
-    ),
-    ...browse.records
-      .filter(
-        (r) => !r.data.id.startsWith('onboarding-') && !r.data.id.startsWith('favorites-'),
-      )
-      .map((r) => r.data),
-  ];
-  const sections = shelves
-    .filter((s) => {
-      if (seenShelves.has(s.id)) return false;
-      seenShelves.add(s.id);
-      return true;
-    })
-    .map((s) => ({
-      id: s.id,
-      heading: s.heading,
-      titles: s.titles
-        .filter((t) => category === 'all' || t.type === category)
-        .map((t) => rememberTitle(viewTitle(t))),
-    }))
-    .filter((s) => s.titles.length);
-  const seen = new Set<string>();
-  const all = sections
-    .flatMap((s) => s.titles)
-    .filter((t) => {
-      const k = `${t.type}:${t.id}`;
-      if (seen.has(k)) return false;
-      seen.add(k);
-      return true;
-    });
-  return { configured: true, titles: all, sections };
+  return { configured: true, titles: [...all.values()], sections, featured };
 }
 export async function loadDetails(title: Title, signal: AbortSignal): Promise<Details> {
   const { record } = await awaitMetadata(

@@ -40,10 +40,6 @@ export const CatalogContent = memo(function CatalogContent({
   onSelect,
   onPlay,
 }: CatalogContentProps) {
-  const featuredTitles = useMemo(() => {
-    return catalog?.sections?.find((section) => section.titles.length)?.titles ?? titles;
-  }, [catalog?.sections, titles]);
-
   const movieTitles = useMemo(() => titles.filter((title) => title.type === 'movie'), [titles]);
 
   const tvTitles = useMemo(() => titles.filter((title) => title.type === 'tv'), [titles]);
@@ -77,7 +73,11 @@ export const CatalogContent = memo(function CatalogContent({
     return fallback;
   }, [catalog?.sections, titles, filter, movieTitles, tvTitles, highestRatedTitles]);
 
-  const spotlightPick = featuredTitles[1];
+  const featuredTitles = catalog?.featured ?? [];
+  const spotlightPick =
+    sections.length > 1 && featuredTitles.length >= 5
+      ? featuredTitles[featuredTitles.length - 1]
+      : undefined;
 
   return error ? (
     <ServiceUnavailable health={health} checking={checking} onRetry={retry} />
@@ -100,7 +100,13 @@ export const CatalogContent = memo(function CatalogContent({
     </div>
   ) : (
     <>
-      <FeaturedCarousel key={filter} titles={featuredTitles} onSelect={onSelect} />
+      {featuredTitles.length > 0 && (
+        <FeaturedCarousel
+          key={filter}
+          titles={spotlightPick ? featuredTitles.slice(0, -1) : featuredTitles}
+          onSelect={onSelect}
+        />
+      )}
       {profileId && onResume && (
         <ContinueWatching
           key={profileId}
@@ -111,51 +117,19 @@ export const CatalogContent = memo(function CatalogContent({
         />
       )}
       {sections.map((section, index) => {
-        if (index === 0 && section.titles.length >= 4) {
-          return (
-            <NumberedShelf
-              key={section.id}
-              heading={filter === 'tv' ? 'Top Shows Today' : 'Top 10 Today'}
-              titles={section.titles}
-              onSelect={onSelect}
-            />
-          );
-        }
-        if (index === 1) {
-          return (
-            <Fragment key={section.id}>
-              <PanoramicShelf
-                heading="Cinematic Premieres"
-                titles={section.titles}
-                onSelect={onSelect}
-              />
-              {spotlightPick && (
-                <EditorialSpotlightCard
-                  title={spotlightPick}
-                  onSelect={onSelect}
-                  onPlay={onPlay}
-                />
-              )}
-            </Fragment>
-          );
-        }
-        if (index % 2 === 1) {
-          return (
-            <PanoramicShelf
-              key={section.id}
-              heading={section.heading}
-              titles={section.titles}
-              onSelect={onSelect}
-            />
-          );
-        }
+        const Row =
+          section.id === 'trending' && section.titles.length >= 4
+            ? NumberedShelf
+            : index % 2 === 1
+              ? PanoramicShelf
+              : Shelf;
         return (
-          <Shelf
-            key={section.id}
-            heading={section.heading}
-            titles={section.titles}
-            onSelect={onSelect}
-          />
+          <Fragment key={section.id}>
+            <Row heading={section.heading} titles={section.titles} onSelect={onSelect} />
+            {index === 1 && spotlightPick && (
+              <EditorialSpotlightCard title={spotlightPick} onSelect={onSelect} onPlay={onPlay} />
+            )}
+          </Fragment>
         );
       })}
     </>

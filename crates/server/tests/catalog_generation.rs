@@ -136,6 +136,15 @@ async fn mock_tmdb(State(state): State<MockState>, uri: Uri) -> Response {
         if is_tv && query.contains("with_keywords=986") {
             return (StatusCode::BAD_REQUEST, Json(json!({"status_code":22,"status_message":"Keyword lookup must select the exact Horror name"}))).into_response();
         }
+        if query.contains("sort_by=vote_average.desc")
+            && (2..=4).any(|page| query.contains(&format!("&page={page}")))
+        {
+            let media = if is_tv { "tv" } else { "movie" };
+            let results: Vec<_> = (6000..6018)
+                .map(|id| tmdb_title(id, "Discovery Pick", media))
+                .collect();
+            return Json(json!({"results":results})).into_response();
+        }
         let (id, name, media) = if is_tv {
             (3001, "Discover TV", "tv")
         } else {
@@ -408,6 +417,61 @@ async fn cold_install_onboarding_profile_recommendations_and_restart_cache() -> 
         !recs["data"]["sections"].as_array().unwrap().is_empty(),
         "series history must aggregate by show before recommendation validation"
     );
+    let home_url = format!("{base}/api/v1/profiles/{first}/home");
+    let home: Value = client
+        .get(format!("{home_url}?type=movie"))
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+    let sections = home["sections"].as_array().unwrap();
+    let discovery = sections
+        .iter()
+        .find(|section| {
+            section["id"].as_str().is_some_and(|id| {
+                id.starts_with("discover-movie-") && id != "discover-movie-comedy"
+            })
+        })
+        .expect("show a discovery row outside the profile's selected genre");
+    let discovery_id = discovery["id"].as_str().unwrap();
+    assert_eq!(discovery["titles"].as_array().unwrap().len(), 12);
+    let title = &discovery["titles"][0];
+    let hidden_id = title["id"].as_i64().unwrap();
+    let mut ids = std::collections::HashSet::new();
+    for title in sections
+        .iter()
+        .flat_map(|section| section["titles"].as_array().unwrap())
+        .chain(home["featured"].as_array().unwrap())
+    {
+        assert_eq!(title["type"], "movie");
+        assert!(
+            ids.insert(title["id"].as_i64().unwrap()),
+            "duplicate title: {title}"
+        );
+    }
+    let hidden = client
+        .put(format!(
+            "{base}/api/v1/profiles/{first}/recommendation-hidden/movie/{hidden_id}"
+        ))
+        .send()
+        .await?
+        .error_for_status()?;
+    assert_eq!(hidden.status(), StatusCode::NO_CONTENT);
+    let shelf: Value = client
+        .get(format!("{home_url}?type=movie&shelf={discovery_id}"))
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+    let titles = shelf["sections"][0]["titles"].as_array().unwrap();
+    assert_eq!(
+        titles.len(),
+        17,
+        "the direct shelf should apply the profile exclusion"
+    );
+    assert!(titles.iter().all(|title| title["id"] != hidden_id));
     let old_fingerprint = catalog
         .get(
             "recommendations",
