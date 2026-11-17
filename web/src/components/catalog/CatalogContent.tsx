@@ -75,7 +75,7 @@ export const CatalogContent = memo(function CatalogContent({
 
   const featuredTitles = catalog?.featured ?? [];
   const spotlightPick =
-    sections.length > 1 && featuredTitles.length >= 5
+    sections.length > 1 && featuredTitles.length >= 8
       ? featuredTitles[featuredTitles.length - 1]
       : undefined;
 

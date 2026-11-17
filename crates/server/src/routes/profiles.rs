@@ -1415,6 +1415,8 @@ fn compose_home(
     day: i64,
 ) -> (Vec<Shelf>, Vec<Title>) {
     const ROW_SIZE: usize = 12;
+    // Seven carousel cards plus a separate editorial spotlight.
+    const FEATURED_LIMIT: usize = 8;
     const MAX_ROWS: usize = 28;
     const ANIME_IN_MIXED_ROWS: usize = 5;
     let anime_ids: HashSet<_> = candidates
@@ -1529,13 +1531,13 @@ fn compose_home(
                 .filter(|title| !title.backdrop.is_empty() && !is_anime(title))
         })
         .collect();
-    while featured.len() < 5 {
+    while featured.len() < FEATURED_LIMIT {
         let start = featured.len();
         for titles in &mut remaining {
             if let Some(title) = titles.find(|title| used_titles.insert(title.identity.key())) {
                 featured.push(title);
             }
-            if featured.len() == 5 {
+            if featured.len() == FEATURED_LIMIT {
                 break;
             }
         }
@@ -1922,7 +1924,7 @@ mod home_tests {
         assert_ne!(today_picks, tomorrow_picks);
         assert!(today.iter().any(|shelf| shelf.id == "discover-movie-crime"));
         assert!(today.iter().all(|shelf| shelf.id != "redundant"));
-        assert_eq!(featured.len(), 5);
+        assert_eq!(featured.len(), 8);
         let mut ids = HashSet::new();
         assert!(
             today

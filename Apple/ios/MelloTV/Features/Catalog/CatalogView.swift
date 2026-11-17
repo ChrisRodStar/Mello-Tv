@@ -301,7 +301,7 @@ struct CatalogView: View {
     }
 
     private var spotlightPick: MediaTitle? {
-        guard store.sections.count > 1, store.featuredTitles.count >= 5 else { return nil }
+        guard store.sections.count > 1, store.featuredTitles.count >= 8 else { return nil }
         return store.featuredTitles.last
     }
 }
