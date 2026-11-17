@@ -1,7 +1,7 @@
 //! Bounded TMDB catalog population and profile-keyed recommendations.
 
 mod related;
-mod shelf_expansion;
+pub(crate) mod shelf_expansion;
 
 use std::{collections::HashSet, env, fmt, sync::Arc, time::Duration};
 

@@ -322,7 +322,7 @@ private struct NumberedShelf: View {
 
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(alignment: .top, spacing: 16) {
-                    ForEach(Array(section.titles.prefix(10).enumerated()), id: \.element.id) { index, title in
+                    ForEach(Array(section.titles.enumerated()), id: \.element.id) { index, title in
                         NumberedPosterTile(rank: index + 1, title: title) {
                             onSelect(title)
                         }

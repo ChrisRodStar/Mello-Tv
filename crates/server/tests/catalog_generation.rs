@@ -199,13 +199,18 @@ async fn mock_tmdb(State(state): State<MockState>, uri: Uri) -> Response {
             return Json(json!({"results":results})).into_response();
         }
         if !is_tv
-            && query.contains("with_genres=35")
+            && (query.contains("with_genres=35") || query.contains("with_runtime.lte=99"))
             && let Some(page) = query
                 .split('&')
                 .find_map(|param| param.strip_prefix("page="))
                 .and_then(|page| page.parse::<i64>().ok())
         {
-            let first = 50_000 + (page - 1) * 20;
+            let start = if query.contains("with_runtime.lte=99") {
+                51_000
+            } else {
+                50_000
+            };
+            let first = start + (page - 1) * 20;
             let results: Vec<_> = (first..first + 20)
                 .map(|id| tmdb_title(id, "Comedy Shelf Pick", "movie"))
                 .collect();
@@ -483,6 +488,16 @@ async fn cold_install_onboarding_profile_recommendations_and_restart_cache() -> 
         !recs["data"]["sections"].as_array().unwrap().is_empty(),
         "series history must aggregate by show before recommendation validation"
     );
+    let short_movies = (4001..4004).map(|id| tmdb_title(id, "Short Movie", "movie"))
+        .map(|item| {
+            json!({"id": item["id"], "type": "movie", "title": item["title"],
+                "overview": "", "rating": 7.0, "details": false, "poster": "https://image.tmdb.org/t/p/w500/short.jpg"})
+        }).collect::<Vec<_>>();
+    catalog.put(CatalogWrite {
+        kind: "shelf".into(), key: "topic-short-movies".into(),
+        data: json!({"id": "topic-short-movies", "heading": "Under 100 minutes", "kind": "topic", "titles": short_movies}),
+        ttl: chrono::Duration::days(1),
+    }, std::time::SystemTime::now().into()).await?;
     let home_url = format!("{base}/api/v1/profiles/{first}/home");
     let home: Value = client
         .get(format!("{home_url}?type=movie"))
@@ -515,7 +530,7 @@ async fn cold_install_onboarding_profile_recommendations_and_restart_cache() -> 
         })
         .expect("show a discovery row outside the profile's selected genre");
     let discovery_id = discovery["id"].as_str().unwrap();
-    assert_eq!(discovery["titles"].as_array().unwrap().len(), 12);
+    assert_eq!(discovery["titles"].as_array().unwrap().len(), 18);
     let title = &discovery["titles"][0];
     let hidden_id = title["id"].as_i64().unwrap();
     let mut ids = std::collections::HashSet::new();
@@ -569,6 +584,43 @@ async fn cold_install_onboarding_profile_recommendations_and_restart_cache() -> 
     assert_eq!(titles[1]["id"], 50_000);
     assert_eq!(titles[80]["id"], 50_079);
     assert!(titles.iter().all(|title| title["type"] == "movie"));
+    let mut warm_home = None;
+    for _ in 0..140 {
+        let page: Value = client
+            .get(format!("{home_url}?type=movie"))
+            .send()
+            .await?
+            .error_for_status()?
+            .json()
+            .await?;
+        if page["shelves_pending"] == false {
+            warm_home = Some(page);
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let warm_home = warm_home.expect("background row expansion completes");
+    let short_row = warm_home["sections"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|shelf| shelf["id"] == "topic-short-movies")
+        .expect("keep the short movies shelf");
+    assert_eq!(
+        short_row["titles"].as_array().unwrap().len(),
+        20,
+        "fill the home shelf without opening View more"
+    );
+    let mut unique = std::collections::HashSet::new();
+    assert!(
+        warm_home["sections"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .flat_map(|shelf| shelf["titles"].as_array().unwrap())
+            .chain(warm_home["featured"].as_array().unwrap())
+            .all(|title| unique.insert(title["id"].as_i64().unwrap()))
+    );
     let calls_after_expansion = calls.load(Ordering::SeqCst);
     let cached: Value = client
         .get(&expanded_url)

@@ -107,7 +107,11 @@ export async function loadCatalog(
   await waitForCatalogReady(profileID, signal);
   const page = await apiJSON(
     `${profilePath(profileID)}/home?type=${category}`,
-    z.object({ sections: z.array(shelfWire), featured: z.array(titleWire) }),
+    z.object({
+      sections: z.array(shelfWire),
+      featured: z.array(titleWire),
+      shelves_pending: z.boolean().optional(),
+    }),
     { signal },
   );
   const featured = page.featured.map((title) => rememberTitle(viewTitle(title)));
@@ -119,7 +123,7 @@ export async function loadCatalog(
   for (const title of [...featured, ...sections.flatMap((section) => section.titles)]) {
     all.set(`${title.type}:${title.id}`, title);
   }
-  return { configured: true, titles: [...all.values()], sections, featured };
+  return { configured: true, titles: [...all.values()], sections, featured, shelvesPending: page.shelves_pending };
 }
 export async function loadShelf(
   profileID: string,

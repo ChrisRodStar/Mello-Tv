@@ -2,7 +2,7 @@ import SwiftUI
 import MelloKit
 
 /// 10-foot "Top 10 Today" / "Top Shows Today" horizontal shelf for tvOS.
-/// Displays large typographic ranking numerals (1 to 10) layered beside focus-reactive 2:3 poster cards.
+/// Displays ranking numerals beside focus-reactive 2:3 poster cards.
 public struct NumberedShelf: View {
     public let eyebrow: String
     public let subtitle: String?
@@ -29,7 +29,7 @@ public struct NumberedShelf: View {
         self.eyebrow = eyebrow ?? section.heading
         self.subtitle = section.reason == "liked" ? "Based on titles you liked" :
                         (section.reason == "watched" ? "Based on titles you watched" : nil)
-        self.titles = Array(section.titles.prefix(10))
+        self.titles = section.titles
         self.onSelect = onSelect
     }
 

@@ -99,6 +99,16 @@ export function useCatalog(category: Category = 'all', profile?: Profile) {
     };
   }, [enabled]);
 
+  const pendingShelves = result?.key === key && result.data.shelvesPending;
+  useEffect(() => {
+    if (!pendingShelves || checking || error) return;
+    const timer = setTimeout(() => {
+      cache.current.delete(key);
+      setAttempt((value) => value + 1);
+    }, 2500);
+    return () => clearTimeout(timer);
+  }, [pendingShelves, checking, error, key]);
+
   useEffect(() => {
     if (!error || checking) return;
     const timer = setTimeout(() => setAttempt((value) => value + 1), 30000);

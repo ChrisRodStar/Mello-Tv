@@ -95,6 +95,7 @@ export const catalogSchema = z.object({
   titles: z.array(titleSchema),
   sections: z.array(catalogSectionSchema).optional(),
   featured: z.array(titleSchema).optional(),
+  shelvesPending: z.boolean().optional(),
 });
 
 export type Title = z.infer<typeof titleSchema>;

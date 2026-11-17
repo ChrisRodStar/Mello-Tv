@@ -1,63 +1,62 @@
 use super::{CatalogServiceError, CatalogWorker, DiscoverOrder, META_TTL, normalize_title};
 use serde_json::Value;
 use std::collections::HashSet;
-use stream_core::catalog::{Shelf, Title};
+use stream_core::catalog::Title;
 use stream_storage::catalog::CatalogWrite;
 use tokio::task::JoinSet;
 
-impl CatalogWorker {
-    pub(crate) async fn shelf_expansion(&self, shelf: &Shelf) -> Vec<Title> {
-        let now = std::time::SystemTime::now().into();
-        let cached = self.store.get("shelf_expansion", &shelf.id, now).await.ok();
-        if let Some(record) = cached.as_ref().filter(|record| record.expires_at > now)
-            && let Ok(titles) = serde_json::from_value(record.data.clone())
-        {
-            return titles;
-        }
-        if let Ok(Some(path)) = self.expansion_path(&shelf.id).await
-            && let Ok(titles) = self.fetch_expansion(&shelf.id, &path).await
-        {
-            return titles;
-        }
-        cached
-            .and_then(|record| serde_json::from_value(record.data).ok())
-            .unwrap_or_default()
-    }
+enum ExpansionSource<'a> {
+    Genre {
+        media: &'a str,
+        genre: &'a str,
+        order: DiscoverOrder,
+    },
+    Path(String),
+}
 
-    async fn expansion_path(&self, id: &str) -> Result<Option<String>, CatalogServiceError> {
-        if let Some((kind, rest)) = id.split_once('-')
-            && matches!(kind, "taste" | "discover" | "recent")
-            && let Some((media @ ("movie" | "tv"), genre)) = rest.split_once('-')
-        {
-            let order = match kind {
-                "discover" => DiscoverOrder::Rated { page: None },
-                "recent" => DiscoverOrder::Recent,
-                _ => DiscoverOrder::Popular,
-            };
-            return self.discover_path(genre, media, order).await.map(Some);
-        }
-        if let Some(seed) = id.strip_prefix("like-")
-            && let Some((media @ ("movie" | "tv"), title_id)) = seed.split_once(':')
-            && let Ok(title_id) = title_id.parse::<i64>()
-            && title_id > 0
-        {
-            return Ok(Some(format!(
-                "/{media}/{title_id}/recommendations?language=en-US"
-            )));
-        }
-        if let Some((media, genre)) = match id {
-            "movie-action" => Some(("movie", "action")),
-            "movie-comedy" => Some(("movie", "comedy")),
-            "tv-crime" => Some(("tv", "crime")),
-            "tv-drama" => Some(("tv", "drama")),
-            _ => None,
-        } {
-            return self
-                .discover_path(genre, media, DiscoverOrder::Popular)
-                .await
-                .map(Some);
-        }
-        Ok(match id {
+pub(crate) fn can_expand(id: &str) -> bool {
+    expansion_source(id).is_some()
+}
+
+fn expansion_source(id: &str) -> Option<ExpansionSource<'_>> {
+    if let Some((kind, rest)) = id.split_once('-')
+        && matches!(kind, "taste" | "discover" | "recent")
+        && let Some((media @ ("movie" | "tv"), genre)) = rest.split_once('-')
+    {
+        let order = match kind {
+            "discover" => DiscoverOrder::Rated { page: None },
+            "recent" => DiscoverOrder::Recent,
+            _ => DiscoverOrder::Popular,
+        };
+        return Some(ExpansionSource::Genre {
+            media,
+            genre,
+            order,
+        });
+    }
+    if let Some(seed) = id.strip_prefix("like-")
+        && let Some((media @ ("movie" | "tv"), title_id)) = seed.split_once(':')
+        && let Ok(title_id) = title_id.parse::<i64>()
+        && title_id > 0
+    {
+        return Some(ExpansionSource::Path(format!(
+            "/{media}/{title_id}/recommendations?language=en-US"
+        )));
+    }
+    if let Some((media, genre)) = match id {
+        "movie-action" => Some(("movie", "action")),
+        "movie-comedy" => Some(("movie", "comedy")),
+        "tv-crime" => Some(("tv", "crime")),
+        "tv-drama" => Some(("tv", "drama")),
+        _ => None,
+    } {
+        return Some(ExpansionSource::Genre {
+            media,
+            genre,
+            order: DiscoverOrder::Popular,
+        });
+    }
+    match id {
             "trending" => Some("/trending/all/week?language=en-US"),
             "movie-popular" => Some("/movie/popular?language=en-US"),
             "movie-top-rated" => Some("/movie/top_rated?language=en-US"),
@@ -74,7 +73,34 @@ impl CatalogWorker {
             "topic-fantasy" => Some("/discover/movie?include_adult=false&with_genres=14&vote_count.gte=50"),
             "topic-mysteries" => Some("/discover/tv?include_adult=false&with_genres=9648&vote_count.gte=50"),
             _ => None,
-        }.map(str::to_owned))
+        }.map(|path| ExpansionSource::Path(path.into()))
+}
+
+impl CatalogWorker {
+    pub(crate) async fn shelf_expansion(&self, id: &str) -> Vec<Title> {
+        let now = std::time::SystemTime::now().into();
+        let cached = self.store.get("shelf_expansion", id, now).await.ok();
+        if let Some(record) = cached.as_ref().filter(|record| record.expires_at > now)
+            && let Ok(titles) = serde_json::from_value(record.data.clone())
+        {
+            return titles;
+        }
+        if let Some(source) = expansion_source(id)
+            && let Ok(path) = match source {
+                ExpansionSource::Genre {
+                    media,
+                    genre,
+                    order,
+                } => self.discover_path(genre, media, order).await,
+                ExpansionSource::Path(path) => Ok(path),
+            }
+            && let Ok(titles) = self.fetch_expansion(id, &path).await
+        {
+            return titles;
+        }
+        cached
+            .and_then(|record| serde_json::from_value(record.data).ok())
+            .unwrap_or_default()
     }
 
     async fn fetch_expansion(

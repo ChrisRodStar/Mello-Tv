@@ -1355,7 +1355,26 @@ async fn get_home(
         && let Some(shelf) = candidates.iter_mut().find(|shelf| shelf.id == target)
         && let Some(worker) = state.catalog_worker.as_ref()
     {
-        shelf.titles.extend(worker.shelf_expansion(shelf).await);
+        shelf.titles.extend(worker.shelf_expansion(&shelf.id).await);
+    }
+
+    let mut fresh_expansions = HashSet::new();
+    if shelf_filter.is_none() {
+        let expansions = state.catalog.list("shelf_expansion", 1000, now).await?;
+        let mut expansions: std::collections::HashMap<_, _> = expansions
+            .into_iter()
+            .map(|record| (record.key.clone(), record))
+            .collect();
+        for shelf in &mut candidates {
+            if let Some(record) = expansions.remove(&shelf.id)
+                && let Ok(extra) = serde_json::from_value::<Vec<Title>>(record.data)
+            {
+                if record.expires_at > now {
+                    fresh_expansions.insert(shelf.id.clone());
+                }
+                shelf.titles.extend(extra);
+            }
+        }
     }
 
     let mut shelf_ids = HashSet::new();
@@ -1376,14 +1395,35 @@ async fn get_home(
         !shelf.titles.is_empty() && shelf_ids.insert(shelf.id.clone())
     });
 
-    let (sections, featured) = if shelf_filter.is_some() {
-        (candidates, Vec::new())
+    let (sections, featured, shelves_pending) = if shelf_filter.is_some() {
+        (candidates, Vec::new(), false)
     } else {
-        compose_home(candidates, &format!("{id}:{media}"), rotation_day(now))
+        let priority: Vec<_> = candidates
+            .iter()
+            .filter(|shelf| {
+                is_anime_shelf(shelf)
+                    || matches!(
+                        shelf.id.as_str(),
+                        "movie-popular" | "tv-popular" | "topic-short-movies"
+                    )
+            })
+            .map(|shelf| shelf.id.clone())
+            .collect();
+        let (sections, featured) =
+            compose_home(candidates, &format!("{id}:{media}"), rotation_day(now));
+        let ids = priority.iter().map(String::as_str).chain(
+            sections
+                .iter()
+                .filter(|shelf| shelf.titles.len() < shelf_row_size(shelf))
+                .map(|shelf| shelf.id.as_str()),
+        );
+        let pending = queue_shelf_expansions(&state, ids, &fresh_expansions, now);
+        (sections, featured, pending)
     };
     let mut payload = json!({
         "sections": sections,
         "featured": featured,
+        "shelves_pending": shelves_pending,
         "catalog_state": state.catalog_generation(&id),
     });
     normalize_artwork_url(&mut payload);
@@ -1394,6 +1434,60 @@ async fn get_home(
         .collect();
     payload["page_version"] = json!(page_version);
     Ok(Json(payload))
+}
+
+fn queue_shelf_expansions<'a>(
+    state: &AppState,
+    ids: impl Iterator<Item = &'a str>,
+    fresh: &HashSet<String>,
+    now: DateTime<Utc>,
+) -> bool {
+    let Some(worker) = state
+        .catalog_worker
+        .as_ref()
+        .filter(|worker| worker.available())
+    else {
+        return false;
+    };
+    let mut pending = false;
+    let mut started = 0;
+    for id in ids {
+        if fresh.contains(id) || !crate::catalog_service::shelf_expansion::can_expand(id) {
+            continue;
+        }
+        let key = format!("shelf-expansion:{id}");
+        if state.is_catalog_job_running(&key) {
+            pending = true;
+            continue;
+        }
+        if started == 8
+            || state.catalog_request_status(&key).is_some_and(|status| {
+                status
+                    .updated_at
+                    .is_some_and(|attempt| now - attempt < chrono::Duration::seconds(30))
+            })
+        {
+            continue;
+        }
+        if state.ensure_catalog_job(&key) {
+            let state = state.clone();
+            let worker = worker.clone();
+            let id = id.to_owned();
+            started += 1;
+            pending = true;
+            tokio::spawn(async move {
+                let _ = worker.shelf_expansion(&id).await;
+                // Avoid continuously retrying short or temporarily unavailable categories.
+                state.set_catalog_request_status(&key, CatalogGenerationStatus::Ready, None);
+                state.finish_catalog_job(&key);
+            });
+        }
+    }
+    pending
+}
+
+fn shelf_row_size(shelf: &Shelf) -> usize {
+    if is_anime_shelf(shelf) { 16 } else { 20 }
 }
 
 fn is_anime_shelf(shelf: &Shelf) -> bool {
@@ -1425,7 +1519,6 @@ fn compose_home(
     profile_id: &str,
     day: i64,
 ) -> (Vec<Shelf>, Vec<Title>) {
-    const ROW_SIZE: usize = 12;
     // Seven carousel cards plus a separate editorial spotlight.
     const FEATURED_LIMIT: usize = 8;
     const MAX_ROWS: usize = 28;
@@ -1483,7 +1576,9 @@ fn compose_home(
                 tail.sort_by_cached_key(|title| {
                     rotation_key(profile_id, day, &title.identity.key())
                 });
-                unique.splice(8..8, tail.into_iter().take(4));
+                let (sample, rest) = tail.split_at(tail.len().min(8));
+                unique.splice(8..8, sample.iter().copied());
+                unique.extend_from_slice(rest);
             }
         } else if matches!(shelf.kind.as_str(), "recent" | "discover" | "taste") {
             unique.sort_by_cached_key(|title| rotation_key(profile_id, day, &title.identity.key()));
@@ -1491,7 +1586,7 @@ fn compose_home(
         let mut row_anime = 0;
         let anime_allowance = (ANIME_IN_MIXED_ROWS - anime_in_mixed_rows)
             .min(if shelf.kind == "personal" { 2 } else { 1 });
-        let row_size = if anime_shelf { 6 } else { ROW_SIZE };
+        let row_size = shelf_row_size(shelf);
         let titles: Vec<_> = unique
             .into_iter()
             .filter(|title| {
@@ -1997,7 +2092,7 @@ mod home_tests {
             6
         );
         assert!(is_anime_shelf(&today[24]));
-        assert_eq!(today[24].titles.len(), 6);
+        assert_eq!(today[24].titles.len(), 16);
         assert!(
             today[0]
                 .titles

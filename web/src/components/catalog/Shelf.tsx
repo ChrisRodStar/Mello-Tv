@@ -84,15 +84,13 @@ export const NumberedShelf = memo(function NumberedShelf({
   onSelect,
   onViewMore,
 }: ShelfProps) {
-  const topTen = titles.slice(0, 10);
-
-  if (!topTen.length) return null;
+  if (!titles.length) return null;
 
   return (
     <section className="shelf numbered-shelf" aria-label={heading}>
       <ShelfHeading heading={heading} onViewMore={onViewMore} />
       <div className="numbered-shelf-track">
-        {topTen.map((title, index) => (
+        {titles.map((title, index) => (
           <NumberedPosterTile
             key={`${title.type}-${title.id}`}
             rank={index + 1}
