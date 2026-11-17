@@ -172,6 +172,7 @@ export const PanoramicCard = memo(function PanoramicCard({
           <img
             src={artworkUrl}
             alt=""
+            loading="lazy"
             decoding="async"
             onError={() => setFailedCount((c) => c + 1)}
           />

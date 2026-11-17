@@ -136,12 +136,37 @@ async fn mock_tmdb(State(state): State<MockState>, uri: Uri) -> Response {
         if is_tv && query.contains("with_keywords=986") {
             return (StatusCode::BAD_REQUEST, Json(json!({"status_code":22,"status_message":"Keyword lookup must select the exact Horror name"}))).into_response();
         }
-        if query.contains("sort_by=vote_average.desc")
-            && (2..=4).any(|page| query.contains(&format!("&page={page}")))
+        let recent =
+            query.contains("primary_release_date.gte=") || query.contains("first_air_date.gte=");
+        if recent
+            || (query.contains("sort_by=vote_average.desc")
+                && (2..=4).any(|page| query.contains(&format!("&page={page}"))))
         {
-            let media = if is_tv { "tv" } else { "movie" };
-            let results: Vec<_> = (6000..6018)
-                .map(|id| tmdb_title(id, "Discovery Pick", media))
+            let (media, date_field) = if is_tv {
+                ("tv", "first_air_date")
+            } else {
+                ("movie", "release_date")
+            };
+            let genre = query
+                .split('&')
+                .find_map(|part| {
+                    part.strip_prefix("with_genres=")
+                        .or_else(|| part.strip_prefix("with_keywords="))
+                })
+                .and_then(|value| value.split('%').next())
+                .and_then(|value| value.parse::<i64>().ok())
+                .unwrap();
+            let first = 6000 + genre * 30;
+            let results: Vec<_> = (first..first + 18)
+                .map(|id| {
+                    let mut title = tmdb_title(id, "Discovery Pick", media);
+                    if recent {
+                        let now: chrono::DateTime<chrono::Utc> =
+                            std::time::SystemTime::now().into();
+                        title[date_field] = json!(now.format("%Y-%m-%d").to_string());
+                    }
+                    title
+                })
                 .collect();
             return Json(json!({"results":results})).into_response();
         }
@@ -426,6 +451,20 @@ async fn cold_install_onboarding_profile_recommendations_and_restart_cache() -> 
         .json()
         .await?;
     let sections = home["sections"].as_array().unwrap();
+    assert_eq!(
+        sections
+            .iter()
+            .filter(|shelf| shelf["kind"] == "recent")
+            .count(),
+        4
+    );
+    assert_eq!(
+        sections
+            .iter()
+            .filter(|shelf| shelf["kind"] == "discover")
+            .count(),
+        4
+    );
     let discovery = sections
         .iter()
         .find(|section| {

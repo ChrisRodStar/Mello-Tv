@@ -72,6 +72,7 @@ export const TitleCard = memo(function TitleCard({
           <img
             src={activeSrc}
             alt=""
+            loading="lazy"
             decoding="async"
             onError={() => setFailedCount((c) => c + 1)}
           />

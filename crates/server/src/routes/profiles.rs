@@ -1385,16 +1385,24 @@ async fn get_home(
     Ok(Json(payload))
 }
 
+fn is_anime_shelf(shelf: &Shelf) -> bool {
+    shelf.id.ends_with("-animation") && matches!(shelf.kind.as_str(), "taste" | "discover")
+}
+
 fn home_shelf_order(shelf: &Shelf) -> u8 {
     if shelf.id.starts_with("personalized-") {
         return 0;
     }
     if shelf.id == "trending" {
-        return 2;
+        return 1;
+    }
+    if is_anime_shelf(shelf) {
+        return 6;
     }
     match shelf.kind.as_str() {
-        "discover" => 1,
+        "because" if shelf.reason == "watched" => 2,
         "because" | "taste" => 3,
+        "recent" | "discover" => 5,
         _ => 4,
     }
 }
@@ -1405,7 +1413,18 @@ fn compose_home(
     day: i64,
 ) -> (Vec<Shelf>, Vec<Title>) {
     const ROW_SIZE: usize = 12;
-    const MAX_ROWS: usize = 10;
+    const MAX_ROWS: usize = 28;
+    const ANIME_IN_MIXED_ROWS: usize = 5;
+    let anime_ids: HashSet<_> = candidates
+        .iter()
+        .filter(|shelf| is_anime_shelf(shelf))
+        .flat_map(|shelf| &shelf.titles)
+        .map(|title| title.identity.key())
+        .collect();
+    let is_anime = |title: &Title| {
+        title.genres.iter().any(|genre| genre == "Anime")
+            || anime_ids.contains(&title.identity.key())
+    };
     candidates.sort_by_cached_key(|shelf| {
         (
             home_shelf_order(shelf),
@@ -1416,22 +1435,24 @@ fn compose_home(
     let mut used_titles = HashSet::new();
     let mut sections = Vec::new();
     let mut topic_counts = std::collections::HashMap::new();
+    let mut anime_in_mixed_rows = 0;
+    let mut has_anime_shelf = false;
 
     for shelf in &candidates {
+        let anime_shelf = is_anime_shelf(shelf);
+        let limit = match shelf.kind.as_str() {
+            "because" | "taste" => 3,
+            _ => MAX_ROWS,
+        };
+        let count = topic_counts.entry(shelf.kind.as_str()).or_insert(0);
+        if (anime_shelf && has_anime_shelf) || (!anime_shelf && *count >= limit) {
+            continue;
+        }
         let mut unique: Vec<_> = shelf
             .titles
             .iter()
             .filter(|title| !used_titles.contains(&title.identity.key()))
             .collect();
-        if unique.is_empty() || (unique.len() < 3 && home_shelf_order(shelf) >= 3) {
-            continue;
-        }
-        let count = topic_counts.entry(shelf.kind.as_str()).or_insert(0);
-        if (*count >= 2 && matches!(shelf.kind.as_str(), "because" | "discover"))
-            || (*count >= 4 && shelf.kind == "taste")
-        {
-            continue;
-        }
         if home_shelf_order(shelf) == 0 {
             // Keep four leading matches, then sample from the next best
             // candidates and from deeper in the same ranked pool.
@@ -1448,16 +1469,39 @@ fn compose_home(
                 });
                 unique.splice(8..8, tail.into_iter().take(4));
             }
-        } else if matches!(shelf.kind.as_str(), "discover" | "taste") {
+        } else if matches!(shelf.kind.as_str(), "recent" | "discover" | "taste") {
             unique.sort_by_cached_key(|title| rotation_key(profile_id, day, &title.identity.key()));
         }
-        let titles: Vec<_> = unique.into_iter().take(ROW_SIZE).cloned().collect();
+        let mut row_anime = 0;
+        let anime_allowance = (ANIME_IN_MIXED_ROWS - anime_in_mixed_rows)
+            .min(if shelf.kind == "personal" { 2 } else { 1 });
+        let row_size = if anime_shelf { 6 } else { ROW_SIZE };
+        let titles: Vec<_> = unique
+            .into_iter()
+            .filter(|title| {
+                if anime_shelf || !is_anime(title) {
+                    return true;
+                }
+                if row_anime == anime_allowance {
+                    return false;
+                }
+                row_anime += 1;
+                true
+            })
+            .take(row_size)
+            .cloned()
+            .collect();
+        if titles.is_empty() || (titles.len() < 3 && home_shelf_order(shelf) > 1) {
+            continue;
+        }
+        anime_in_mixed_rows += row_anime;
+        has_anime_shelf |= anime_shelf;
         used_titles.extend(titles.iter().map(|title| title.identity.key()));
         sections.push(Shelf {
             titles,
             ..shelf.clone()
         });
-        *count += 1;
+        *count += usize::from(!anime_shelf);
         if sections.len() == MAX_ROWS {
             break;
         }
@@ -1479,7 +1523,7 @@ fn compose_home(
             shelf
                 .titles
                 .into_iter()
-                .filter(|title| !title.backdrop.is_empty())
+                .filter(|title| !title.backdrop.is_empty() && !is_anime(title))
         })
         .collect();
     while featured.len() < 5 {
@@ -1833,22 +1877,23 @@ async fn load_or_create_title(state: &AppState, identity: TitleIdentity) -> Titl
 mod home_tests {
     use super::*;
 
+    fn shelf(id: &str, kind: &str, first: i64, last: i64) -> Result<Shelf, serde_json::Error> {
+        let titles: Vec<_> = (first..=last)
+            .map(|id| {
+                json!({
+                    "id": id, "type": "movie", "title": format!("Title {id}"),
+                    "overview": "", "rating": 7.5, "details": false,
+                    "backdrop": "https://example.com/backdrop.jpg"
+                })
+            })
+            .collect();
+        serde_json::from_value::<Shelf>(json!({
+            "id": id, "heading": id, "kind": kind, "titles": titles
+        }))
+    }
+
     #[test]
     fn home_keeps_leading_matches_and_rotates_unique_discovery() -> Result<(), serde_json::Error> {
-        let shelf = |id: &str, kind: &str, first: i64, last: i64| {
-            let titles: Vec<_> = (first..=last)
-                .map(|id| {
-                    json!({
-                        "id": id, "type": "movie", "title": format!("Title {id}"),
-                        "overview": "", "rating": 7.5, "details": false,
-                        "backdrop": "https://example.com/backdrop.jpg"
-                    })
-                })
-                .collect();
-            serde_json::from_value::<Shelf>(json!({
-                "id": id, "heading": id, "kind": kind, "titles": titles
-            }))
-        };
         let candidates = vec![
             shelf("personalized-test", "personal", 1, 50)?,
             shelf("discover-movie-crime", "discover", 1, 16)?,
@@ -1875,6 +1920,59 @@ mod home_tests {
         assert!(today.iter().any(|shelf| shelf.id == "discover-movie-crime"));
         assert!(today.iter().all(|shelf| shelf.id != "redundant"));
         assert_eq!(featured.len(), 5);
+        let mut ids = HashSet::new();
+        assert!(
+            today
+                .iter()
+                .flat_map(|shelf| &shelf.titles)
+                .chain(&featured)
+                .all(|title| ids.insert(title.identity.key()))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn deeper_home_mixes_recent_and_rated_rows_with_limited_anime() -> Result<(), serde_json::Error>
+    {
+        let mut personal = shelf("personalized-test", "personal", 1, 30)?;
+        for title in &mut personal.titles[..8] {
+            title.genres = vec!["Anime".into()];
+        }
+        let mut candidates = vec![
+            personal,
+            shelf("trending", "trending", 50, 69)?,
+            shelf("taste-movie-animation", "taste", 70, 89)?,
+            shelf("taste-tv-animation", "taste", 90, 109)?,
+        ];
+        for index in 0..16 {
+            let kind = if index % 2 == 0 { "recent" } else { "discover" };
+            let first = 200 + index * 20;
+            candidates.push(shelf(&format!("{kind}-{index}"), kind, first, first + 19)?);
+        }
+
+        let (today, featured) = compose_home(candidates.clone(), "test", 20_000);
+        let (tomorrow, _) = compose_home(candidates, "test", 20_001);
+        assert_eq!(today.len(), 19);
+        assert_eq!(today[0].id, "personalized-test");
+        assert_eq!(today[1].id, "trending");
+        assert_eq!(
+            today[2..18]
+                .iter()
+                .filter(|shelf| shelf.kind == "recent")
+                .count(),
+            8
+        );
+        assert_ne!(today[2].id, tomorrow[2].id);
+        assert!(is_anime_shelf(&today[18]));
+        assert_eq!(today[18].titles.len(), 6);
+        assert!(
+            today[0]
+                .titles
+                .iter()
+                .filter(|title| title.genres.iter().any(|genre| genre == "Anime"))
+                .count()
+                <= 2
+        );
         let mut ids = HashSet::new();
         assert!(
             today

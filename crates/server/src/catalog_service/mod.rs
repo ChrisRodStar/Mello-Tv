@@ -16,6 +16,7 @@ use stream_core::{
 use stream_storage::{CatalogStore, catalog::CatalogWrite};
 use tokio::{
     sync::{Mutex, Semaphore},
+    task::JoinSet,
     time::Instant,
 };
 
@@ -117,6 +118,13 @@ struct HomeShelf {
     kind: &'static str,
     source: &'static str,
     ttl: chrono::Duration,
+}
+
+#[derive(Clone, Copy)]
+enum DiscoverOrder {
+    Popular,
+    Recent,
+    Rated { page: i64 },
 }
 
 struct RateLimit {
@@ -340,7 +348,12 @@ impl CatalogWorker {
         Ok(GenerationStatus::Ready)
     }
 
-    async fn discover_path(&self, genre: &str, media: &str) -> Result<String, CatalogServiceError> {
+    async fn discover_path(
+        &self,
+        genre: &str,
+        media: &str,
+        order: DiscoverOrder,
+    ) -> Result<String, CatalogServiceError> {
         let genre_ids = match (genre, media) {
             ("action", "movie") => Some("28|12"),
             ("action", "tv") => Some("10759"),
@@ -358,8 +371,6 @@ impl CatalogWorker {
         };
         let mut filters = vec![
             "include_adult=false".to_owned(),
-            "sort_by=popularity.desc".to_owned(),
-            "vote_count.gte=50".to_owned(),
             "language=en-US".to_owned(),
         ];
         if let Some(genre_ids) = genre_ids {
@@ -378,6 +389,24 @@ impl CatalogWorker {
         };
         let now: DateTime<Utc> = std::time::SystemTime::now().into();
         filters.push(format!("{date_field}.lte={}", now.format("%Y-%m-%d")));
+        match order {
+            DiscoverOrder::Popular => {
+                filters.extend(["sort_by=popularity.desc".into(), "vote_count.gte=50".into()]);
+            }
+            DiscoverOrder::Recent => {
+                // Use a lower vote floor so recent releases can qualify.
+                let since = now - chrono::Duration::days(180);
+                filters.push(format!("{date_field}.gte={}", since.format("%Y-%m-%d")));
+                filters.extend(["sort_by=popularity.desc".into(), "vote_count.gte=10".into()]);
+            }
+            DiscoverOrder::Rated { page } => {
+                filters.extend([
+                    "sort_by=vote_average.desc".into(),
+                    "vote_count.gte=50".into(),
+                ]);
+                filters.push(format!("page={page}"));
+            }
+        }
         Ok(format!("/discover/{media}?{}", filters.join("&")))
     }
 
@@ -461,7 +490,9 @@ impl CatalogWorker {
                 if favorite_is_fresh && onboarding_is_fresh {
                     continue;
                 }
-                let path = self.discover_path(genre, media).await?;
+                let path = self
+                    .discover_path(genre, media, DiscoverOrder::Popular)
+                    .await?;
                 let payload = self.get_json(&path).await?;
                 let mut titles = Vec::new();
                 if let Some(results) = payload.get("results").and_then(Value::as_array) {
@@ -882,12 +913,15 @@ impl CatalogWorker {
         if self.available() {
             for genre in &inputs.genres {
                 for media in media_types {
-                    if let Ok(path) = self.discover_path(genre, media).await
+                    if let Ok(path) = self
+                        .discover_path(genre, media, DiscoverOrder::Popular)
+                        .await
                         && let Ok(payload) = self.get_json(&path).await
                     {
                         let titles = recommendation_candidates(&payload, media, &excluded);
                         if !titles.is_empty() {
-                            contributions.push((titles.clone(), 2.0));
+                            let weight = if genre == "animation" { 0.6 } else { 2.0 };
+                            contributions.push((titles.clone(), weight));
                             sections.push(genre_shelf("taste", media, genre, titles));
                         }
                     }
@@ -900,13 +934,25 @@ impl CatalogWorker {
                     let titles = recommendation_candidates(&payload, media, &excluded);
                     if !titles.is_empty() {
                         contributions.push((titles.clone(), *weight));
-                        if !seed.title.trim().is_empty() {
+                        let seed_name = if seed.title.trim().is_empty() {
+                            self.store
+                                .get("title", &seed.identity.key(), now)
+                                .await
+                                .ok()
+                                .and_then(|record| {
+                                    record.data.get("title")?.as_str().map(str::to_owned)
+                                })
+                                .unwrap_or_default()
+                        } else {
+                            seed.title.clone()
+                        };
+                        if !seed_name.trim().is_empty() {
                             let favorite =
                                 inputs.favorites.iter().any(|f| f.identity == seed.identity);
                             let action = if favorite { "liked" } else { "watched" };
                             sections.push(Shelf {
                                 id: format!("like-{}", seed.identity.key()),
-                                heading: format!("Because you {action} {}", seed.title),
+                                heading: format!("Because you {action} {seed_name}"),
                                 kind: "because".into(),
                                 source: "tmdb-recommendations".into(),
                                 reason: action.into(),
@@ -916,43 +962,31 @@ impl CatalogWorker {
                     }
                 }
             }
-            // Prefer genres outside the profile's usual choices. Alternate deeper
-            // pages and use rating instead of popularity to give older titles a chance.
-            let mut genres: Vec<_> = CANONICAL_GENRES.iter().map(|(genre, _)| *genre).collect();
-            genres.sort_by_key(|genre| {
-                (
-                    inputs.genres.iter().any(|selected| selected == genre),
-                    rotation_key(profile_id, rotation_day(now), genre),
-                )
-            });
-            let page = 2 + rotation_day(now).rem_euclid(3);
-            for (index, media) in media_types.iter().enumerate() {
-                for genre in genres.iter().skip(index * 2).take(2) {
-                    if let Ok(path) = self.discover_path(genre, media).await {
-                        let path = path.replace("popularity.desc", "vote_average.desc");
-                        if let Ok(payload) = self.get_json(&format!("{path}&page={page}")).await {
-                            let titles = recommendation_candidates(&payload, media, &excluded);
-                            if !titles.is_empty() {
-                                sections.push(genre_shelf("discover", media, genre, titles));
-                            }
-                        }
-                    }
-                }
-            }
+            sections.extend(
+                self.discovery_shelves(profile_id, media_types, now, &excluded)
+                    .await,
+            );
         }
         let fingerprint = input_fingerprint(profile_id, &inputs)?;
-        let mut pool = rank_contributions(&contributions, &excluded);
-        let mut saved = HashSet::new();
-        pool = diversify(pool, 50);
+        let pool = diversify(rank_contributions(&contributions, &excluded), 50);
         if pool.is_empty() && sections.is_empty() {
             return Err(CatalogServiceError::Upstream);
         }
+        let mut identities = HashSet::new();
+        let mut writes = Vec::new();
         for title in pool
             .iter()
             .chain(sections.iter().flat_map(|shelf| &shelf.titles))
         {
-            if saved.insert(title.identity.key()) {
-                self.save_title(title).await?;
+            let key = title.identity.key();
+            if identities.insert(key.clone()) {
+                writes.push(CatalogWrite {
+                    kind: "title".into(),
+                    key,
+                    data: serde_json::to_value(title)
+                        .map_err(|_| CatalogServiceError::InvalidResponse)?,
+                    ttl: META_TTL,
+                });
             }
         }
         if let Ok(_guard) = self.warm_lock.try_lock() {
@@ -975,13 +1009,70 @@ impl CatalogWorker {
             pool,
             sections,
         };
-        self.save(
-            "recommendations",
-            profile_id,
-            &data,
-            recommendation_cadence(now, &inputs),
-        )
-        .await
+        let ttl = recommendation_cadence(now, &inputs);
+        writes.push(CatalogWrite {
+            kind: "recommendations".into(),
+            key: profile_id.into(),
+            data: serde_json::to_value(&data).map_err(|_| CatalogServiceError::InvalidResponse)?,
+            ttl,
+        });
+        let saved_at = std::time::SystemTime::now().into();
+        let revision = self.store.put_batch(writes, saved_at).await?;
+        Ok(CatalogRecord {
+            kind: "recommendations".into(),
+            key: profile_id.into(),
+            data,
+            updated_at: saved_at,
+            expires_at: saved_at + ttl,
+            revision,
+            state: "fresh".into(),
+        })
+    }
+
+    async fn discovery_shelves(
+        &self,
+        profile_id: &str,
+        media_types: &[&'static str],
+        now: DateTime<Utc>,
+        excluded: &HashSet<String>,
+    ) -> Vec<Shelf> {
+        let day = rotation_day(now);
+        let page = 2 + day.rem_euclid(3);
+        let mut requests = JoinSet::new();
+        for &media in media_types {
+            let mut genres: Vec<_> = CANONICAL_GENRES
+                .iter()
+                .map(|(genre, _)| *genre)
+                .filter(|genre| *genre != "animation")
+                .collect();
+            let rotation = format!("{profile_id}:{media}");
+            genres.sort_by_key(|genre| rotation_key(&rotation, day, genre));
+            for (index, genre) in genres.into_iter().enumerate() {
+                let (kind, order) = if index % 2 == 0 {
+                    ("recent", DiscoverOrder::Recent)
+                } else {
+                    ("discover", DiscoverOrder::Rated { page })
+                };
+                let worker = self.clone();
+                // The catalog worker's semaphore and rate limiter bound concurrent requests.
+                requests.spawn(async move {
+                    let path = worker.discover_path(genre, media, order).await?;
+                    let payload = worker.get_json(&path).await?;
+                    Ok::<_, CatalogServiceError>((kind, media, genre, payload))
+                });
+            }
+        }
+        let mut shelves = Vec::new();
+        while let Some(result) = requests.join_next().await {
+            if let Ok(Ok((kind, media, genre, payload))) = result {
+                let titles = recommendation_candidates(&payload, media, excluded);
+                if !titles.is_empty() {
+                    shelves.push(genre_shelf(kind, media, genre, titles));
+                }
+            }
+        }
+        shelves.sort_by(|a, b| a.id.cmp(&b.id));
+        shelves
     }
 
     async fn save_title(&self, title: &Title) -> Result<CatalogRecord<Title>, CatalogServiceError> {
@@ -1386,10 +1477,10 @@ fn genre_shelf(kind: &str, media: &str, genre: &str, titles: Vec<Title>) -> Shel
     let heading = format!("{category} {format}");
     Shelf {
         id: format!("{kind}-{media}-{genre}"),
-        heading: if kind == "discover" {
-            format!("Discover {heading}")
-        } else {
-            heading
+        heading: match kind {
+            "discover" => format!("Discover {heading}"),
+            "recent" => format!("Recently released · {heading}"),
+            _ => heading,
         },
         kind: kind.into(),
         source: "tmdb-discover".into(),
@@ -1540,7 +1631,7 @@ fn normalize_title(raw: &Value) -> Option<Title> {
         .and_then(Value::as_str)
         .unwrap_or("")
         .to_owned();
-    let genres = raw
+    let mut genres: Vec<String> = raw
         .get("genres")
         .and_then(Value::as_array)
         .map(|g| {
@@ -1549,6 +1640,15 @@ fn normalize_title(raw: &Value) -> Option<Title> {
                 .collect()
         })
         .unwrap_or_default();
+    let japanese_animation = raw.get("original_language").and_then(Value::as_str) == Some("ja")
+        && (genres.iter().any(|genre| genre == "Animation")
+            || raw
+                .get("genre_ids")
+                .and_then(Value::as_array)
+                .is_some_and(|ids| ids.iter().any(|id| id.as_i64() == Some(16))));
+    if japanese_animation && !genres.iter().any(|genre| genre == "Anime") {
+        genres.push("Anime".into());
+    }
     let seasons = raw
         .get("seasons")
         .and_then(Value::as_array)
@@ -1765,6 +1865,22 @@ mod tests {
     }
 
     #[test]
+    fn anime_requires_japanese_and_animation_metadata() {
+        for (language, genres, anime) in [
+            ("ja", vec![16, 35], true),
+            ("en", vec![16, 35], false),
+            ("ja", vec![18], false),
+        ] {
+            let raw = json!({"id": 1, "title": "Example", "original_language": language, "genre_ids": genres});
+            assert_eq!(
+                normalize_title(&raw)
+                    .is_some_and(|title| title.genres.iter().any(|genre| genre == "Anime")),
+                anime
+            );
+        }
+    }
+
+    #[test]
     fn search_query_escaping_does_not_allow_query_injection() {
         assert_eq!(urlencoding("A & B?"), "A%20%26%20B%3F");
     }
@@ -1849,7 +1965,9 @@ mod tests {
             ("family", "tv", Some("10751")),
         ];
         for (genre, media, expected_id) in cases {
-            let path = worker.discover_path(genre, media).await;
+            let path = worker
+                .discover_path(genre, media, DiscoverOrder::Popular)
+                .await;
             assert!(path.is_ok());
             let Ok(path) = path else {
                 return;
