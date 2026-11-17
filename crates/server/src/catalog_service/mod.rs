@@ -1,5 +1,7 @@
 //! Bounded TMDB catalog population and profile-keyed recommendations.
 
+mod related;
+
 use std::{collections::HashSet, env, fmt, sync::Arc, time::Duration};
 
 use chrono::{DateTime, Utc};

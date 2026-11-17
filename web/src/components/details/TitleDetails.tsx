@@ -4,7 +4,7 @@ import type { Episode, Title } from '../../model';
 
 import { useProfileLibrary } from '../../hooks/useProfileLibrary';
 import { useTitleDetails } from '../../hooks/useTitleDetails';
-import { loadCatalog, loadEpisodes } from '../../lib/catalog';
+import { loadEpisodes, loadRelated } from '../../lib/catalog';
 import type { PlaybackRequest, PlaybackResolver } from '../../lib/playback';
 import { Icon } from '../common/Icon';
 import { EpisodeList } from './EpisodeList';
@@ -35,7 +35,9 @@ export function TitleDetails({
   const [selectedTab, setSelectedTab] = useState<DetailTab>('episodes');
 
   const [suggestions, setSuggestions] = useState<Title[] | null>(null);
-  const [loadingSuggestions, setLoadingSuggestions] = useState(false);
+  const [suggestionsError, setSuggestionsError] = useState(false);
+  const [suggestionsAttempt, setSuggestionsAttempt] = useState(0);
+  const showRelated = title.type === 'movie' || selectedTab === 'related';
 
   const savedProgress = library.progress.find(
     (item) => item.title.id === title.id && item.title.type === title.type,
@@ -71,33 +73,18 @@ export function TitleDetails({
     }
   }, [library.ready, details, savedProgress, title.type, setSeason, initialPlayback]);
 
-  // Load suggestions / related titles
   useEffect(() => {
-    let active = true;
+    if (!showRelated) return;
     const controller = new AbortController();
-    async function fetchRelated() {
-      setLoadingSuggestions(true);
-      try {
-        const catalog = await loadCatalog(profileId, title.type, controller.signal);
-        if (!active) return;
-        const candidates = catalog.titles.filter(
-          (t) => t.id !== title.id && Boolean(t.posterUrl),
-        );
-        setSuggestions(candidates.slice(0, 18));
-      } catch {
-        if (active && !controller.signal.aborted) {
-          setSuggestions([]);
-        }
-      } finally {
-        if (active) setLoadingSuggestions(false);
-      }
-    }
-    void fetchRelated();
-    return () => {
-      active = false;
-      controller.abort();
-    };
-  }, [profileId, title.id, title.type]);
+    const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(40_000)]);
+    setSuggestions(null);
+    setSuggestionsError(false);
+    void loadRelated(title.type, title.id, signal).then(
+      (titles) => { if (!controller.signal.aborted) setSuggestions(titles); },
+      () => { if (!controller.signal.aborted) setSuggestionsError(true); },
+    );
+    return () => controller.abort();
+  }, [showRelated, suggestionsAttempt, title.id, title.type]);
 
   const isEpisodeWatched = useCallback(
     (epNum: number) =>
@@ -268,11 +255,18 @@ export function TitleDetails({
 
   const suggestionsSection = (
     <div className="detail-suggestions-section">
-      {loadingSuggestions ? (
+      {suggestionsError ? (
+        <div className="metadata-status" role="alert">
+          <span>Couldn’t load related titles.</span>
+          <button type="button" onClick={() => setSuggestionsAttempt((attempt) => attempt + 1)}>
+            Try again
+          </button>
+        </div>
+      ) : suggestions === null ? (
         <p className="metadata-status" role="status">
           Finding {title.type === 'movie' ? 'movies' : 'TV shows'}…
         </p>
-      ) : suggestions && suggestions.length > 0 ? (
+      ) : suggestions.length > 0 ? (
         <div className="detail-suggestions-grid">
           {suggestions.map((item) => (
             <button
@@ -298,8 +292,7 @@ export function TitleDetails({
         </div>
       ) : (
         <p className="metadata-status">
-          More {title.type === 'movie' ? 'movies' : 'TV shows'} will appear as the catalog
-          updates.
+          No related {title.type === 'movie' ? 'movies' : 'shows'} found.
         </p>
       )}
     </div>

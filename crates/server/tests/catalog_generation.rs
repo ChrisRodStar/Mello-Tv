@@ -73,6 +73,34 @@ async fn mock_tmdb(State(state): State<MockState>, uri: Uri) -> Response {
     } else {
         format!("{path}?{query}")
     });
+    if path == "/collection/77" {
+        return Json(json!({"parts":[
+            tmdb_title(701, "Example: Second Story", "movie"),
+            tmdb_title(700, "Example: New Story", "movie"),
+        ]}))
+        .into_response();
+    }
+    if path == "/movie/700" && query.contains("append_to_response=recommendations") {
+        let mut seed = tmdb_title(700, "Example: New Story", "movie");
+        seed["belongs_to_collection"] = json!({"id":77});
+        seed["recommendations"] = json!({"results":[
+            tmdb_title(703, "Another Film", "movie"),
+            tmdb_title(702, "Example", "movie"),
+            tmdb_title(701, "Example: Second Story", "movie"),
+            tmdb_title(704, "Mismatched TV", "tv"),
+        ]});
+        return Json(seed).into_response();
+    }
+    if path == "/tv/213375" && query.contains("append_to_response=recommendations") {
+        let mut seed = tmdb_title(213375, "VisionQuest", "tv");
+        seed["recommendations"] = json!({"results":[tmdb_title(710, "Other Show", "tv")]});
+        return Json(seed).into_response();
+    }
+    if path == "/tv/711" && query.contains("append_to_response=recommendations") {
+        let mut seed = tmdb_title(711, "No Matches", "tv");
+        seed["recommendations"] = json!({"results":[]});
+        return Json(seed).into_response();
+    }
     if path == "/movie/99999" {
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -1017,5 +1045,54 @@ async fn deleting_profile_during_generation_does_not_restore_profile_metadata() 
         .send()
         .await?;
     assert_eq!(get.status(), StatusCode::NOT_FOUND);
+    Ok(())
+}
+
+#[tokio::test]
+async fn related_titles_prioritize_story_links_and_keep_empty_results() -> TestResult {
+    let (tmdb, calls, _) = start_mock().await?;
+    let catalog = Arc::new(CatalogStore::from_database(Database::in_memory(64).await?).await?);
+    let accounts =
+        Arc::new(AccountStore::from_database(Database::in_memory(64).await?, [0x5c; 32]).await?);
+    let household = accounts.select_household(None).await?;
+    let worker = Arc::new(CatalogWorker::with_config(
+        catalog.clone(),
+        CatalogWorkerConfig::new(None, Some("test-key".into())).with_base_url(tmdb),
+    )?);
+    let base = start_server(catalog, accounts, household, Some(worker)).await?;
+    let client = reqwest::Client::new();
+
+    let expected = [
+        ("movie/700", vec![701, 702, 703]),
+        ("tv/213375", vec![85271, 138501, 710]),
+        ("tv/711", vec![]),
+    ];
+    for (seed, expected_ids) in expected {
+        let url = format!("{base}/api/v1/titles/{seed}/related");
+        let reply: Value = client
+            .get(&url)
+            .send()
+            .await?
+            .error_for_status()?
+            .json()
+            .await?;
+        let actual: Vec<_> = reply["titles"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|title| title["id"].as_i64().unwrap())
+            .collect();
+        assert_eq!(actual, expected_ids);
+        let upstream_calls = calls.load(Ordering::SeqCst);
+        let cached: Value = client
+            .get(&url)
+            .send()
+            .await?
+            .error_for_status()?
+            .json()
+            .await?;
+        assert_eq!(cached, reply);
+        assert_eq!(calls.load(Ordering::SeqCst), upstream_calls);
+    }
     Ok(())
 }

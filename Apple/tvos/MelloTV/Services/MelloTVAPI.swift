@@ -237,55 +237,12 @@ public struct MelloTVAPI: Sendable {
         let _: EmptyReply = try await request("profiles/\(resolvedID)/recommendation-topics/\(topicID)", method: hidden ? "PUT" : "DELETE")
     }
 
-    public func relatedTitles(to title: MediaTitle, genres: [String], profileID: String? = nil) async throws -> CatalogSection {
-        guard let resolvedID = await resolveProfileID(profileID), !resolvedID.isEmpty else {
-            return CatalogSection(id: "related-" + title.id, heading: "More Like This", titles: [])
+    public func relatedTitles(to title: MediaTitle, genres _: [String], profileID _: String? = nil) async throws -> CatalogSection {
+        let reply: RelatedTitlesReply = try await request("titles/\(title.type.rawValue)/\(title.tmdbID)/related")
+        guard let titles = reply.titles else {
+            throw APIError.serverMessage(reply.reason ?? "Couldn’t load related titles.")
         }
-        async let page: HomePageWireReply = request("profiles/\(resolvedID)/home", query: [URLQueryItem(name: "type", value: title.type.rawValue)])
-        async let personalized = recommendationShelves(profileID: resolvedID, type: title.type)
-        let (general, personal) = try await (page, personalized)
-        try Task.checkCancellation()
-        let shelves = personal + general.sections
-        let wanted = Set(genres.map(normalizedGenre))
-        var candidates: [Int: (title: MediaTitle, score: Int, order: Int)] = [:]
-        var order = 0
-        for shelf in shelves {
-            let exactSeed = shelf.id == "like-\(title.type.rawValue):\(title.tmdbID)"
-            let genreShelf = wanted.contains(normalizedGenre(shelf.heading))
-            for candidate in shelf.titles where candidate.type == title.type && candidate.id != title.tmdbID {
-                defer { order += 1 }
-                let view = candidate.view
-                guard view.posterURL != nil else { continue }
-                let overlap = Set((candidate.genres ?? []).map(normalizedGenre)).intersection(wanted).count
-                let score = (exactSeed ? 1000 : 0) + overlap * 20 + (genreShelf ? 10 : 0)
-                if let existing = candidates[candidate.id], existing.score >= score { continue }
-                candidates[candidate.id] = (view, score, order)
-            }
-        }
-        let ranked = candidates.values.sorted {
-            $0.score == $1.score ? $0.order < $1.order : $0.score > $1.score
-        }
-        let matches = ranked.filter { $0.score > 0 }
-        return CatalogSection(id: "\(title.type.rawValue)-suggestions-\(title.tmdbID)",
-                              heading: matches.isEmpty ? (personal.isEmpty ? (title.type == .movie ? "Explore Movies" : "Explore TV Shows") : "Recommended for You") : "More Like This",
-                              titles: Array((matches.isEmpty ? ranked : matches).prefix(12).map(\.title)))
-    }
-
-    private func recommendationShelves(profileID: String, type: MediaType) async throws -> [WireShelf] {
-        guard !profileID.isEmpty else { return [] }
-        do {
-            let reply: SavedWireRecord<WireRecommendations> = try await request("profiles/\(profileID)/recommendations",
-                query: [URLQueryItem(name: "type", value: type.rawValue)])
-            return reply.data.sections
-        } catch {
-            if Task.isCancelled { throw CancellationError() }
-            return []
-        }
-    }
-
-    private func normalizedGenre(_ value: String) -> String {
-        let normalized = value.lowercased().filter { $0.isLetter || $0.isNumber }
-        return normalized == "scifi" ? "sciencefiction" : normalized
+        return CatalogSection(id: "related-\(title.id)", heading: "More Like This", titles: titles.map(\.view))
     }
 
     // MARK: - Search
@@ -996,7 +953,7 @@ private struct SearchReply: Decodable {
 }
 private struct HistoryReply: Decodable { let records: [WireProgress]; let offset: Int; let limit: Int }
 private struct WireShelf: Decodable { let id: String; let heading: String; let titles: [WireTitle]; let reason: String? }
-private struct WireRecommendations: Decodable { let sections: [WireShelf] }
+private struct RelatedTitlesReply: Decodable { let titles: [WireTitle]?; let reason: String? }
 private struct WireSeasonSummary: Decodable { let season: Int; let name: String; let episodeCount: Int }
 private struct WireTitle: Decodable {
     let id: Int

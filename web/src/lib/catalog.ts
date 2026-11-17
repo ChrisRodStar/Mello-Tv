@@ -121,6 +121,19 @@ export async function loadCatalog(
   }
   return { configured: true, titles: [...all.values()], sections, featured };
 }
+export async function loadRelated(
+  type: Title['type'],
+  id: number,
+  signal: AbortSignal,
+): Promise<Title[]> {
+  const { titles } = await apiJSON(
+    `/api/v1/titles/${type}/${id}/related`,
+    z.object({ titles: z.array(titleWire) }),
+    { signal },
+  );
+  return titles.map((title) => rememberTitle(viewTitle(title)));
+}
+
 export async function loadDetails(title: Title, signal: AbortSignal): Promise<Details> {
   const { record } = await awaitMetadata(
     () => loadTitle(title.type, title.id, signal),

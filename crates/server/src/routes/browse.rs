@@ -10,7 +10,7 @@ use axum::{
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use serde_json::json;
-use stream_core::catalog::Title;
+use stream_core::catalog::{MediaType, Title, TitleIdentity};
 use stream_storage::StorageError;
 
 use crate::{
@@ -290,6 +290,10 @@ pub fn routes() -> Router<AppState> {
         .route(
             "/api/v1/titles/{media_type}/{id}/cross-ids",
             put(put_cross_ids),
+        )
+        .route(
+            "/api/v1/titles/{media_type}/{id}/related",
+            get(related_titles),
         )
         // TV Seasons & Episodes
         .route("/internal/v1/tv/{id}/seasons/{season}", get(season))
@@ -758,6 +762,51 @@ async fn shelf_by_id(
         Err(StorageError::NotFound) => Err(AppError::NotFound(format!("shelf {id} not found"))),
         Err(e) => Err(AppError::Storage(e)),
     }
+}
+
+async fn related_titles(
+    State(state): State<AppState>,
+    Path((media, id)): Path<(String, i64)>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let media = match media.as_str() {
+        "movie" => MediaType::Movie,
+        "tv" => MediaType::Tv,
+        _ => return Err(AppError::BadRequest("invalid title coordinates".into())),
+    };
+    let identity = TitleIdentity::new(media, id)
+        .map_err(|_| AppError::BadRequest("invalid title coordinates".into()))?;
+    let now: DateTime<Utc> = SystemTime::now().into();
+    let cached = match state.catalog.get("related", &identity.key(), now).await {
+        Ok(record) => Some(record),
+        Err(StorageError::NotFound) => None,
+        Err(error) => return Err(error.into()),
+    };
+    let worker = state
+        .catalog_worker
+        .as_ref()
+        .filter(|worker| worker.available());
+    let mut payload = if let Some(record) = cached.as_ref().filter(|record| record.expires_at > now)
+    {
+        json!({ "titles": record.data })
+    } else if let Some(worker) = worker {
+        match worker.refresh_related(identity).await {
+            Ok(titles) => json!({ "titles": titles }),
+            Err(_) if cached.is_some() => json!({ "titles": cached.map(|record| record.data) }),
+            Err(_) => {
+                return Ok(Json(
+                    json!({"status":"failed","reason":"Couldn’t load related titles. Try again."}),
+                ));
+            }
+        }
+    } else if let Some(record) = cached {
+        json!({ "titles": record.data })
+    } else {
+        return Ok(Json(
+            json!({"status":"unavailable","reason":CATALOG_CONFIG_GUIDANCE}),
+        ));
+    };
+    normalize_artwork_url(&mut payload);
+    Ok(Json(payload))
 }
 
 async fn title(
